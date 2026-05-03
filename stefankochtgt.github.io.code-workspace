@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"name": "stefankochtgt.github.io",
+			"path": "."
+		}
+	],
+	"settings": {
+		"liveServer.settings.multiRootWorkspaceName": "stefankochtgt.github.io"
+	}
+}
