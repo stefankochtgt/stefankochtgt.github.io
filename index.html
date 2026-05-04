@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TEGRITY Safety Engineering GmbH</title>
   <link href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300;0,400;0,600;0,700;1,300&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
@@ -260,6 +261,143 @@
     }
 
     /* ─── RESPONSIVE ─── */
+    /* ─── LOGIN OVERLAY ─── */
+    .login-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      background: #f5f7fa;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .login-box {
+      background: #fff; border: 1px solid #e8e8e8;
+      border-radius: 4px; padding: 48px 40px;
+      width: 100%; max-width: 380px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    }
+    .login-box h2 {
+      font-size: 22px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.04em;
+      color: #1a1a1a; margin-bottom: 28px; text-align: center;
+    }
+    .login-field { margin-bottom: 18px; }
+    .login-field label {
+      font-size: 12px; font-weight: 600; color: #555;
+      letter-spacing: 0.05em; display: block;
+      margin-bottom: 6px; text-transform: uppercase;
+    }
+    .login-field input {
+      width: 100%; border: 1px solid #ccc; border-radius: 2px;
+      padding: 10px 14px; font-family: inherit; font-size: 14px;
+      color: #2d2d2d; outline: none; transition: border-color 0.2s;
+    }
+    .login-field input:focus { border-color: #007bff; }
+    .login-btn {
+      width: 100%; background: #2d2d2d; color: #fff;
+      border: none; border-radius: 2px;
+      font-family: inherit; font-size: 14px; font-weight: 600;
+      padding: 12px; cursor: pointer;
+      transition: background 0.2s; margin-top: 8px;
+    }
+    .login-btn:hover { background: #007bff; }
+    .login-error {
+      color: #c62828; font-size: 13px;
+      text-align: center; margin-top: 12px; display: none;
+    }
+
+    /* ─── LOGOUT BUTTON ─── */
+    .logout-btn {
+      margin-left: auto;
+      background: none; border: 1px solid #ccc; border-radius: 2px;
+      padding: 5px 14px; font-family: inherit;
+      font-size: 12px; font-weight: 600;
+      color: #555; cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .logout-btn:hover { border-color: #007bff; color: #007bff; }
+
+    /* ─── GFACTION FORM ─── */
+    .gf-privacy {
+      background: #f0faf4; border-left: 4px solid #2e7d32;
+      padding: 14px 18px; font-size: 13px; color: #2e7d32;
+      line-height: 1.7; margin-bottom: 28px;
+    }
+    .gf-meta {
+      display: flex; gap: 24px; flex-wrap: wrap;
+      margin-bottom: 24px; align-items: flex-end;
+    }
+    .gf-meta-field { display: flex; flex-direction: column; gap: 5px; }
+    .gf-meta-field label {
+      font-size: 12px; font-weight: 600; color: #555;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .gf-meta-field select,
+    .gf-meta-field input[type="number"],
+    .gf-meta-field input[type="text"] {
+      border: 1px solid #ccc; border-radius: 2px;
+      padding: 8px 12px; font-family: inherit; font-size: 14px;
+      color: #2d2d2d; outline: none; transition: border-color 0.2s;
+      background: #fff;
+    }
+    .gf-meta-field select:focus,
+    .gf-meta-field input:focus { border-color: #2b6cb0; }
+    .gf-card { margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 3px; overflow: hidden; }
+    .gf-card-header {
+      background: #2b6cb0; color: #fff;
+      padding: 8px 14px; font-size: 13px; font-weight: 700;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .gf-card-header span { font-size: 11px; font-weight: 400; color: #bee3f8; }
+    .gf-card-body { background: #fff; padding: 14px 16px; }
+    .gf-radio-group { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; }
+    .gf-radio-group label {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 14px; color: #2d2d2d; cursor: pointer;
+    }
+    .gf-radio-group input[type="radio"] { accent-color: #2b6cb0; width: 15px; height: 15px; cursor: pointer; }
+    .gf-comment-label {
+      font-size: 12px; color: #718096; font-style: italic;
+      margin-bottom: 5px;
+    }
+    .gf-comment {
+      width: 100%; border: 1px solid #cbd5e0; border-radius: 2px;
+      padding: 8px 10px; font-family: inherit; font-size: 13px;
+      color: #2d2d2d; background: #f0f7ff; resize: vertical;
+      outline: none; transition: border-color 0.2s;
+    }
+    .gf-comment:focus { border-color: #2b6cb0; }
+    .gf-action-bar {
+      display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap;
+    }
+    .gf-btn-reset {
+      background: #718096; color: #fff; border: none; border-radius: 2px;
+      padding: 10px 22px; font-family: inherit; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .gf-btn-reset:hover { background: #4a5568; }
+
+    /* ─── MEMBERS PAGE ─── */
+    .hello-banner {
+      background: #1a1a1a; color: #fff;
+      padding: 60px 40px; text-align: center;
+    }
+    .hello-banner h1 {
+      font-size: clamp(36px, 7vw, 64px);
+      font-weight: 700; letter-spacing: 0.06em;
+    }
+    .pdf-toolbar {
+      display: flex; align-items: center;
+      gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .pdf-btn {
+      background: #2d2d2d; color: #fff; border: none;
+      border-radius: 2px; padding: 10px 22px;
+      font-family: inherit; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .pdf-btn:hover { background: #007bff; }
+    .pdf-container {
+      border: 1px solid #e8e8e8; border-radius: 4px; overflow: hidden;
+    }
+    .pdf-container iframe { width: 100%; height: 540px; border: none; display: block; }
+
     @media (max-width: 800px) {
       header { padding: 0 20px; }
       nav { display: none; }
@@ -294,8 +432,11 @@
     <a href="#" onclick="showPage('contact'); return false;" id="nav-contact">Contact</a>
     <a href="#" onclick="showPage('impressum'); return false;" id="nav-impressum">Impressum</a>
     <a href="#" onclick="showPage('dataprivacy'); return false;" id="nav-dataprivacy">Data Privacy</a>
+    <a href="#" onclick="showPage('members'); return false;" id="nav-members">Members</a>
+    <a href="#" onclick="showPage('gfaction'); return false;" id="nav-gfaction" style="display:none;">GF-Entscheidung</a>
   </nav>
 
+  <button class="logout-btn" id="logoutBtn" onclick="doLogout()" style="display:none;"></button>
   <button class="hamburger" onclick="toggleMobileMenu()" aria-label="Menu">
     <span></span><span></span><span></span>
   </button>
@@ -311,6 +452,8 @@
   <a href="#" onclick="showPage('contact'); return false;">Contact</a>
   <a href="#" onclick="showPage('impressum'); return false;">Impressum</a>
   <a href="#" onclick="showPage('dataprivacy'); return false;">Data Privacy</a>
+  <a href="#" onclick="showPage('members'); return false;">Members</a>
+  <a href="#" onclick="showPage('gfaction'); return false;" id="mobile-nav-gfaction" style="display:none;">GF-Entscheidung</a>
 </div>
 
 <!-- ═══════════════ HOME ═══════════════ -->
@@ -561,6 +704,134 @@
   </div>
 </div>
 
+<!-- ═══════════════ GFACTION ═══════════════ -->
+<div class="page" id="page-gfaction">
+  <div class="page-banner"><h1>GF-Entscheidungsdokumentation</h1></div>
+  <div class="section">
+
+    <div class="gf-privacy">
+      Alle Eingaben verbleiben ausschließlich in Ihrem Browser. Es werden keine Daten gespeichert oder übertragen. Das PDF wird direkt auf Ihrer Festplatte gespeichert.
+    </div>
+
+    <!-- Meta -->
+    <div class="gf-meta">
+      <div class="gf-meta-field">
+        <label>Monat</label>
+        <select id="gf-month">
+          <option>Januar</option><option>Februar</option><option>März</option>
+          <option>April</option><option>Mai</option><option>Juni</option>
+          <option>Juli</option><option>August</option><option>September</option>
+          <option>Oktober</option><option>November</option><option>Dezember</option>
+        </select>
+      </div>
+      <div class="gf-meta-field">
+        <label>Jahr</label>
+        <input type="number" id="gf-year" min="2020" max="2040" style="width:80px;" />
+      </div>
+      <div class="gf-meta-field">
+        <label>Erstellt von</label>
+        <input type="text" id="gf-author" style="width:200px;" />
+      </div>
+    </div>
+
+    <!-- 1. Liquidität -->
+    <div class="gf-card">
+      <div class="gf-card-header">1. &nbsp;Liquidität <span>OK / NOK</span></div>
+      <div class="gf-card-body">
+        <div class="gf-radio-group">
+          <label><input type="radio" name="gf-liquidity" value="OK" checked /> OK</label>
+          <label><input type="radio" name="gf-liquidity" value="NOK" /> NOK</label>
+        </div>
+        <div class="gf-comment-label">Bemerkung / Maßnahmen:</div>
+        <textarea class="gf-comment" id="gf-liq-cmt" rows="2"></textarea>
+      </div>
+    </div>
+
+    <!-- 2. Investitionen -->
+    <div class="gf-card">
+      <div class="gf-card-header">2. &nbsp;Investitionen <span>Maßnahmen / Keine Maßnahmen</span></div>
+      <div class="gf-card-body">
+        <div class="gf-radio-group">
+          <label><input type="radio" name="gf-investment" value="Maßnahmen erforderlich" /> Maßnahmen erforderlich</label>
+          <label><input type="radio" name="gf-investment" value="Keine Maßnahmen erforderlich" checked /> Keine Maßnahmen erforderlich</label>
+        </div>
+        <div class="gf-comment-label">Bemerkung / Maßnahmen:</div>
+        <textarea class="gf-comment" id="gf-inv-cmt" rows="2"></textarea>
+      </div>
+    </div>
+
+    <!-- 3. Fremdleistung -->
+    <div class="gf-card">
+      <div class="gf-card-header">3. &nbsp;Fremdleistung / Subcontracting <span>Ja / Nein</span></div>
+      <div class="gf-card-body">
+        <div class="gf-radio-group">
+          <label><input type="radio" name="gf-subcontract" value="Ja – beauftragen" /> Ja – beauftragen</label>
+          <label><input type="radio" name="gf-subcontract" value="Nein – nicht beauftragen" checked /> Nein – nicht beauftragen</label>
+        </div>
+        <div class="gf-comment-label">Workpackage / Bemerkung:</div>
+        <textarea class="gf-comment" id="gf-sub-cmt" rows="2"></textarea>
+      </div>
+    </div>
+
+    <!-- 4. Auftragsannahme -->
+    <div class="gf-card">
+      <div class="gf-card-header">4. &nbsp;Auftragsannahme <span>Ja / Nein</span></div>
+      <div class="gf-card-body">
+        <div class="gf-radio-group">
+          <label><input type="radio" name="gf-order" value="Ja" checked /> Ja</label>
+          <label><input type="radio" name="gf-order" value="Nein" /> Nein</label>
+        </div>
+        <div class="gf-comment-label">Details / Bemerkung:</div>
+        <textarea class="gf-comment" id="gf-ord-cmt" rows="2"></textarea>
+      </div>
+    </div>
+
+    <!-- 5. Kundenkommunikation -->
+    <div class="gf-card">
+      <div class="gf-card-header">5. &nbsp;Kundenkommunikation <span>Freitext</span></div>
+      <div class="gf-card-body">
+        <div class="gf-comment-label">Wesentliche Themen, Entscheidungen und Maßnahmen:</div>
+        <textarea class="gf-comment" id="gf-cust-cmt" rows="4"></textarea>
+      </div>
+    </div>
+
+    <!-- 6. Qualität -->
+    <div class="gf-card">
+      <div class="gf-card-header">6. &nbsp;Qualitätssicherung und Risiken <span>Bewertung</span></div>
+      <div class="gf-card-body">
+        <div class="gf-radio-group">
+          <label><input type="radio" name="gf-quality" value="Keine Auffälligkeiten" checked /> Keine Auffälligkeiten</label>
+          <label><input type="radio" name="gf-quality" value="Maßnahmen erforderlich" /> Maßnahmen erforderlich</label>
+        </div>
+        <div class="gf-comment-label">Bemerkung / Maßnahmen:</div>
+        <textarea class="gf-comment" id="gf-qual-cmt" rows="2"></textarea>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="gf-action-bar">
+      <button class="pdf-btn" onclick="generateGFPdf()">PDF generieren</button>
+      <button class="gf-btn-reset" onclick="resetGFForm()">Felder zurücksetzen</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════ MEMBERS ═══════════════ -->
+<div class="page" id="page-members">
+  <div class="page-banner"><h1>Members Area</h1></div>
+  <div class="section">
+    <h2>Welcome to the TEGRITY Members Area</h2>
+    <p>This area provides internal tools and resources for TEGRITY Safety Engineering GmbH. All data entered in any tool remains exclusively in your browser and is never transmitted or stored externally.</p>
+
+    <hr>
+
+    <h2>Useful Tools</h2>
+    <h3><a href="#" onclick="showPage('gfaction'); return false;" style="color:#007bff;">GF-Entscheidungsdokumentation</a></h3>
+    <p>Monthly managing director decision documentation tool. Fill in the six decision categories and generate a signed PDF directly in your browser — ready to save to your hard drive.</p>
+  </div>
+</div>
+
 <!-- FOOTER -->
 <footer>
   <p>©2026 by TEGRITY Safety Engineering GmbH.</p>
@@ -571,8 +842,77 @@
   </div>
 </footer>
 
+<!-- LOGIN OVERLAY -->
+<div class="login-overlay" id="loginOverlay" style="display:none;">
+  <div class="login-box">
+    <h2>TEGRITY Members</h2>
+    <div class="login-field">
+      <label>Username</label>
+      <input type="text" id="login-user" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('login-pw').focus()" />
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" id="login-pw" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" />
+    </div>
+    <button class="login-btn" onclick="doLogin()">Sign In</button>
+    <div class="login-error" id="loginError">Invalid username or password.</div>
+  </div>
+</div>
+
 <script>
+  /* ── Auth ── */
+  const USERS = { CEO: 'CEO' };
+
+  function checkAuth() {
+    const user = sessionStorage.getItem('tgt_user');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const gfNav = document.getElementById('nav-gfaction');
+    const gfMobileNav = document.getElementById('mobile-nav-gfaction');
+    if (user) {
+      logoutBtn.style.display = '';
+      logoutBtn.textContent = user + ' — Sign out';
+      gfNav.style.display = '';
+      gfMobileNav.style.display = '';
+    } else {
+      logoutBtn.style.display = 'none';
+      gfNav.style.display = 'none';
+      gfMobileNav.style.display = 'none';
+    }
+  }
+
+  function doLogin() {
+    const u = document.getElementById('login-user').value.trim();
+    const p = document.getElementById('login-pw').value;
+    const err = document.getElementById('loginError');
+    if (USERS[u] !== undefined && USERS[u] === p) {
+      sessionStorage.setItem('tgt_user', u);
+      err.style.display = 'none';
+      document.getElementById('loginOverlay').style.display = 'none';
+      document.body.style.overflow = '';
+      checkAuth();
+      showPage('members');
+    } else {
+      err.style.display = 'block';
+    }
+  }
+
+  function doLogout() {
+    sessionStorage.removeItem('tgt_user');
+    document.getElementById('loginOverlay').style.display = 'none';
+    document.body.style.overflow = '';
+    checkAuth();
+    showPage('home');
+  }
+
+
+  /* ── Navigation ── */
   function showPage(id) {
+    if ((id === 'members' || id === 'gfaction') && !sessionStorage.getItem('tgt_user')) {
+      document.getElementById('loginOverlay').style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+      closeMobileMenu();
+      return;
+    }
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('#mainNav a').forEach(a => a.classList.remove('active'));
     const page = document.getElementById('page-' + id);
@@ -597,7 +937,172 @@
       document.getElementById(id).value = '';
     });
   }
+  /* ── GFAction ── */
+  const MONTHS_DE = ['Januar','Februar','März','April','Mai','Juni',
+                     'Juli','August','September','Oktober','November','Dezember'];
+  const MONTH_NUM = Object.fromEntries(MONTHS_DE.map((m,i) => [m, i+1]));
+
+  function initGFForm() {
+    const today = new Date();
+    document.getElementById('gf-month').value = MONTHS_DE[today.getMonth()];
+    document.getElementById('gf-year').value  = today.getFullYear();
+    document.getElementById('gf-author').value = '';
+  }
+
+  function collectGFData() {
+    return {
+      month:       document.getElementById('gf-month').value,
+      year:        document.getElementById('gf-year').value,
+      author:      document.getElementById('gf-author').value.trim(),
+      doc_date:    new Date().toLocaleDateString('de-DE'),
+      liquidity:   document.querySelector('input[name="gf-liquidity"]:checked')?.value  || 'OK',
+      investment:  document.querySelector('input[name="gf-investment"]:checked')?.value || 'Keine Maßnahmen erforderlich',
+      subcontract: document.querySelector('input[name="gf-subcontract"]:checked')?.value || 'Nein – nicht beauftragen',
+      order:       document.querySelector('input[name="gf-order"]:checked')?.value      || 'Ja',
+      quality:     document.querySelector('input[name="gf-quality"]:checked')?.value    || 'Keine Auffälligkeiten',
+      liq_comment: document.getElementById('gf-liq-cmt').value.trim(),
+      inv_comment: document.getElementById('gf-inv-cmt').value.trim(),
+      sub_comment: document.getElementById('gf-sub-cmt').value.trim(),
+      ord_comment: document.getElementById('gf-ord-cmt').value.trim(),
+      cust_comment:document.getElementById('gf-cust-cmt').value.trim(),
+      qual_comment:document.getElementById('gf-qual-cmt').value.trim(),
+    };
+  }
+
+  function resetGFForm() {
+    initGFForm();
+    document.querySelectorAll('input[type="radio"]').forEach(r => {
+      r.checked = r.defaultChecked;
+    });
+    document.querySelectorAll('.gf-comment').forEach(t => t.value = '');
+  }
+
+  function buildGFPdf(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const PW = 210, PH = 297, M = 25, CW = PW - 2*M;
+    const BLUE  = [43, 108, 176];
+    const DARK  = [26, 32, 44];
+    const MUTED = [113, 128, 150];
+    let pageNum = 1;
+
+    function deco() {
+      doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...DARK);
+      doc.text('TEGRITY Safety Engineering GmbH', M, 13);
+      doc.setFont('helvetica','normal');
+      doc.text('GF-Entscheidungsdokumentation', PW-M, 13, {align:'right'});
+      doc.setDrawColor(...BLUE); doc.setLineWidth(0.4);
+      doc.line(M, 15, PW-M, 15);
+      doc.setFontSize(8); doc.setTextColor(...MUTED);
+      doc.text('Vertraulich – Nur für interne Zwecke', M, PH-10);
+      doc.text('Seite '+pageNum, PW-M, PH-10, {align:'right'});
+      doc.setDrawColor(...MUTED); doc.line(M, PH-13, PW-M, PH-13);
+    }
+
+    deco();
+    let y = 23;
+
+    function checkPage(need) {
+      if (y + need > PH - 22) {
+        doc.addPage(); pageNum++; deco(); y = 23;
+      }
+    }
+
+    // Title block
+    checkPage(40);
+    doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(...DARK);
+    doc.text('Geschäftsführer-Entscheidungsdokumentation', PW/2, y, {align:'center'}); y+=9;
+    doc.setFontSize(12); doc.setTextColor(...BLUE);
+    doc.text('Berichtsmonat: '+data.month+' '+data.year, PW/2, y, {align:'center'}); y+=7;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...MUTED);
+    doc.text('TEGRITY Safety Engineering GmbH', PW/2, y, {align:'center'}); y+=5;
+    doc.text('Geschäftsführer: '+data.author, PW/2, y, {align:'center'}); y+=5;
+    doc.text('Dokumentiert am: '+data.doc_date, PW/2, y, {align:'center'}); y+=7;
+    doc.setDrawColor(...BLUE); doc.setLineWidth(1); doc.line(M, y, PW-M, y); y+=8;
+
+    function drawSection(num, title, subtitle, options, selected, comment, remarkLabel) {
+      remarkLabel = remarkLabel || 'Bemerkung / Maßnahmen';
+      const cLines = doc.splitTextToSize(comment||'---', CW);
+      checkPage(6+5+8+cLines.length*5+12);
+
+      doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(...BLUE);
+      doc.text(num+'.  '+title, M, y); y+=5;
+      doc.setFont('helvetica','italic'); doc.setFontSize(8); doc.setTextColor(...MUTED);
+      doc.text(subtitle, M, y); y+=6;
+
+      let x = M;
+      const BOX = 3.2;
+      doc.setLineWidth(0.6);
+      for (const opt of options) {
+        const sel = opt===selected;
+        doc.setDrawColor(...BLUE); doc.setFillColor(255,255,255);
+        doc.rect(x, y-BOX, BOX, BOX, 'FD');
+        if (sel) { doc.setFillColor(...BLUE); doc.rect(x+0.8, y-BOX+0.8, BOX-1.6, BOX-1.6,'F'); }
+        x+=BOX+2;
+        doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...DARK);
+        doc.text(opt, x, y);
+        x+=doc.getTextWidth(opt)+10;
+      }
+      y+=7;
+
+      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...DARK);
+      doc.text(remarkLabel+':', M, y); y+=5;
+      doc.setFont('helvetica','normal');
+      doc.text(cLines, M, y); y+=cLines.length*5+7;
+    }
+
+    drawSection(1,'Liquidität','Beurteilung der Liquiditätssituation im Berichtsmonat.',
+      ['OK','NOK'], data.liquidity, data.liq_comment);
+    drawSection(2,'Investitionen','Entscheidung über Investitionsmaßnahmen im Berichtsmonat.',
+      ['Maßnahmen erforderlich','Keine Maßnahmen erforderlich'], data.investment, data.inv_comment);
+    drawSection(3,'Fremdleistung / Subcontracting','Entscheidung über den Einsatz von Subunternehmern.',
+      ['Ja – beauftragen','Nein – nicht beauftragen'], data.subcontract, data.sub_comment,
+      'Workpackage / Bemerkung');
+    drawSection(4,'Auftragsannahme','Entscheidung zur Annahme neuer Aufträge im Berichtsmonat.',
+      ['Ja','Nein'], data.order, data.ord_comment, 'Details / Bemerkung');
+
+    // Section 5 – free text
+    const custLines = doc.splitTextToSize(data.cust_comment||'---', CW);
+    checkPage(6+5+custLines.length*5+12);
+    doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(...BLUE);
+    doc.text('5.  Kundenkommunikation', M, y); y+=5;
+    doc.setFont('helvetica','italic'); doc.setFontSize(8); doc.setTextColor(...MUTED);
+    doc.text('Wesentliche Themen und Entscheidungen in der Kundenkommunikation.', M, y); y+=6;
+    doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
+    doc.text(custLines, M, y); y+=custLines.length*5+7;
+
+    drawSection(6,'Qualitätssicherung und Risiken','Bewertung der Qualitätssituation und identifizierter Risiken.',
+      ['Keine Auffälligkeiten','Maßnahmen erforderlich'], data.quality, data.qual_comment);
+
+    // Signature block
+    checkPage(30);
+    y+=4;
+    doc.setDrawColor(...MUTED); doc.setLineWidth(0.5); doc.line(M, y, PW-M, y); y+=14;
+    const c1=M, c2=PW/2+10, lw=70;
+    doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
+    doc.text('Ort, Datum:', c1, y);
+    doc.text('Unterschrift Geschäftsführer:', c2, y); y+=8;
+    doc.setDrawColor(0,0,0); doc.setLineWidth(0.5);
+    doc.line(c1, y, c1+lw, y); doc.line(c2, y, c2+lw, y);
+
+    return doc;
+  }
+
+  function generateGFPdf() {
+    const data = collectGFData();
+    const monthNum = String(MONTH_NUM[data.month]||1).padStart(2,'0');
+    const filename = `GF_Entscheidung_${data.year}_${monthNum}.pdf`;
+    try {
+      buildGFPdf(data).save(filename);
+    } catch(e) {
+      alert('PDF konnte nicht erstellt werden:\n'+e.message);
+    }
+  }
+
+  /* ── Init ── */
+  initGFForm();
   document.getElementById('nav-home').classList.add('active');
+  checkAuth();
 </script>
 </body>
 </html>
