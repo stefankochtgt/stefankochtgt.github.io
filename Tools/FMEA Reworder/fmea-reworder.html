@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FMEA/FHA Failure Mode Reworder — TEGRITY</title>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 15px;
+      color: #2d2d2d;
+      background: #f5f7fa;
+      min-height: 100vh;
+    }
+
+    /* ─── TOOLBAR ─── */
+    .toolbar {
+      background: #2d2d2d;
+      color: #fff;
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      border-bottom: 3px solid #007bff;
+    }
+    .toolbar-brand { font-size: 11px; color: #aaa; letter-spacing: 0.08em; text-transform: uppercase; }
+    .toolbar h1 { font-size: 17px; font-weight: 600; letter-spacing: 0.01em; }
+
+    /* ─── LAYOUT ─── */
+    .main { max-width: 860px; margin: 0 auto; padding: 28px 20px 60px; }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      padding: 22px 24px;
+      margin-bottom: 18px;
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #777;
+      margin-bottom: 14px;
+    }
+
+    /* ─── FORM ─── */
+    input[type="password"], textarea {
+      width: 100%;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 9px 12px;
+      font-family: inherit;
+      font-size: 14px;
+      color: #2d2d2d;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="password"]:focus, textarea:focus { border-color: #007bff; }
+    textarea { min-height: 80px; resize: vertical; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border: none;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: #007bff; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #0062cc; }
+    .btn-dark { background: #2d2d2d; color: #fff; }
+    .btn-dark:hover:not(:disabled) { background: #444; }
+    .btn-outline { background: transparent; border: 1px solid #ccc; color: #555; }
+    .btn-outline:hover:not(:disabled) { background: #f5f5f5; }
+    .btn-group { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+
+    /* ─── DIVIDER ─── */
+    .divider {
+      display: flex; align-items: center; gap: 10px;
+      color: #bbb; font-size: 12px; margin: 14px 0;
+    }
+    .divider::before, .divider::after {
+      content: ''; flex: 1; height: 1px; background: #e8e8e8;
+    }
+
+    /* ─── STATUS / ERROR ─── */
+    .msg {
+      border-radius: 3px;
+      padding: 9px 13px;
+      font-size: 13px;
+      margin-bottom: 14px;
+      display: none;
+    }
+    .msg-info  { background: #e8f0fe; border: 1px solid #c5d7f8; color: #1a56c4; }
+    .msg-error { background: #fdecea; border: 1px solid #f5c6c2; color: #c62828; }
+    .msg-ok    { background: #e6f4ea; border: 1px solid #a5d6a7; color: #2e7d32; }
+
+    /* ─── API KEY ─── */
+    .key-row { display: flex; gap: 8px; align-items: center; }
+    .key-row input { flex: 1; }
+    .api-note { font-size: 12px; color: #888; margin-top: 7px; line-height: 1.5; }
+
+    /* ─── CAPTURE HINT ─── */
+    .capture-hint {
+      font-size: 13px; color: #666; margin-top: 8px; line-height: 1.6;
+    }
+
+    /* ─── RESULTS ─── */
+    .result-header {
+      display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px;
+    }
+    .result-original {
+      font-size: 13px; color: #888; margin-bottom: 14px;
+      border-left: 3px solid #e0e0e0; padding-left: 12px;
+      font-style: italic;
+    }
+    .result-item {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 11px 14px;
+      border: 1px solid #e8e8e8;
+      border-radius: 3px;
+      margin-bottom: 7px;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .result-item:hover { background: #f0f6ff; border-color: #007bff; }
+    .result-item.copied { background: #e6f4ea; border-color: #66bb6a; }
+    .result-num { font-size: 12px; font-weight: 700; color: #007bff; min-width: 18px; padding-top: 1px; }
+    .result-text { font-size: 14px; line-height: 1.5; color: #1a1a1a; flex: 1; }
+    .copy-hint { font-size: 11px; color: #bbb; white-space: nowrap; padding-top: 2px; }
+
+    /* ─── FALLBACK ─── */
+    .fallback-code {
+      background: #f5f5f5; border: 1px solid #ddd; border-radius: 3px;
+      padding: 12px 14px; font-size: 12px; font-family: 'Consolas', monospace;
+      white-space: pre-wrap; word-break: break-word;
+      max-height: 180px; overflow-y: auto; color: #333;
+      margin-top: 10px;
+    }
+
+    /* ─── CAPTURE OVERLAY ─── */
+    #overlay {
+      display: none;
+      position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,0.82);
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+    }
+    #overlay.active { display: flex; }
+
+    #overlay-header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1001;
+      background: rgba(0,0,0,0.85);
+      padding: 11px 20px;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    }
+    #overlay-header .hint { font-size: 13px; color: #ddd; }
+    #overlay-header .hint strong { color: #ffdd57; }
+
+    #overlay-footer {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 1001;
+      background: rgba(0,0,0,0.85);
+      padding: 11px 20px;
+      display: flex; align-items: center; gap: 12px;
+    }
+
+    #capture-canvas {
+      cursor: crosshair;
+      display: block;
+      margin-top: 48px;
+      margin-bottom: 56px;
+      box-shadow: 0 6px 30px rgba(0,0,0,0.6);
+      max-width: 100%;
+    }
+
+    .progress-bar-wrap {
+      background: #e0e0e0; border-radius: 2px; height: 6px;
+      overflow: hidden; margin-top: 8px;
+    }
+    .progress-bar {
+      background: #007bff; height: 100%; width: 0%;
+      transition: width 0.2s;
+    }
+  </style>
+</head>
+<body>
+
+<!-- TOOLBAR -->
+<div class="toolbar">
+  <div>
+    <div class="toolbar-brand">TEGRITY Safety Engineering</div>
+    <h1>FMEA / FHA Failure Mode Reworder</h1>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- ─── API KEY ─── -->
+  <div class="card">
+    <div class="card-title">Anthropic API Key</div>
+    <div class="key-row">
+      <input type="password" id="apikey-input" placeholder="sk-ant-api03-…" autocomplete="off" />
+      <button class="btn btn-dark" onclick="saveApiKey()">Save</button>
+      <button class="btn btn-outline" onclick="clearApiKey()" title="Remove saved key">Clear</button>
+    </div>
+    <p class="api-note" id="apikey-note">No key saved. The key is stored only in your browser (localStorage) — never sent anywhere except to the Anthropic API.</p>
+  </div>
+
+  <!-- ─── INPUT ─── -->
+  <div class="card">
+    <div class="card-title">Failure Mode Text</div>
+
+    <div class="msg msg-info" id="msg-status"></div>
+    <div class="msg msg-error" id="msg-error"></div>
+
+    <button class="btn btn-primary" id="btn-capture" onclick="startCapture()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M3 9h18"/></svg>
+      Capture Screen Region
+    </button>
+    <p class="capture-hint">
+      Click to share your screen → a screenshot appears → <strong>drag a rectangle</strong> over the failure mode cell in APIS IQ FMEA → text is extracted automatically.
+    </p>
+
+    <div class="divider">or type / paste directly</div>
+
+    <textarea id="text-input" placeholder="e.g.:  &quot;system not working correctly&quot;   →  paste or type your failure mode description here"></textarea>
+
+    <div class="progress-bar-wrap" id="ocr-progress-wrap" style="display:none">
+      <div class="progress-bar" id="ocr-progress-bar"></div>
+    </div>
+
+    <div class="btn-group">
+      <button class="btn btn-dark" id="btn-generate" onclick="generateAlternatives()">Generate Alternatives</button>
+    </div>
+  </div>
+
+  <!-- ─── RESULTS ─── -->
+  <div class="card" id="card-results" style="display:none">
+    <div class="result-header">
+      <div class="card-title" style="margin-bottom:0">Alternative Wordings</div>
+      <span id="result-count" style="font-size:12px;color:#007bff;"></span>
+    </div>
+    <p style="font-size:12px;color:#aaa;margin-bottom:12px;">Click any alternative to copy it to the clipboard.</p>
+    <div id="result-original" class="result-original" style="display:none"></div>
+    <div id="results-list"></div>
+  </div>
+
+</div>
+
+<!-- ─── CAPTURE OVERLAY ─── -->
+<div id="overlay">
+  <div id="overlay-header">
+    <span class="hint">🖱 <strong>Drag a rectangle</strong> around the failure mode text — then click <strong style="color:#4fc3f7;">Extract Text</strong></span>
+    <button class="btn btn-outline" onclick="cancelCapture()" style="color:#ccc;border-color:#666;padding:5px 14px;font-size:13px;">✕ Cancel</button>
+  </div>
+
+  <canvas id="capture-canvas"></canvas>
+
+  <div id="overlay-footer">
+    <button class="btn btn-primary" id="btn-extract" onclick="extractText()" disabled>Extract Text</button>
+    <span style="font-size:12px;color:#aaa;">Release mouse after dragging, then click Extract Text</span>
+  </div>
+</div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────────
+let screenshotEl = null;   // offscreen canvas with original screenshot
+let displayScale = 1;
+let capCanvas = null;
+let capCtx = null;
+let isSelecting = false;
+let selStart = null;
+let selEnd = null;
+
+// ─── API KEY ──────────────────────────────────────────────
+function saveApiKey() {
+  const key = document.getElementById('apikey-input').value.trim();
+  if (!key.startsWith('sk-ant-')) {
+    showError('Please enter a valid Anthropic API key (starts with sk-ant-).');
+    return;
+  }
+  localStorage.setItem('tegrity_fmea_apikey', key);
+  document.getElementById('apikey-input').value = '';
+  refreshKeyNote();
+  clearError();
+}
+
+function clearApiKey() {
+  localStorage.removeItem('tegrity_fmea_apikey');
+  refreshKeyNote();
+}
+
+function refreshKeyNote() {
+  const key = localStorage.getItem('tegrity_fmea_apikey');
+  const el = document.getElementById('apikey-note');
+  if (key) {
+    el.style.color = '#2e7d32';
+    el.textContent = '✓ API key saved  (…' + key.slice(-6) + ')';
+  } else {
+    el.style.color = '#888';
+    el.textContent = 'No key saved. The key is stored only in your browser (localStorage).';
+  }
+}
+
+// ─── SCREEN CAPTURE ───────────────────────────────────────
+async function startCapture() {
+  clearMessages();
+  showStatus('Starting screen capture — choose the APIS IQ FMEA window in the next dialog…');
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { cursor: 'always' },
+      audio: false
+    });
+    clearStatus();
+
+    // Grab one frame from the stream
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.muted = true;
+    await new Promise(r => { video.onloadedmetadata = r; });
+    await video.play();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    const offscreen = document.createElement('canvas');
+    offscreen.width = video.videoWidth;
+    offscreen.height = video.videoHeight;
+    offscreen.getContext('2d').drawImage(video, 0, 0);
+    stream.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+    screenshotEl = offscreen;
+
+    // Compute display scale to fit the viewport (leave room for header/footer bars)
+    const maxW = window.innerWidth * 0.97;
+    const maxH = window.innerHeight - 120;
+    displayScale = Math.min(maxW / offscreen.width, maxH / offscreen.height, 1);
+
+    capCanvas = document.getElementById('capture-canvas');
+    capCanvas.width = offscreen.width;
+    capCanvas.height = offscreen.height;
+    capCanvas.style.width  = Math.round(offscreen.width  * displayScale) + 'px';
+    capCanvas.style.height = Math.round(offscreen.height * displayScale) + 'px';
+
+    capCtx = capCanvas.getContext('2d');
+    capCtx.drawImage(offscreen, 0, 0);
+
+    selStart = null;
+    selEnd = null;
+    document.getElementById('btn-extract').disabled = true;
+
+    document.getElementById('overlay').classList.add('active');
+    capCanvas.addEventListener('mousedown', onSelStart);
+    capCanvas.addEventListener('mousemove', onSelMove);
+    capCanvas.addEventListener('mouseup', onSelEnd);
+
+  } catch (e) {
+    clearStatus();
+    if (e.name !== 'NotAllowedError') {
+      showError(
+        'Screen capture failed: ' + e.message +
+        ' — If you are opening this as a local file, try serving it with: python -m http.server 8000'
+      );
+    }
+  }
+}
+
+function cssToCanvas(e) {
+  const r = capCanvas.getBoundingClientRect();
+  return {
+    x: Math.round((e.clientX - r.left) / displayScale),
+    y: Math.round((e.clientY - r.top)  / displayScale)
+  };
+}
+
+function onSelStart(e) {
+  e.preventDefault();
+  isSelecting = true;
+  selStart = cssToCanvas(e);
+  selEnd   = { ...selStart };
+  document.getElementById('btn-extract').disabled = true;
+}
+
+function onSelMove(e) {
+  if (!isSelecting) return;
+  selEnd = cssToCanvas(e);
+  redraw();
+}
+
+function onSelEnd(e) {
+  if (!isSelecting) return;
+  isSelecting = false;
+  selEnd = cssToCanvas(e);
+  redraw();
+  const w = Math.abs(selEnd.x - selStart.x);
+  const h = Math.abs(selEnd.y - selStart.y);
+  document.getElementById('btn-extract').disabled = !(w > 20 && h > 8);
+}
+
+function redraw() {
+  capCtx.drawImage(screenshotEl, 0, 0);
+  if (!selStart || !selEnd) return;
+
+  const x = Math.min(selStart.x, selEnd.x);
+  const y = Math.min(selStart.y, selEnd.y);
+  const w = Math.abs(selEnd.x - selStart.x);
+  const h = Math.abs(selEnd.y - selStart.y);
+
+  capCtx.fillStyle = 'rgba(0,0,0,0.48)';
+  capCtx.fillRect(0, 0, capCanvas.width, capCanvas.height);
+  capCtx.drawImage(screenshotEl, x, y, w, h, x, y, w, h);
+
+  capCtx.strokeStyle = '#4fc3f7';
+  capCtx.lineWidth = Math.max(2, 2.5 / displayScale);
+  capCtx.strokeRect(x, y, w, h);
+
+  const hs = Math.max(6, 7 / displayScale);
+  capCtx.fillStyle = '#4fc3f7';
+  [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].forEach(([cx, cy]) => {
+    capCtx.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
+  });
+}
+
+function cancelCapture() {
+  document.getElementById('overlay').classList.remove('active');
+  detachSelEvents();
+}
+
+function detachSelEvents() {
+  if (!capCanvas) return;
+  capCanvas.removeEventListener('mousedown', onSelStart);
+  capCanvas.removeEventListener('mousemove', onSelMove);
+  capCanvas.removeEventListener('mouseup',   onSelEnd);
+}
+
+// ─── OCR EXTRACT ──────────────────────────────────────────
+async function extractText() {
+  if (!selStart || !selEnd) return;
+
+  const x = Math.min(selStart.x, selEnd.x);
+  const y = Math.min(selStart.y, selEnd.y);
+  const w = Math.abs(selEnd.x - selStart.x);
+  const h = Math.abs(selEnd.y - selStart.y);
+
+  cancelCapture();
+  showStatus('Extracting text… (first run downloads the OCR language model ~10 MB)');
+
+  const crop = document.createElement('canvas');
+  crop.width = w;
+  crop.height = h;
+  crop.getContext('2d').drawImage(screenshotEl, x, y, w, h, 0, 0, w, h);
+
+  showProgressBar();
+  try {
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          setProgressBar(m.progress * 100);
+          showStatus('OCR: ' + Math.round(m.progress * 100) + '%…');
+        }
+      }
+    });
+    const { data: { text } } = await worker.recognize(crop);
+    await worker.terminate();
+
+    const cleaned = text.replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    document.getElementById('text-input').value = cleaned;
+    clearStatus();
+
+    if (!cleaned) {
+      showError('OCR found no text. Try a larger selection or type the text manually below.');
+    }
+  } catch (e) {
+    clearStatus();
+    showError('OCR failed: ' + e.message + ' — please type the failure mode manually.');
+  }
+  hideProgressBar();
+}
+
+function showProgressBar() {
+  document.getElementById('ocr-progress-wrap').style.display = 'block';
+  setProgressBar(0);
+}
+function hideProgressBar() {
+  document.getElementById('ocr-progress-wrap').style.display = 'none';
+}
+function setProgressBar(pct) {
+  document.getElementById('ocr-progress-bar').style.width = pct + '%';
+}
+
+// ─── CLAUDE API ───────────────────────────────────────────
+const SYSTEM_PROMPT =
+`You are an expert technical writer for aerospace and automotive safety engineering.
+You specialize in FMEA/FHA documentation per ARP4761, ARP4754, and ISO26262.
+The user is a non-native English speaker (German) who needs help phrasing failure modes professionally.
+
+FMEA/FHA failure mode writing rules:
+- Describe what the function FAILS to do — not the cause or consequence
+- Use standard FMEA verbs: "fails to", "provides erroneous", "loss of", "partial loss of",
+  "inadvertent", "spurious", "undetected loss of", "fails to detect"
+- Specify the failure type: complete, partial, erroneous, untimely, unintended
+- Be concise and unambiguous; avoid vague terms like "malfunction", "not working", "problem"
+- Use active voice where natural
+
+Output: a numbered list of exactly 6 alternative wordings. One wording per line.
+No headings, no explanations, no preamble — only the 6 numbered items.`;
+
+async function generateAlternatives() {
+  const apiKey = localStorage.getItem('tegrity_fmea_apikey');
+  if (!apiKey) {
+    showError('Please enter and save your Anthropic API key first.');
+    return;
+  }
+  const text = document.getElementById('text-input').value.trim();
+  if (!text) {
+    showError('Please enter or extract a failure mode description first.');
+    return;
+  }
+
+  clearMessages();
+  hideResults();
+  showStatus('Calling Claude API…');
+  document.getElementById('btn-generate').disabled = true;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-allow-browser': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 600,
+        system: SYSTEM_PROMPT,
+        messages: [{
+          role: 'user',
+          content: 'Improve this failure mode description and provide 6 professional alternatives:\n\n"' + text + '"'
+        }]
+      })
+    });
+
+    if (!resp.ok) {
+      let msg = resp.statusText;
+      try { const e = await resp.json(); msg = e.error?.message || msg; } catch {}
+      throw new Error('API ' + resp.status + ': ' + msg);
+    }
+
+    const data = await resp.json();
+    displayResults(data.content[0].text, text);
+
+  } catch (e) {
+    const msg = e.message || '';
+    if (msg.includes('Failed to fetch') || msg.toLowerCase().includes('cors') || msg.toLowerCase().includes('network')) {
+      showCORSFallback(text);
+    } else {
+      showError(msg);
+    }
+  }
+
+  clearStatus();
+  document.getElementById('btn-generate').disabled = false;
+}
+
+// ─── DISPLAY RESULTS ──────────────────────────────────────
+function displayResults(raw, original) {
+  const lines = raw.split('\n')
+    .map(l => l.replace(/^\d+[\.\)]\s*/, '').trim())
+    .filter(l => l.length > 5);
+
+  const origEl = document.getElementById('result-original');
+  origEl.style.display = 'block';
+  origEl.textContent = 'Original: "' + original + '"';
+
+  const list = document.getElementById('results-list');
+  list.innerHTML = '';
+  lines.forEach((text, i) => {
+    const div = document.createElement('div');
+    div.className = 'result-item';
+    div.innerHTML =
+      '<span class="result-num">' + (i + 1) + '</span>' +
+      '<span class="result-text">' + esc(text) + '</span>' +
+      '<span class="copy-hint">click to copy</span>';
+    div.addEventListener('click', () => {
+      navigator.clipboard.writeText(text).then(() => {
+        div.classList.add('copied');
+        div.querySelector('.copy-hint').textContent = '✓ copied!';
+        setTimeout(() => {
+          div.classList.remove('copied');
+          div.querySelector('.copy-hint').textContent = 'click to copy';
+        }, 2000);
+      });
+    });
+    list.appendChild(div);
+  });
+
+  document.getElementById('result-count').textContent = '(' + lines.length + ')';
+  showResults();
+}
+
+function showCORSFallback(text) {
+  const prompt = 'System:\n' + SYSTEM_PROMPT +
+    '\n\nUser:\nImprove this failure mode description and provide 6 professional alternatives:\n\n"' + text + '"';
+
+  document.getElementById('result-original').style.display = 'none';
+  const list = document.getElementById('results-list');
+  list.innerHTML =
+    '<div class="msg msg-error" style="display:block;margin-bottom:14px;">' +
+      '<strong>Network / CORS error</strong> — the browser blocked the API request from a local file.<br>' +
+      '<span style="font-size:12px;">Fix: serve this file with <code>python -m http.server 8000</code> and open <code>http://localhost:8000/fmea-reworder.html</code></span>' +
+    '</div>' +
+    '<p style="font-size:13px;color:#555;margin-bottom:8px;"><strong>Alternative:</strong> copy the prompt below and paste it into ' +
+    '<a href="https://claude.ai" target="_blank" style="color:#007bff;">claude.ai</a>:</p>' +
+    '<div class="fallback-code" id="fallback-prompt">' + esc(prompt) + '</div>' +
+    '<div class="btn-group"><button class="btn btn-outline" onclick="copyFallback()">Copy Prompt</button></div>';
+
+  document.getElementById('result-count').textContent = '';
+  showResults();
+}
+
+function copyFallback() {
+  const t = document.getElementById('fallback-prompt').textContent;
+  navigator.clipboard.writeText(t).then(() => alert('Prompt copied to clipboard!'));
+}
+
+// ─── UI HELPERS ──────────────────────────────────────────
+function showResults()  { document.getElementById('card-results').style.display = 'block'; document.getElementById('card-results').scrollIntoView({ behavior: 'smooth' }); }
+function hideResults()  { document.getElementById('card-results').style.display = 'none'; }
+function showStatus(m)  { const el = document.getElementById('msg-status'); el.textContent = m; el.style.display = 'block'; }
+function clearStatus()  { document.getElementById('msg-status').style.display = 'none'; }
+function showError(m)   { const el = document.getElementById('msg-error');  el.textContent = m; el.style.display = 'block'; }
+function clearError()   { document.getElementById('msg-error').style.display = 'none'; }
+function clearMessages(){ clearStatus(); clearError(); }
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ─── INIT ─────────────────────────────────────────────────
+refreshKeyNote();
+</script>
+</body>
+</html>
