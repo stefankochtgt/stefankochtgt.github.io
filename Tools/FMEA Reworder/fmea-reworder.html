@@ -615,12 +615,17 @@ function showCORSFallback(text) {
   const prompt = 'System:\n' + SYSTEM_PROMPT +
     '\n\nUser:\nImprove this failure mode description and provide 6 professional alternatives:\n\n"' + text + '"';
 
+  const isLocalFile = location.protocol === 'file:';
+  const hint = isLocalFile
+    ? 'Fix: serve this file with <code>python -m http.server 8000</code> and open <code>http://localhost:8000/fmea-reworder.html</code>'
+    : 'The Anthropic API blocked the browser request (CORS). Make sure your API key is saved, then try again. If the error persists, use the prompt below.';
+
   document.getElementById('result-original').style.display = 'none';
   const list = document.getElementById('results-list');
   list.innerHTML =
     '<div class="msg msg-error" style="display:block;margin-bottom:14px;">' +
-      '<strong>Network / CORS error</strong> — the browser blocked the API request from a local file.<br>' +
-      '<span style="font-size:12px;">Fix: serve this file with <code>python -m http.server 8000</code> and open <code>http://localhost:8000/fmea-reworder.html</code></span>' +
+      '<strong>Network / CORS error</strong> — the browser could not reach the Anthropic API.<br>' +
+      '<span style="font-size:12px;">' + hint + '</span>' +
     '</div>' +
     '<p style="font-size:13px;color:#555;margin-bottom:8px;"><strong>Alternative:</strong> copy the prompt below and paste it into ' +
     '<a href="https://claude.ai" target="_blank" style="color:#007bff;">claude.ai</a>:</p>' +
