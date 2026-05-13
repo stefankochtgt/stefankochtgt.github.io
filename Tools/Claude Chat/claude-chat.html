@@ -165,6 +165,13 @@
   <button class="btn-sm btn-outline" onclick="clearApiKey()">Clear</button>
   <span class="key-note" id="apikey-note"></span>
 </div>
+<div class="key-bar" style="background:#fafafa;border-bottom-color:#e8e8e8;">
+  <span class="key-label">Proxy URL</span>
+  <input type="text" id="proxy-input" placeholder="https://my-proxy.yourname.workers.dev  (required — see Tools/proxy/anthropic-proxy.js)" autocomplete="off" style="font-size:12px;" />
+  <button class="btn-sm btn-dark"    onclick="saveProxy()">Save</button>
+  <button class="btn-sm btn-outline" onclick="clearProxy()">Clear</button>
+  <span class="key-note" id="proxy-note"></span>
+</div>
 
 <div class="chat-wrap" id="chatWrap"></div>
 
@@ -210,6 +217,34 @@ function refreshKeyNote() {
   }
 }
 
+function saveProxy() {
+  const url = document.getElementById('proxy-input').value.trim().replace(/\/$/, '');
+  if (!url.startsWith('https://')) { alert('Proxy URL must start with https://'); return; }
+  localStorage.setItem('tegrity_proxy_url', url);
+  document.getElementById('proxy-input').value = '';
+  refreshProxyNote();
+}
+function clearProxy() {
+  localStorage.removeItem('tegrity_proxy_url');
+  refreshProxyNote();
+}
+function refreshProxyNote() {
+  const url = localStorage.getItem('tegrity_proxy_url');
+  const el  = document.getElementById('proxy-note');
+  if (url) {
+    el.style.color = '#2e7d32';
+    el.textContent = '✓ ' + url;
+  } else {
+    el.style.color = '#c62828';
+    el.textContent = 'Not set — requests will fail on hosted sites.';
+  }
+}
+
+function apiEndpoint() {
+  const proxy = localStorage.getItem('tegrity_proxy_url');
+  return (proxy || 'https://api.anthropic.com') + '/v1/messages';
+}
+
 // ─── CHAT ─────────────────────────────────────────────────────────────────────
 function newChat() {
   if (history.length && !confirm('Start a new chat? The current conversation will be cleared.')) return;
@@ -250,7 +285,7 @@ async function sendMessage() {
   const thinkingEl = appendThinking();
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch(apiEndpoint(), {
       method: 'POST',
       headers: {
         'x-api-key': key,
@@ -332,6 +367,7 @@ function appendError(msg) {
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 refreshKeyNote();
+refreshProxyNote();
 </script>
 </body>
 </html>
