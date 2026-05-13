@@ -217,6 +217,12 @@
       <button class="btn btn-outline" onclick="clearApiKey()" title="Remove saved key">Clear</button>
     </div>
     <p class="api-note" id="apikey-note">No key saved. The key is stored only in your browser (localStorage) — never sent anywhere except to the Anthropic API.</p>
+    <div class="key-row" style="margin-top:10px;">
+      <input type="text" id="proxy-input" placeholder="Proxy URL — https://my-proxy.yourname.workers.dev" autocomplete="off" style="font-size:13px;" />
+      <button class="btn btn-dark" onclick="saveProxy()">Save</button>
+      <button class="btn btn-outline" onclick="clearProxy()">Clear</button>
+    </div>
+    <p class="api-note" id="proxy-note"></p>
   </div>
 
   <!-- ─── INPUT ─── -->
@@ -284,6 +290,34 @@ let capCtx = null;
 let isSelecting = false;
 let selStart = null;
 let selEnd = null;
+
+// ─── PROXY ────────────────────────────────────────────────
+function saveProxy() {
+  const url = document.getElementById('proxy-input').value.trim().replace(/\/$/, '');
+  if (!url.startsWith('https://')) { alert('Proxy URL must start with https://'); return; }
+  localStorage.setItem('tegrity_proxy_url', url);
+  document.getElementById('proxy-input').value = '';
+  refreshProxyNote();
+}
+function clearProxy() {
+  localStorage.removeItem('tegrity_proxy_url');
+  refreshProxyNote();
+}
+function refreshProxyNote() {
+  const url = localStorage.getItem('tegrity_proxy_url');
+  const el  = document.getElementById('proxy-note');
+  if (url) {
+    el.style.color = '#2e7d32';
+    el.textContent = '✓ Proxy: ' + url;
+  } else {
+    el.style.color = '#c62828';
+    el.textContent = 'Proxy not set — requests will fail on hosted sites (see Tools/proxy/anthropic-proxy.js).';
+  }
+}
+function apiEndpoint() {
+  const proxy = localStorage.getItem('tegrity_proxy_url');
+  return (proxy || 'https://api.anthropic.com') + '/v1/messages';
+}
 
 // ─── API KEY ──────────────────────────────────────────────
 function saveApiKey() {
@@ -534,7 +568,7 @@ async function generateAlternatives() {
   document.getElementById('btn-generate').disabled = true;
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch(apiEndpoint(), {
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
@@ -653,6 +687,7 @@ function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 
 // ─── INIT ─────────────────────────────────────────────────
 refreshKeyNote();
+refreshProxyNote();
 </script>
 </body>
 </html>
