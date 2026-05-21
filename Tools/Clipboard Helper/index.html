@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Clipboard Helper — TEGRITY</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 15px;
+      color: #2d2d2d;
+      background: #f5f7fa;
+      min-height: 100vh;
+    }
+
+    .toolbar {
+      background: #2d2d2d;
+      color: #fff;
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      border-bottom: 3px solid #007bff;
+    }
+    .toolbar-brand { font-size: 11px; color: #aaa; letter-spacing: 0.08em; text-transform: uppercase; }
+    .toolbar h1 { font-size: 17px; font-weight: 600; letter-spacing: 0.01em; }
+
+    .main { max-width: 740px; margin: 0 auto; padding: 32px 20px 60px; }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      padding: 24px 26px;
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #777;
+      margin-bottom: 12px;
+    }
+
+    textarea {
+      width: 100%;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 10px 13px;
+      font-family: 'Consolas', monospace;
+      font-size: 14px;
+      color: #2d2d2d;
+      outline: none;
+      resize: vertical;
+      min-height: 220px;
+      transition: border-color 0.15s;
+      line-height: 1.55;
+    }
+    textarea:focus { border-color: #007bff; }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 20px;
+      border: none;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: #007bff; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #0069d9; }
+    .btn-clear { background: #f0f0f0; color: #555; }
+    .btn-clear:hover:not(:disabled) { background: #e0e0e0; }
+
+    #status {
+      font-size: 13px;
+      padding: 2px 0;
+      min-height: 20px;
+      transition: color 0.2s;
+    }
+    #status.ok  { color: #28a745; }
+    #status.err { color: #dc3545; }
+    #status.sending { color: #888; }
+
+    .port-hint {
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 18px;
+      border-top: 1px solid #f0f0f0;
+      padding-top: 14px;
+    }
+    .port-hint code {
+      background: #f5f5f5;
+      padding: 1px 5px;
+      border-radius: 2px;
+      font-family: 'Consolas', monospace;
+    }
+  </style>
+</head>
+<body>
+
+<div class="toolbar">
+  <span class="toolbar-brand">TEGRITY</span>
+  <h1>Clipboard Helper</h1>
+</div>
+
+<div class="main">
+  <div class="card">
+    <div class="card-title">Text</div>
+    <textarea id="text" placeholder="Paste or type your text here…" autofocus></textarea>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="send-btn">Send to PC</button>
+      <button class="btn btn-clear" id="clear-btn">Clear</button>
+      <span id="status"></span>
+    </div>
+
+    <div class="port-hint">
+      Make sure <code>clipboard_helper.py</code> is running on your PC.
+      Open <code>http://localhost:8765</code> locally, or share the ngrok URL shown in the app for remote access.
+    </div>
+  </div>
+</div>
+
+<script>
+  // When served by clipboard_helper.py (localhost or ngrok) use a relative path.
+  // When opened directly as a file:// URL, fall back to the hardcoded localhost address.
+  const ENDPOINT = window.location.protocol === 'file:' ? 'http://localhost:8765/' : '/';
+
+  const textEl   = document.getElementById('text');
+  const sendBtn  = document.getElementById('send-btn');
+  const clearBtn = document.getElementById('clear-btn');
+  const statusEl = document.getElementById('status');
+
+  function setStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = cls || '';
+  }
+
+  sendBtn.addEventListener('click', async () => {
+    const text = textEl.value;
+    if (!text.trim()) { setStatus('Nothing to send.', 'err'); return; }
+
+    sendBtn.disabled = true;
+    setStatus('Sending…', 'sending');
+
+    try {
+      const res = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      if (res.ok) {
+        setStatus('Sent — text copied to clipboard on your PC.', 'ok');
+      } else {
+        setStatus(`Server error ${res.status}.`, 'err');
+      }
+    } catch (e) {
+      setStatus('Could not reach clipboard_helper.py — is it running?', 'err');
+    } finally {
+      sendBtn.disabled = false;
+    }
+  });
+
+  clearBtn.addEventListener('click', () => {
+    textEl.value = '';
+    setStatus('');
+    textEl.focus();
+  });
+
+  // Ctrl+Enter to send
+  textEl.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendBtn.click();
+  });
+</script>
+
+</body>
+</html>
