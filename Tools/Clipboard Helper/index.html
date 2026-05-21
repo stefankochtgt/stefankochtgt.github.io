@@ -34,6 +34,7 @@
       border: 1px solid #e0e0e0;
       border-radius: 4px;
       padding: 24px 26px;
+      margin-bottom: 14px;
     }
     .card-title {
       font-size: 11px;
@@ -43,6 +44,32 @@
       color: #777;
       margin-bottom: 12px;
     }
+
+    /* endpoint bar */
+    .endpoint-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .endpoint-bar input {
+      flex: 1;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 8px 11px;
+      font-family: 'Consolas', monospace;
+      font-size: 13px;
+      color: #2d2d2d;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .endpoint-bar input:focus { border-color: #007bff; }
+    .endpoint-bar input.set { border-color: #28a745; background: #f6fff8; }
+    #endpoint-note {
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 8px;
+    }
+    #endpoint-note.warn { color: #dc3545; }
 
     textarea {
       width: 100%;
@@ -83,6 +110,11 @@
     .btn:disabled { opacity: 0.45; cursor: not-allowed; }
     .btn-primary { background: #007bff; color: #fff; }
     .btn-primary:hover:not(:disabled) { background: #0069d9; }
+    .btn-sm { padding: 7px 14px; font-size: 13px; }
+    .btn-save { background: #28a745; color: #fff; }
+    .btn-save:hover { background: #218838; }
+    .btn-clear-ep { background: #f0f0f0; color: #555; }
+    .btn-clear-ep:hover { background: #e0e0e0; }
     .btn-clear { background: #f0f0f0; color: #555; }
     .btn-clear:hover:not(:disabled) { background: #e0e0e0; }
 
@@ -92,23 +124,9 @@
       min-height: 20px;
       transition: color 0.2s;
     }
-    #status.ok  { color: #28a745; }
-    #status.err { color: #dc3545; }
+    #status.ok     { color: #28a745; }
+    #status.err    { color: #dc3545; }
     #status.sending { color: #888; }
-
-    .port-hint {
-      font-size: 12px;
-      color: #aaa;
-      margin-top: 18px;
-      border-top: 1px solid #f0f0f0;
-      padding-top: 14px;
-    }
-    .port-hint code {
-      background: #f5f5f5;
-      padding: 1px 5px;
-      border-radius: 2px;
-      font-family: 'Consolas', monospace;
-    }
   </style>
 </head>
 <body>
@@ -119,6 +137,19 @@
 </div>
 
 <div class="main">
+
+  <!-- ── Endpoint config card ── -->
+  <div class="card">
+    <div class="card-title">PC Endpoint (ngrok URL)</div>
+    <div class="endpoint-bar">
+      <input type="url" id="endpoint-input" placeholder="https://xxxx-xxxx.ngrok-free.dev" spellcheck="false" />
+      <button class="btn btn-save btn-sm" id="save-ep-btn">Save</button>
+      <button class="btn btn-clear-ep btn-sm" id="clear-ep-btn">Clear</button>
+    </div>
+    <div id="endpoint-note" class="warn">No endpoint set — paste the ngrok URL from clipboard_helper.py and click Save.</div>
+  </div>
+
+  <!-- ── Text card ── -->
   <div class="card">
     <div class="card-title">Text</div>
     <textarea id="text" placeholder="Paste or type your text here…" autofocus></textarea>
@@ -128,23 +159,55 @@
       <button class="btn btn-clear" id="clear-btn">Clear</button>
       <span id="status"></span>
     </div>
-
-    <div class="port-hint">
-      Make sure <code>clipboard_helper.py</code> is running on your PC.
-      Open <code>http://localhost:8765</code> locally, or share the ngrok URL shown in the app for remote access.
-    </div>
   </div>
+
 </div>
 
 <script>
-  // When served by clipboard_helper.py (localhost or ngrok) use a relative path.
-  // When opened directly as a file:// URL, fall back to the hardcoded localhost address.
-  const ENDPOINT = window.location.protocol === 'file:' ? 'http://localhost:8765/' : '/';
+  const STORAGE_KEY = 'clh_endpoint';
 
-  const textEl   = document.getElementById('text');
-  const sendBtn  = document.getElementById('send-btn');
-  const clearBtn = document.getElementById('clear-btn');
-  const statusEl = document.getElementById('status');
+  const epInput   = document.getElementById('endpoint-input');
+  const epNote    = document.getElementById('endpoint-note');
+  const saveEpBtn = document.getElementById('save-ep-btn');
+  const clearEpBtn= document.getElementById('clear-ep-btn');
+  const textEl    = document.getElementById('text');
+  const sendBtn   = document.getElementById('send-btn');
+  const clearBtn  = document.getElementById('clear-btn');
+  const statusEl  = document.getElementById('status');
+
+  function getEndpoint() {
+    return localStorage.getItem(STORAGE_KEY) || '';
+  }
+
+  function refreshEndpointUI() {
+    const url = getEndpoint();
+    if (url) {
+      epInput.value = url;
+      epInput.classList.add('set');
+      epNote.textContent = 'Endpoint saved — ready to send.';
+      epNote.className = '';
+    } else {
+      epInput.value = '';
+      epInput.classList.remove('set');
+      epNote.textContent = 'No endpoint set — paste the ngrok URL from clipboard_helper.py and click Save.';
+      epNote.className = 'warn';
+    }
+  }
+
+  saveEpBtn.addEventListener('click', () => {
+    const val = epInput.value.trim().replace(/\/$/, '');
+    if (!val) return;
+    localStorage.setItem(STORAGE_KEY, val);
+    refreshEndpointUI();
+  });
+
+  clearEpBtn.addEventListener('click', () => {
+    localStorage.removeItem(STORAGE_KEY);
+    refreshEndpointUI();
+  });
+
+  // Save on Enter in the input
+  epInput.addEventListener('keydown', e => { if (e.key === 'Enter') saveEpBtn.click(); });
 
   function setStatus(msg, cls) {
     statusEl.textContent = msg;
@@ -152,6 +215,12 @@
   }
 
   sendBtn.addEventListener('click', async () => {
+    const endpoint = getEndpoint();
+    if (!endpoint) {
+      setStatus('Set the ngrok URL above first.', 'err');
+      epInput.focus();
+      return;
+    }
     const text = textEl.value;
     if (!text.trim()) { setStatus('Nothing to send.', 'err'); return; }
 
@@ -159,9 +228,12 @@
     setStatus('Sending…', 'sending');
 
     try {
-      const res = await fetch(ENDPOINT, {
+      const res = await fetch(endpoint + '/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': '1'
+        },
         body: JSON.stringify({ text })
       });
       if (res.ok) {
@@ -170,7 +242,7 @@
         setStatus(`Server error ${res.status}.`, 'err');
       }
     } catch (e) {
-      setStatus('Could not reach clipboard_helper.py — is it running?', 'err');
+      setStatus('Could not reach the PC — is clipboard_helper.py running?', 'err');
     } finally {
       sendBtn.disabled = false;
     }
@@ -182,10 +254,11 @@
     textEl.focus();
   });
 
-  // Ctrl+Enter to send
   textEl.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendBtn.click();
   });
+
+  refreshEndpointUI();
 </script>
 
 </body>
