@@ -1,42 +1,17 @@
 /**
- * Clipboard Helper Relay — Cloudflare Worker
- * ===========================================
- * Acts as a message queue between the website form and clipboard_helper.py.
+ * Clipboard Helper Relay — Cloudflare Worker (Upstash Redis backend)
+ * ===================================================================
+ * POST /push  — website sends text (public)
+ * GET  /pop   — Python script polls for messages (requires X-Admin-Key)
  *
- *   POST /push  — website sends text (public, no auth)
- *   GET  /pop   — Python script polls for new messages (requires X-Admin-Key header)
- *
- * Setup (~5 minutes):
- *
- *   STEP 1 — Create a KV namespace
- *     Cloudflare dashboard → Workers & Pages → KV → Create namespace
- *     Name it "CLIPBOARD_MESSAGES"
- *
- *   STEP 2 — Deploy this Worker
- *     Workers & Pages → Create → Create Worker
- *     Replace all default code with this file → Deploy
- *
- *   STEP 3 — Bind the KV namespace
- *     Open the Worker → Settings → Variables → KV Namespace Bindings → Add binding
- *     Variable name:  MESSAGES
- *     KV namespace:   CLIPBOARD_MESSAGES
- *     → Save and deploy
- *
- *   STEP 4 — Set the admin key secret
- *     Run clipboard_helper.py — it shows your Admin Key in the GUI
- *     Back in the Worker → Settings → Variables → Environment Variables → Add variable
- *     Variable name:  ADMIN_KEY   (set as Secret — encrypted)
- *     Value:          (paste the key from clipboard_helper.py)
- *     → Save and deploy
- *
- *   STEP 5 — Wire up the website and the Python script
- *     Copy the Worker URL (e.g. https://clipboard-relay.stefankochtgt.workers.dev)
- *     In clipboard_helper.py GUI: paste the Worker URL → Save
- *     In index.html: replace the WORKER_URL placeholder with the Worker URL → push
+ * Environment variables (set in Worker Settings → Variables):
+ *   ADMIN_KEY      — secret key used by clipboard_helper.py
+ *   UPSTASH_URL    — your Upstash Redis REST URL
+ *   UPSTASH_TOKEN  — your Upstash Redis REST token
  */
 
-const MAX_BYTES = 50_000;  // 50 KB max per message
-const TTL       = 3600;    // messages auto-expire after 1 hour if not picked up
+const KEY = 'clipboard';
+const MAX_BYTES = 50_000;
 
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
@@ -68,9 +43,7 @@ async function handlePush(request) {
   const text = String(body.text ?? '').slice(0, MAX_BYTES);
   if (!text.trim()) return jsonResp({ error: 'Empty text' }, 400);
 
-  const key = `msg:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-  await MESSAGES.put(key, text, { expirationTtl: TTL });
-
+  await redis(['LPUSH', KEY, text]);
   return jsonResp({ ok: true }, 200);
 }
 
@@ -79,14 +52,26 @@ async function handlePop(request) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  const list = await MESSAGES.list({ limit: 1 });
-  if (!list.keys.length) return jsonResp({ text: null }, 200);
+  // Get all pending messages and clear the list atomically
+  const result = await redis(['LRANGE', KEY, '0', '-1']);
+  const messages = result.result || [];
 
-  const key  = list.keys[0].name;
-  const text = await MESSAGES.get(key);
-  await MESSAGES.delete(key);
+  if (!messages.length) return jsonResp({ text: null }, 200);
 
-  return jsonResp({ text }, 200);
+  await redis(['DEL', KEY]);
+  return jsonResp({ text: messages.reverse().join('\n\n') }, 200);
+}
+
+async function redis(command) {
+  const resp = await fetch(UPSTASH_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${UPSTASH_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(command),
+  });
+  return resp.json();
 }
 
 function jsonResp(data, status) {
