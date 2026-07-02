@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SKO.BG — Safety Engineering</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #f7f6f3;
+      --surface:  #ffffff;
+      --ink:      #111111;
+      --muted:    #6b6b6b;
+      --rule:     #e0ddd8;
+      --accent:   #0d2b52;
+      --accent-h: #1a4a8a;
+      --gap:      clamp(40px, 8vw, 100px);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, "Segoe UI", Helvetica Neue, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ── LAYOUT ── */
+    .wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 clamp(20px, 5vw, 60px);
+    }
+
+    section { padding: var(--gap) 0; }
+    section + section { border-top: 1px solid var(--rule); }
+
+    /* ── HEADER ── */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(247, 246, 243, 0.92);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .header-inner {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 clamp(20px, 5vw, 60px);
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .wordmark {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+    }
+
+    nav { display: flex; gap: 28px; }
+    nav a {
+      font-size: 13px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      transition: color 0.15s;
+    }
+    nav a:hover { color: var(--ink); }
+
+    /* ── HERO ── */
+    #hero { padding-top: clamp(60px, 10vw, 120px); padding-bottom: var(--gap); }
+
+    .hero-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: clamp(32px, 5vw, 52px);
+      font-weight: 300;
+      line-height: 1.18;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+      margin-bottom: 28px;
+    }
+
+    h1 strong { font-weight: 700; }
+
+    .hero-sub {
+      font-size: clamp(15px, 2vw, 17px);
+      color: var(--muted);
+      max-width: 540px;
+      line-height: 1.7;
+      margin-bottom: 40px;
+    }
+
+    .cta {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 13px 28px;
+      transition: background 0.15s;
+    }
+    .cta:hover { background: var(--accent-h); }
+
+    /* ── SERVICES ── */
+    h2 {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 36px;
+    }
+
+    .services {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 2px;
+    }
+
+    .service {
+      background: var(--surface);
+      padding: 32px 28px;
+    }
+
+    .service-tag {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      padding: 3px 8px;
+      margin-bottom: 18px;
+    }
+
+    .service h3 {
+      font-size: 17px;
+      font-weight: 600;
+      line-height: 1.3;
+      margin-bottom: 12px;
+    }
+
+    .service p {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    /* ── ABOUT ── */
+    .about-grid {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 48px;
+      align-items: start;
+    }
+
+    @media (max-width: 580px) {
+      .about-grid { grid-template-columns: 1fr; gap: 24px; }
+    }
+
+    .about-name {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-bottom: 6px;
+    }
+
+    .about-role {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .about-body p {
+      font-size: 15px;
+      color: var(--muted);
+      line-height: 1.8;
+      margin-bottom: 16px;
+    }
+
+    .about-body p:last-child { margin-bottom: 0; }
+
+    .standards {
+      margin-top: 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .std {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      background: #eef2f8;
+      padding: 5px 10px;
+    }
+
+    /* ── CONTACT ── */
+    .contact-row {
+      display: flex;
+      align-items: baseline;
+      gap: 40px;
+      flex-wrap: wrap;
+    }
+
+    .contact-label {
+      font-size: 13px;
+      color: var(--muted);
+      width: 80px;
+      flex-shrink: 0;
+    }
+
+    .contact-value {
+      font-size: 15px;
+      font-weight: 500;
+    }
+
+    .contact-value a {
+      border-bottom: 1px solid var(--rule);
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .contact-value a:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .contact-row + .contact-row { margin-top: 18px; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--rule);
+      padding: 28px 0;
+    }
+
+    .footer-inner {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 clamp(20px, 5vw, 60px);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .footer-copy {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .footer-mark {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <span class="wordmark">SKO.BG</span>
+    <nav>
+      <a href="#services">Services</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <!-- HERO -->
+  <section id="hero">
+    <div class="wrap">
+      <p class="hero-label">Freelance Safety Engineer</p>
+      <h1>Functional safety for<br><strong>automotive &amp; aerospace.</strong></h1>
+      <p class="hero-sub">
+        Independent consulting for ISO&nbsp;26262 and ARP4754A&nbsp;/&nbsp;ARP4761 programmes —
+        from hazard analysis through to safety case closure.
+      </p>
+      <a class="cta" href="#contact">Get in touch</a>
+    </div>
+  </section>
+
+  <!-- SERVICES -->
+  <section id="services">
+    <div class="wrap">
+      <h2>Services</h2>
+      <div class="services">
+
+        <div class="service">
+          <span class="service-tag">ISO 26262</span>
+          <h3>Automotive Functional Safety</h3>
+          <p>HARA, safety goals, ASIL decomposition, TSC/SSC, FSC, safety validation — full lifecycle support for road-vehicle E/E systems.</p>
+        </div>
+
+        <div class="service">
+          <span class="service-tag">ARP4754A</span>
+          <h3>Aircraft Systems Development</h3>
+          <p>Function hazard assessment, development assurance levels, safety requirements allocation, and compliance with EASA / FAA guidelines.</p>
+        </div>
+
+        <div class="service">
+          <span class="service-tag">ARP4761</span>
+          <h3>Safety Assessment</h3>
+          <p>PSSA, SSA, FTA, FMEA, FMEDA, common-cause analysis — rigorous quantitative and qualitative methods to demonstrate DAL/ASIL compliance.</p>
+        </div>
+
+        <div class="service">
+          <span class="service-tag">Advisory</span>
+          <h3>Process &amp; Audit Support</h3>
+          <p>Safety management setup, supplier audits, assessor preparation, gap analysis against standard requirements, and independent review.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ABOUT -->
+  <section id="about">
+    <div class="wrap">
+      <h2>About</h2>
+      <div class="about-grid">
+        <div>
+          <p class="about-name">Stefan Koch</p>
+          <p class="about-role">Safety Engineer</p>
+          <div class="standards">
+            <span class="std">ISO 26262</span>
+            <span class="std">ARP4754A</span>
+            <span class="std">ARP4761</span>
+            <span class="std">IEC 61508</span>
+          </div>
+        </div>
+        <div class="about-body">
+          <p>
+            I work with automotive OEMs, Tier&nbsp;1 suppliers, and aerospace primes as an independent safety engineer.
+            My focus is on translating complex standard requirements into practical, auditable safety evidence —
+            without unnecessary overhead.
+          </p>
+          <p>
+            Engagements range from short-term assessments and gap analyses to multi-year programme support
+            embedded in the client's team.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONTACT -->
+  <section id="contact">
+    <div class="wrap">
+      <h2>Contact</h2>
+      <div class="contact-row">
+        <span class="contact-label">Email</span>
+        <span class="contact-value"><a href="mailto:stefan.koch@tegrity.de">stefan.koch@tegrity.de</a></span>
+      </div>
+      <div class="contact-row">
+        <span class="contact-label">Location</span>
+        <span class="contact-value">Remote · EU</span>
+      </div>
+      <div class="contact-row">
+        <span class="contact-label">Language</span>
+        <span class="contact-value">English</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="footer-inner">
+    <span class="footer-copy">&copy; 2026 SKO.BG — All rights reserved</span>
+    <span class="footer-mark">SKO.BG</span>
+  </div>
+</footer>
+
+</body>
+</html>
