@@ -48,8 +48,8 @@ dialog { border: 1px solid var(--border); border-radius: 8px; }
 <p class="intro">Fault trees drawn by hand. <strong>Add top event</strong> starts a tree. <strong>Add gate</strong> /
 <strong>Add basic event</strong>, then click gates: each click adds a gate or basic event below the clicked gate, with a
 default ID (TP-1 for a top event, GT-1 for a gate, EV-1 for a basic event, numbered on and never reused) and no title
-yet; the mode stays on until Esc or the button again. Click an element afterwards to enter its title, description and
-an optional <strong>label</strong>, which is shown next to its box. A gate with two or more inputs shows its OR / AND
+yet; the mode stays on until Esc or the button again. Click an element afterwards to enter its title, description, its ID (any unique ID you
+like) and an optional <strong>label</strong>, which is shown next to its box. A gate with two or more inputs shows its OR / AND
 symbol, a gate with one input is drawn as an intermediate event, a gate with nothing below it yet as a triangle, a
 basic event is a circle and cannot have anything below it. Right-click an event for the same and more: edit, AND / OR,
 move left / right, delete. Hold <strong>Ctrl</strong> and drag an event onto a gate or top event to move it there with
@@ -83,6 +83,8 @@ to load one.</p>
 <dialog id="event-dialog" style="min-width:380px;">
     <form id="event-form" method="dialog">
         <h3 id="event-dialog-title" style="margin-top:0;"></h3>
+        <label>ID</label>
+        <input name="eventId" autocomplete="off" spellcheck="false">
         <label>Title</label>
         <input name="title" autocomplete="off">
         <label>Description</label>
@@ -160,8 +162,17 @@ function addCause(parentId, kind) {
     return cause;
 }
 
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+
 function updateEvent(id, fields) {
     const [event, parent] = find(id);
+    // Rename (any unique id; automatic ids keep counting and skip ids in use)
+    if ('id' in fields && (fields.id || '').trim() !== event.id) {
+        const newId = (fields.id || '').trim();
+        if (!ID_PATTERN.test(newId)) throw new FtaError(`'${newId}' is not a valid ID -- use letters, digits, '-', '_' and '.' only (no spaces).`);
+        if ([...walk(state.tops)].some(e => e.id === newId)) throw new FtaError(`The ID ${newId} is already used by another event.`);
+        event.id = newId;
+    }
     for (const k of ['title', 'description', 'label']) if (k in fields) event[k] = (fields[k] || '').trim();
     if ('kind' in fields && fields.kind !== event.kind) {
         if (fields.kind === 'basic' && event.causes.length) throw new FtaError(`${id} has causes, so it cannot be a basic event.`);
@@ -284,13 +295,13 @@ const dialogError = document.getElementById('event-dialog-error');
 let onSave = null;
 function openDialog(heading, values, save) {
     document.getElementById('event-dialog-title').textContent = heading;
-    form.title.value = values.title || ''; form.description.value = values.description || ''; form.label.value = values.label || '';
+    form.eventId.value = values.id || ''; form.title.value = values.title || ''; form.description.value = values.description || ''; form.label.value = values.label || '';
     dialogError.hidden = true; onSave = save; dialog.showModal(); form.title.focus(); form.title.select();
 }
 form.addEventListener('submit', evt => {
     evt.preventDefault();
     try {
-        const saved = onSave({ title: form.title.value, description: form.description.value, label: form.label.value });
+        const saved = onSave({ id: form.eventId.value, title: form.title.value, description: form.description.value, label: form.label.value });
         dialog.close();
         loadGraph({ keepViewport: true, reveal: saved && saved.id });
     } catch (e) { dialogError.textContent = e.message; dialogError.hidden = false; }
@@ -303,7 +314,7 @@ document.getElementById('event-dialog-cancel').addEventListener('click', () => d
 
 function editEvent(node) {
     const d = node.data();
-    openDialog(`Edit ${d.id}`, { title: d.label, description: d.description, label: d.note }, v => updateEvent(d.id, v));
+    openDialog(`Edit ${d.id}`, { id: d.id, title: d.label, description: d.description, label: d.note }, v => updateEvent(d.id, v));
 }
 function addBelow(node, kind) {
     const added = act(() => addCause(node.id(), kind));
