@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual FTA — TEGRITY</title>
+<!-- Manual FTA, browser-only version of the TEGRITY Safety Model's Manual FTA tab (same drawing,
+     same editing, same manual_fta.xml file format for export / import). Everything is stored in
+     this browser (localStorage); nothing is sent anywhere. -->
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<script src="fta_draw.js"></script>
+<style>
+:root { --bg: #f5f6f8; --panel: #fff; --border: #d9dce1; --text: #1c2430; --muted: #6b7280; --accent: #1d4ed8; --error: #b91c1c; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; font-size: 14px; color: var(--text); background: var(--bg); }
+header { background: #0f172a; color: #fff; padding: 10px 20px; display: flex; align-items: center; gap: 16px; }
+header a { color: #cbd5e1; text-decoration: none; font-size: 13px; }
+header .brand { font-weight: 700; color: #fff; font-size: 16px; }
+main { max-width: 1400px; margin: 0 auto; padding: 16px 20px; }
+h1 { font-size: 20px; margin: 4px 0 8px; }
+.intro { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+.toolbar .spacer { flex: 1; }
+button { padding: 6px 14px; border-radius: 4px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; font-size: 13px; }
+button.secondary { background: #fff; color: var(--text); border-color: var(--border); }
+button.danger { background: #fff; color: var(--error); border-color: var(--error); }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; border: 1px solid var(--border); }
+#graph { height: 72vh; min-height: 420px; border: 1px solid var(--border); border-radius: 4px; background: #fff; }
+.context-menu { position: absolute; z-index: 20; min-width: 170px; max-height: 60vh; overflow-y: auto; padding: 4px 0; background: #fff; border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 6px 18px rgba(16,24,40,.16); }
+.context-menu[hidden] { display: none; }
+.context-menu-header { padding: 4px 12px 6px; font-size: 11px; color: var(--muted); font-family: Consolas, monospace; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.context-menu .context-menu-item { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 0; color: var(--text); padding: 6px 12px; font-size: 13px; }
+.context-menu .context-menu-item:hover { background: #eef1f5; }
+.context-menu .context-menu-item.danger { color: var(--error); }
+label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 2px; }
+input, textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+dialog { border: 1px solid var(--border); border-radius: 8px; }
+</style>
+</head>
+<body>
+<header>
+    <span class="brand">TEGRITY</span>
+    <a href="../../index.html">&larr; www.tegrity.eu</a>
+</header>
+<main>
+<h1>Manual FTA</h1>
+<p class="intro">Fault trees drawn by hand. <strong>Add top event</strong> starts a tree. <strong>Add gate</strong> /
+<strong>Add basic event</strong>, then click gates: each click adds a gate or basic event below the clicked gate, with a
+default ID (TP-1 for a top event, GT-1 for a gate, EV-1 for a basic event, numbered on and never reused) and no title
+yet; the mode stays on until Esc or the button again. Click an element afterwards to enter its title, description and
+an optional <strong>label</strong>, which is shown next to its box. A gate with two or more inputs shows its OR / AND
+symbol, a gate with one input is drawn as an intermediate event, a gate with nothing below it yet as a triangle, a
+basic event is a circle and cannot have anything below it. Right-click an event for the same and more: edit, AND / OR,
+move left / right, delete. Hold <strong>Ctrl</strong> and drag an event onto a gate or top event to move it there with
+everything below it. In the dialog, <strong>Enter</strong> saves (Shift+Enter for a new line), Esc cancels.<br>
+<strong>Your trees stay in this browser only</strong> (nothing is sent anywhere). Use <strong>Export</strong> to save
+them as a file (<code>manual_fta.xml</code>, the same format as the TEGRITY Safety Model) and <strong>Import</strong>
+to load one.</p>
+
+<div class="panel">
+    <div class="toolbar">
+        <button type="button" class="secondary" id="add-top">Add top event</button>
+        <button type="button" class="secondary" id="add-gate">Add gate</button>
+        <button type="button" class="secondary" id="add-basic">Add basic event</button>
+        <span id="move-mode-badge" class="badge" title="Hold Ctrl and drag an event onto a gate or top event to move it with everything below it">Move: hold Ctrl</span>
+        <button type="button" class="secondary" onclick="cy && cy.fit(undefined, 30)">Fit</button>
+        <span id="hint" style="font-size:13px;" hidden></span>
+        <span id="empty" style="color:var(--muted); font-size:13px;" hidden>No fault tree yet &mdash; click <strong>Add top event</strong>.</span>
+        <span class="spacer"></span>
+        <button type="button" class="secondary" id="export">Export (.xml)</button>
+        <button type="button" class="secondary" id="import">Import…</button>
+        <input type="file" id="import-file" accept=".xml,text/xml" hidden>
+        <button type="button" class="danger" id="clear">Clear all</button>
+    </div>
+    <div style="position:relative;">
+        <div id="graph"></div>
+        <div id="menu" class="context-menu" role="menu" hidden></div>
+    </div>
+</div>
+</main>
+
+<dialog id="event-dialog" style="min-width:380px;">
+    <form id="event-form" method="dialog">
+        <h3 id="event-dialog-title" style="margin-top:0;"></h3>
+        <label>Title</label>
+        <input name="title" autocomplete="off">
+        <label>Description</label>
+        <textarea name="description" rows="3"></textarea>
+        <label>Label <span style="font-weight:normal;">(shown next to the box)</span></label>
+        <input name="label" autocomplete="off">
+        <p id="event-dialog-error" style="color:var(--error); font-size:12px;" hidden></p>
+        <p style="margin-bottom:0;">
+            <button type="submit">Save</button>
+            <button type="button" class="secondary" id="event-dialog-cancel">Cancel</button>
+        </p>
+    </form>
+</dialog>
+
+<script>
+// ============ model: trees of events, kept in localStorage (port of the Safety Model's manual_fta.py) ============
+const STORE_KEY = 'tegrityManualFta';
+const ID_PREFIX = { top: 'TP', intermediate: 'GT', basic: 'EV' };
+// layout grid -- the Safety Model's graph.py (FTA_UNIT 1.5)
+const LEAF_WIDTH = 75.2 * 1.5, H_GAP = (18.4 + 16) * 1.5, ROW_PITCH = 128 * 1.5;
+
+class FtaError extends Error {}
+let state = { tops: [], counters: {} };
+
+function loadState() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+        if (saved && Array.isArray(saved.tops)) state = { tops: saved.tops, counters: saved.counters || {} };
+    } catch (e) { /* private window / blocked storage: start empty */ }
+}
+function saveState() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* not persisted */ }
+}
+
+function* walk(events) { for (const e of events) { yield e; yield* walk(e.causes); } }
+
+function find(id) {
+    const search = (events, parent) => {
+        for (const e of events) {
+            if (e.id === id) return [e, parent];
+            const found = search(e.causes, e);
+            if (found) return found;
+        }
+        return null;
+    };
+    const found = search(state.tops, null);
+    if (!found) throw new FtaError(`There is no event ${id}.`);
+    return found;
+}
+
+function newId(kind, extra = []) {
+    const prefix = ID_PREFIX[kind];
+    const taken = new Set([...walk([...state.tops, ...extra])].map(e => e.id));
+    let n = state.counters[prefix] || 1;
+    while (taken.has(`${prefix}-${n}`)) n++;
+    state.counters[prefix] = n + 1;
+    return `${prefix}-${n}`;
+}
+
+const blank = (id, kind) => ({ id, title: '', description: '', label: '', kind, gate: 'or', causes: [] });
+
+function newTree() {
+    const top = blank(newId('top'), 'intermediate');
+    state.tops.push(top);
+    saveState();
+    return top;
+}
+
+function addCause(parentId, kind) {
+    const [parent] = find(parentId);
+    if (parent.kind === 'basic') throw new FtaError(`${parentId} is a basic event and cannot have anything below it -- add it below a gate.`);
+    const cause = blank(newId(kind), kind);
+    parent.causes.push(cause);
+    saveState();
+    return cause;
+}
+
+function updateEvent(id, fields) {
+    const [event, parent] = find(id);
+    for (const k of ['title', 'description', 'label']) if (k in fields) event[k] = (fields[k] || '').trim();
+    if ('kind' in fields && fields.kind !== event.kind) {
+        if (fields.kind === 'basic' && event.causes.length) throw new FtaError(`${id} has causes, so it cannot be a basic event.`);
+        if (parent) event.id = newId(fields.kind);
+        event.kind = fields.kind;
+    }
+    if ('gate' in fields) event.gate = fields.gate;
+    saveState();
+    return event;
+}
+
+function deleteEvent(id) {
+    const [event, parent] = find(id);
+    const list = parent ? parent.causes : state.tops;
+    list.splice(list.indexOf(event), 1);
+    saveState();
+}
+
+function moveCause(id, step) {
+    const [event, parent] = find(id);
+    const list = parent ? parent.causes : state.tops;
+    const i = list.indexOf(event), j = i + step;
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    saveState();
+}
+
+// Drag and drop: the event with its branch becomes the last input of another gate / top event.
+function moveBranch(id, parentId) {
+    const [event, parent] = find(id);
+    const [target] = find(parentId);
+    if (target === event || [...walk(event.causes)].includes(target)) throw new FtaError(`${id} cannot be moved below itself or below an event of its own branch.`);
+    if (target.kind === 'basic') throw new FtaError(`${parentId} is a basic event and cannot have anything below it -- drop onto a gate.`);
+    if (parent === target) return event;
+    const list = parent ? parent.causes : state.tops;
+    list.splice(list.indexOf(event), 1);
+    if (!parent) event.id = newId(event.kind, [event]);   // no longer a top event: id of its kind
+    target.causes.push(event);
+    saveState();
+    return event;
+}
+
+// ---- layout: the Safety Model's build_graph() ----
+function symbolOf(e) {
+    if (e.causes.length > 1) return e.gate;
+    if (!e.causes.length) return e.kind === 'basic' ? 'basic' : 'triangle';
+    return 'none';
+}
+function widthOf(e) {
+    if (!e.causes.length) return LEAF_WIDTH;
+    const ws = e.causes.map(widthOf);
+    return Math.max(LEAF_WIDTH, ws.reduce((a, b) => a + b, 0) + H_GAP * (ws.length - 1));
+}
+function buildGraph() {
+    const nodes = [], edges = [];
+    const place = (e, x, row, topId) => {
+        nodes.push({ data: { id: e.id, type: 'manual_event', symbol: symbolOf(e), label: e.title, code: e.id, depth: row,
+                             kind: e.kind, gate: e.gate, top: topId, description: e.description, note: e.label, tag: '',
+                             causes: e.causes.length },
+                     position: { x, y: row * ROW_PITCH } });
+        const ws = e.causes.map(widthOf);
+        let cursor = x - (ws.reduce((a, b) => a + b, 0) + H_GAP * (ws.length - 1)) / 2;
+        e.causes.forEach((c, i) => {
+            edges.push({ data: { id: `mfta-${e.id}-${c.id}`, source: e.id, target: c.id, input_index: i, input_count: e.causes.length } });
+            place(c, cursor + ws[i] / 2, row + 1, topId);
+            cursor += ws[i] + H_GAP;
+        });
+    };
+    let cursor = 0;
+    for (const top of state.tops) { const w = widthOf(top); place(top, cursor + w / 2, 0, top.id); cursor += w + H_GAP * 3; }
+    return { nodes, edges };
+}
+
+// ---- export / import: the Safety Model's model/manual_fta.xml format ----
+function toXml() {
+    const doc = document.implementation.createDocument(null, 'manualFta', null);
+    const root = doc.documentElement;
+    Object.keys(state.counters).sort().forEach(p => root.setAttribute(`next${p}`, String(state.counters[p])));
+    const el = e => {
+        const x = doc.createElement('event');
+        x.setAttribute('id', e.id); x.setAttribute('kind', e.kind); x.setAttribute('gate', e.gate);
+        if (e.label) x.setAttribute('label', e.label);
+        const t = doc.createElement('title'); t.textContent = e.title; x.appendChild(t);
+        if (e.description) { const d = doc.createElement('description'); d.textContent = e.description; x.appendChild(d); }
+        e.causes.forEach(c => x.appendChild(el(c)));
+        return x;
+    };
+    state.tops.forEach(top => { const tree = doc.createElement('tree'); tree.setAttribute('id', top.id); tree.appendChild(el(top)); root.appendChild(tree); });
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(doc);
+}
+function fromXml(text) {
+    const doc = new DOMParser().parseFromString(text, 'application/xml');
+    const root = doc.documentElement;
+    if (!root || root.nodeName !== 'manualFta' || doc.getElementsByTagName('parsererror').length) throw new FtaError('Not a Manual FTA file (manual_fta.xml).');
+    const childOf = (x, name) => [...x.children].filter(c => c.nodeName === name);
+    const parse = x => ({
+        id: x.getAttribute('id'), kind: x.getAttribute('kind') === 'basic' ? 'basic' : 'intermediate',
+        gate: x.getAttribute('gate') === 'and' ? 'and' : 'or', label: x.getAttribute('label') || '',
+        title: (childOf(x, 'title')[0] || {}).textContent || '', description: (childOf(x, 'description')[0] || {}).textContent || '',
+        causes: childOf(x, 'event').map(parse),
+    });
+    const tops = childOf(root, 'tree').map(t => childOf(t, 'event')[0]).filter(Boolean).map(parse);
+    const counters = {};
+    for (const a of root.attributes) if (a.name.startsWith('next') && /^\d+$/.test(a.value)) counters[a.name.slice(4)] = +a.value;
+    return { tops, counters };
+}
+
+// ============ page ============
+let cy = null;
+const menu = document.getElementById('menu');
+const KIND_NAMES = { intermediate: 'gate', basic: 'basic event' };
+
+// the same call shape as the Safety Model page (actions are local, errors are alerts)
+function act(fn) { try { return fn(); } catch (e) { alert(e.message); return null; } }
+
+// ---- dialog ----
+const dialog = document.getElementById('event-dialog');
+const form = document.getElementById('event-form');
+const dialogError = document.getElementById('event-dialog-error');
+let onSave = null;
+function openDialog(heading, values, save) {
+    document.getElementById('event-dialog-title').textContent = heading;
+    form.title.value = values.title || ''; form.description.value = values.description || ''; form.label.value = values.label || '';
+    dialogError.hidden = true; onSave = save; dialog.showModal(); form.title.focus(); form.title.select();
+}
+form.addEventListener('submit', evt => {
+    evt.preventDefault();
+    try {
+        const saved = onSave({ title: form.title.value, description: form.description.value, label: form.label.value });
+        dialog.close();
+        loadGraph({ keepViewport: true, reveal: saved && saved.id });
+    } catch (e) { dialogError.textContent = e.message; dialogError.hidden = false; }
+});
+form.addEventListener('keydown', evt => {
+    if (evt.key !== 'Enter' || evt.shiftKey || evt.isComposing || evt.target.tagName === 'BUTTON') return;
+    evt.preventDefault(); form.requestSubmit();
+});
+document.getElementById('event-dialog-cancel').addEventListener('click', () => dialog.close());
+
+function editEvent(node) {
+    const d = node.data();
+    openDialog(`Edit ${d.id}`, { title: d.label, description: d.description, label: d.note }, v => updateEvent(d.id, v));
+}
+function addBelow(node, kind) {
+    const added = act(() => addCause(node.id(), kind));
+    if (added) loadGraph({ keepViewport: true, reveal: added.id });
+}
+
+// ---- toolbar ----
+let addMode = null;
+const hint = document.getElementById('hint');
+const modeButtons = { intermediate: document.getElementById('add-gate'), basic: document.getElementById('add-basic') };
+function setAddMode(kind, message) {
+    addMode = kind;
+    for (const [k, b] of Object.entries(modeButtons)) b.classList.toggle('secondary', k !== kind);
+    hint.hidden = !kind && !message;
+    hint.style.color = message ? 'var(--error)' : '';
+    hint.textContent = message || (kind ? `Click a gate to add a ${KIND_NAMES[kind]} below it -- as often as you like (Esc or the button again ends).` : '');
+}
+document.getElementById('add-top').addEventListener('click', () => { setAddMode(null); const top = newTree(); loadGraph({ keepViewport: true, reveal: top.id }); });
+for (const [kind, b] of Object.entries(modeButtons)) {
+    b.addEventListener('click', () => {
+        if (addMode === kind) { setAddMode(null); return; }
+        if (!state.tops.length) { setAddMode(null, 'Add a top event first.'); return; }
+        setAddMode(kind);
+    });
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && addMode && !dialog.open) setAddMode(null); });
+function placeOn(node, mode) {
+    if (node.data('kind') === 'basic') { setAddMode(mode, `${node.id()} is a basic event and cannot have anything below it -- click a gate.`); return; }
+    if (addMode) setAddMode(addMode);                  // clears an earlier message, stays in the mode
+    addBelow(node, mode);
+}
+
+document.getElementById('export').addEventListener('click', () => {
+    const blob = new Blob([toXml()], { type: 'application/xml' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'manual_fta.xml'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+const fileInput = document.getElementById('import-file');
+document.getElementById('import').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    try {
+        const loaded = fromXml(await file.text());
+        if (state.tops.length && !confirm(`Replace the ${state.tops.length} fault tree(s) in this browser with the ${loaded.tops.length} from ${file.name}?`)) return;
+        state = loaded; saveState(); loadGraph({ fit: true });
+    } catch (e) { alert(e.message); }
+});
+document.getElementById('clear').addEventListener('click', () => {
+    if (!state.tops.length || !confirm('Delete all fault trees in this browser? (Export them first to keep a copy.)')) return;
+    state = { tops: [], counters: {} }; saveState(); loadGraph();
+});
+
+// ---- right-click menu ----
+function hideMenu() { menu.hidden = true; }
+function showMenu(pos, headerText, items) {
+    menu.replaceChildren();
+    const header = document.createElement('div');
+    header.className = 'context-menu-header'; header.textContent = headerText; menu.appendChild(header);
+    for (const { label, className, run } of items) {
+        const item = document.createElement('button');
+        item.type = 'button'; item.className = 'context-menu-item' + (className ? ' ' + className : ''); item.textContent = label;
+        item.addEventListener('click', () => { hideMenu(); run(); });
+        menu.appendChild(item);
+    }
+    menu.style.left = pos.x + 'px'; menu.style.top = pos.y + 'px'; menu.hidden = false;
+}
+function run(fn) { act(fn); loadGraph({ keepViewport: true }); }
+function eventMenuItems(node) {
+    const d = node.data();
+    const items = d.kind === 'basic' ? [] : [
+        { label: '+ Add gate below', run: () => addBelow(node, 'intermediate') },
+        { label: '+ Add basic event below', run: () => addBelow(node, 'basic') },
+    ];
+    items.push({ label: 'Edit…', run: () => editEvent(node) });
+    if (d.causes >= 2) {
+        const other = d.gate === 'and' ? 'or' : 'and';
+        items.push({ label: `Change to ${other.toUpperCase()} gate`, run: () => run(() => updateEvent(d.id, { gate: other })) });
+    }
+    if (d.causes === 0 && d.id !== d.top) {
+        const other = d.kind === 'basic' ? 'intermediate' : 'basic';
+        items.push({ label: `Make ${KIND_NAMES[other]}`, run: () => run(() => updateEvent(d.id, { kind: other })) });
+    }
+    if (d.id !== d.top) {
+        items.push({ label: 'Move left', run: () => run(() => moveCause(d.id, -1)) });
+        items.push({ label: 'Move right', run: () => run(() => moveCause(d.id, 1)) });
+    }
+    items.push({ label: d.id === d.top ? 'Delete fault tree…' : 'Delete…', className: 'danger', run: () => {
+        const below = branchOf(node).length - 1;
+        const what = d.id === d.top ? `the whole fault tree ${d.id} (${d.label})` : `${d.id} (${d.label})`;
+        if (confirm(`Delete ${what}` + (below ? ` and the ${below} event(s) below it?` : '?'))) run(() => deleteEvent(d.id));
+    } });
+    return items;
+}
+document.getElementById('graph').addEventListener('contextmenu', e => e.preventDefault());
+menu.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('mousedown', e => { if (!menu.contains(e.target)) hideMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') hideMenu(); });
+
+// ---- Ctrl+drag: move an event with its branch onto a gate / top event ----
+let drag = null, moveModeOn = false;
+function setMoveMode(on) {
+    moveModeOn = on;
+    document.getElementById('move-mode-badge').textContent = on ? 'Move: ON — drag onto a gate' : 'Move: hold Ctrl';
+    if (cy) { cy.userPanningEnabled(!on); cy.boxSelectionEnabled(false); }
+}
+document.addEventListener('keydown', e => { if (e.key === 'Control' && !moveModeOn) setMoveMode(true); });
+document.addEventListener('keyup', e => { if (e.key === 'Control') setMoveMode(false); });
+window.addEventListener('blur', () => setMoveMode(false));
+
+function branchOf(node) {
+    const branch = [node];
+    for (let i = 0; i < branch.length; i++) {
+        cy.edges('.tree-edge').filter(e => e.data('source') === branch[i].id()).forEach(e => branch.push(cy.$id(e.data('target'))));
+    }
+    return branch;
+}
+function startDrag(node, pointer) {
+    hideMenu();
+    const branch = branchOf(node);
+    const moving = branch.flatMap(n => [n, cy.$id(n.id() + '#note')]).filter(n => n.length);
+    drag = { node, ids: new Set(branch.map(n => n.id())), start: { ...pointer }, moved: false,
+             moving: moving.map(n => ({ n, pos: { ...n.position() } })), target: null };
+}
+function dropTargetAt(pos) {
+    return cy.nodes('[type = "manual_event"]').filter(n => {
+        if (drag.ids.has(n.id())) return false;
+        const b = n.boundingBox({ includeLabels: false });
+        return pos.x >= b.x1 && pos.x <= b.x2 && pos.y >= b.y1 && pos.y <= b.y2;
+    })[0] || null;
+}
+function duringDrag(pointer) {
+    const dx = pointer.x - drag.start.x, dy = pointer.y - drag.start.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+    if (!drag.moved) { drag.moved = true; drag.moving.forEach(({ n }) => n.addClass('dragging')); }
+    for (const { n, pos } of drag.moving) n.position({ x: pos.x + dx, y: pos.y + dy });
+    const target = dropTargetAt(pointer);
+    if (drag.target && drag.target !== target) drag.target.removeClass('drop-ok drop-no');
+    drag.target = target;
+    if (target) target.addClass(target.data('kind') === 'basic' ? 'drop-no' : 'drop-ok');
+}
+function endDrag() {
+    const { node, target, moved } = drag;
+    drag = null;
+    if (!moved) return;
+    if (target) {
+        const result = act(() => moveBranch(node.id(), target.id()));
+        loadGraph({ keepViewport: true });
+        if (result) { const m = cy.$id(result.id); if (m.length) reveal(cy.collection(branchOf(m))); }
+        return;
+    }
+    loadGraph({ keepViewport: true });
+}
+
+// ---- graph ----
+const MAX_FIT_ZOOM = 1.5;
+function reveal(node) {
+    if (!node || !node.length) return;
+    const box = node.renderedBoundingBox(), w = cy.width(), h = cy.height();
+    if (box.x1 >= 0 && box.y1 >= 0 && box.x2 <= w && box.y2 <= h) return;
+    cy.fit(undefined, 30);
+    if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(node); }
+}
+function loadGraph(options = {}) {
+    const viewport = options.keepViewport && cy && cy.nodes().length ? { zoom: cy.zoom(), pan: { ...cy.pan() } } : null;
+    const data = buildGraph();
+    document.getElementById('empty').hidden = data.nodes.length > 0;
+    if (cy) cy.destroy();
+    data.nodes.forEach(n => { n.data.svg = blockSvg(n.data); });
+    const treeEdges = data.edges.map(e => ({ data: { ...e.data }, classes: 'tree-edge' }));
+    const notes = data.nodes.filter(n => n.data.note).map(n => ({
+        data: { id: `${n.data.id}#note`, note: n.data.note }, classes: 'note',
+        position: { x: n.position.x + (BOX_W / 2 + 3) * U, y: n.position.y + (BOX_H / 2 - BLOCK_H / 2) * U },
+    }));
+    cy = cytoscape({
+        container: document.getElementById('graph'),
+        elements: [...data.nodes, ...treeEdges, ...notes, ...connectorElements(data.nodes, data.edges)],
+        autoungrabify: true,
+        style: [
+            { selector: 'node', style: {
+                'shape': 'rectangle', 'width': NODE_W * U, 'height': BLOCK_H * U, 'background-opacity': 0, 'border-width': 0,
+                'background-image': 'data(svg)', 'background-width': '100%', 'background-height': '100%',
+                'label': 'data(label)', 'font-family': 'Arial, Helvetica, sans-serif', 'font-size': 9, 'color': '#000',
+                'text-wrap': 'wrap', 'text-max-width': (BOX_W - 6) * U, 'text-valign': 'center', 'text-halign': 'center',
+                'text-margin-y': (BOX_H / 2 - BLOCK_H / 2) * U,
+            }},
+            { selector: 'node.junction', style: { 'width': 0.1, 'height': 0.1, 'background-image': 'none', 'label': '', 'events': 'no' } },
+            { selector: 'node.note', style: {
+                'width': 0.1, 'height': 0.1, 'background-image': 'none', 'events': 'no', 'label': 'data(note)', 'font-size': 9,
+                'font-weight': 'bold', 'color': '#000', 'text-halign': 'right', 'text-valign': 'center', 'text-margin-y': 0,
+                'text-wrap': 'wrap', 'text-max-width': 110,
+            }},
+            { selector: 'edge', style: { 'curve-style': 'straight', 'width': 1, 'line-color': STROKE, 'target-arrow-shape': 'none', 'events': 'no', 'label': '' } },
+            { selector: 'edge.tree-edge', style: { 'display': 'none' } },
+            { selector: 'node.dragging', style: { 'opacity': 0.6 } },
+            { selector: 'node.drop-ok', style: { 'overlay-color': '#16a34a', 'overlay-opacity': 0.25, 'overlay-padding': 4 } },
+            { selector: 'node.drop-no', style: { 'overlay-color': '#dc2626', 'overlay-opacity': 0.25, 'overlay-padding': 4 } },
+        ],
+        layout: { name: 'preset', padding: 40 },
+    });
+    if (viewport) cy.viewport(viewport);
+    else if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(); }
+    if (options.reveal) reveal(cy.$id(options.reveal));
+    setMoveMode(moveModeOn);
+    cy.on('pan zoom', hideMenu);
+    cy.on('tapstart', 'node[type = "manual_event"]', evt => { if (moveModeOn) startDrag(evt.target, evt.position); });
+    cy.on('tapdrag', evt => { if (drag) duringDrag(evt.position); });
+    // Rebuilding the graph destroys this cytoscape instance -- never inside one of its own events
+    // (the next click would be lost), so changes made from graph events run just after them.
+    cy.on('tapend', () => { if (drag) setTimeout(endDrag, 0); });
+    cy.on('tap', 'node[type = "manual_event"]', evt => {
+        const node = evt.target, mode = addMode;              // the mode at the moment of the click
+        setTimeout(() => (mode ? placeOn(node, mode) : editEvent(node)), 0);
+    });
+    cy.on('cxttap', evt => {
+        if (evt.target === cy) showMenu(evt.renderedPosition, 'Manual FTA', [{ label: '+ Add top event', run: () => { const t = newTree(); loadGraph({ keepViewport: true, reveal: t.id }); } }]);
+        else if (evt.target.isNode() && evt.target.data('type') === 'manual_event') showMenu(evt.renderedPosition, `${evt.target.id()}: ${evt.target.data('label')}`, eventMenuItems(evt.target));
+    });
+}
+
+loadState();
+loadGraph();
+</script>
+</body>
+</html>
