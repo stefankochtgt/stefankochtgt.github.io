@@ -52,6 +52,19 @@
 .menubar .menu-list hr { margin: 4px 0; border: 0; border-top: 1px solid #e5e7eb; }
 .fta-toolbar { align-items: center; }
 .help-dialog { max-width: 760px; }
+/* phones and narrow windows (SFM-183): everything wraps inside the screen, nothing makes the page wider */
+.fta-toolbar { flex-wrap: wrap; row-gap: 6px; }
+@media (max-width: 760px) {
+    html, body { overflow-x: hidden; }
+    main.content.fill { padding-left: 6px; padding-right: 6px; }
+    .app-heading { font-size: 16px !important; flex-wrap: wrap; row-gap: 0; }
+    .menubar .menu-title { padding: 3px 7px; }
+    #analysis-select { min-width: 0 !important; width: 44vw; }
+    .icon-sep { display: none; }
+    #move-mode-badge { display: none; }
+    .help-table td:first-child { white-space: normal; }
+}
+@media (hover: none) { #move-mode-badge { display: none; } }
 /* guided tour (SFM-178) */
 .tour-btn { font-size: 12px; font-weight: 600; padding: 0 9px; color: #1e3a8a; }
 #tour-block { position: fixed; inset: 0; z-index: 999; background: transparent; }
@@ -177,6 +190,7 @@
                 <tr><td>Click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Right-click an event</td><td>add below, edit, AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
                 <tr><th colspan="2">Moving and copying</th></tr>
+                <tr><td>Phone / tablet</td><td>tap = click, <strong>long-press</strong> = right-click; the event menu has <em>Select</em> and <em>Move / copy to…</em> (then tap the gate); pinch zooms</td></tr>
                 <tr><td><kbd>Ctrl</kbd> + drag onto a gate</td><td>menu: move here, copy (same IDs = the same event, dashed box), copy with new IDs</td></tr>
                 <tr><td>Change a repeated (dashed) event</td><td>asks: change all occurrences, or only this one (it gets a new ID)</td></tr>
                 <tr><th colspan="2">Selecting several</th></tr>
@@ -512,6 +526,10 @@ function showMenu(renderedPos, headerText, items) {
     menu.style.left = renderedPos.x + 'px';
     menu.style.top = renderedPos.y + 'px';
     menu.hidden = false;
+    // kept inside the graph area: moved left / up when it would stick out (a phone, or near the edge)
+    const area = menu.parentElement.getBoundingClientRect();
+    menu.style.left = Math.max(0, Math.min(renderedPos.x, area.width - menu.offsetWidth - 4)) + 'px';
+    menu.style.top = Math.max(0, Math.min(renderedPos.y, area.height - menu.offsetHeight - 4)) + 'px';
 }
 
 async function run(action) {
@@ -529,6 +547,10 @@ function eventMenuItems(node) {
         { label: '+ Add basic event below', run: () => addBelow(node, 'basic') },
     ];
     items.push({ label: 'Edit…', run: () => editEvent(node) });
+    // without a Ctrl key (phone, tablet) these are the way to select several and to move / copy (SFM-183)
+    items.push({ label: picked.has(node.id()) ? 'Unselect' : 'Select (for several)', run: () => togglePick(node) });
+    if (d.id !== d.top || cy.nodes('[type = "manual_event"]').length > 1)
+        items.push({ label: 'Move / copy to…', run: () => startMoveTo(node) });
     if (d.causes >= 2) {
         const other = d.gate === 'and' ? 'or' : 'and';
         items.push({ label: `Change to ${other.toUpperCase()} gate`, run: () => put({ gate: other }) });
@@ -641,7 +663,13 @@ document.addEventListener('keydown', e => {
 // Only while Ctrl is held (user, 2026-10-02), so a plain drag cannot move anything by accident. The
 // move follows the pointer itself (tapstart / tapdrag / tapend): cytoscape keeps Ctrl+drag for box
 // selection and would not move a grabbed node. While Ctrl is held the view does not pan.
-let drag = null, moveModeOn = false;
+let drag = null, moveModeOn = false, held = false;
+// The graph area moves or changes size when a hint line wraps in (narrow screens) -- the graph then has to
+// measure itself again, or taps land beside the boxes (SFM-183).
+new ResizeObserver(() => { if (cy) cy.resize(); }).observe(document.getElementById('manual-fta-graph'));
+for (const el of [document.getElementById('manual-fta-hint'), document.getElementById('pick-badge')])
+    new MutationObserver(() => requestAnimationFrame(() => { if (cy) cy.resize(); }))
+        .observe(el, { attributes: true, childList: true, characterData: true, subtree: true });
 
 function setMoveMode(on) {
     moveModeOn = on;
@@ -688,12 +716,9 @@ function duringDrag(pointer) {
     if (target) target.addClass(target.data('kind') === 'basic' ? 'drop-no' : 'drop-ok');
 }
 
-async function endDrag() {
-    const { node, target, moved } = drag;
-    drag = null;
-    if (!moved) return;                                         // a plain (Ctrl+)click: tap handles it
-    if (target && target.data('kind') !== 'basic') {
-        // what to do there (user, 2026-10-21): move, copy with the same IDs (repeated events), copy with new IDs
+// What to do with `node` (and its branch) on the gate `target` (user, 2026-10-21): move, copy with the same IDs
+// (repeated events), copy with new IDs -- after a Ctrl+drag, or "Move / copy to…" then a tap (SFM-183).
+async function dropMenu(node, target) {
         const place = mode => async () => {
             try {
                 const result = await withScope(scope => api('POST', eventUrl(node) + '/move-to',
@@ -711,8 +736,33 @@ async function endDrag() {
             { label: 'Copy here with new IDs', run: place('copy_new') },
             { label: 'Cancel', run: () => {} },
         ]);
-        return;
-    }
+}
+
+// "Move / copy to…" from the event menu (SFM-183): the next tap on a gate opens the drop menu there --
+// the same as a Ctrl+drag, for phones and tablets (no Ctrl key). Esc or a tap on the background cancels.
+let moveSource = null;
+function startMoveTo(node) {
+    setAddMode(null);
+    moveSource = node.id();
+    hint.hidden = false; hint.style.color = '';
+    hint.textContent = `Tap the gate to move or copy ${node.data('code')} to (Esc or a tap on the background cancels).`;
+}
+function endMoveTo() { if (moveSource) { moveSource = null; hint.hidden = true; } }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') endMoveTo(); });
+async function moveToTapped(target) {
+    const node = cy.$id(moveSource);
+    endMoveTo();
+    if (!node.length) return;
+    if (target.data('kind') === 'basic') { alert(`${target.data('code')} is a basic event and cannot have anything below it -- tap a gate.`); return; }
+    if (target.id() === node.id() || target.id().startsWith(node.id() + '/')) { alert(`${node.data('code')} cannot be placed below itself.`); return; }
+    await dropMenu(node, target);
+}
+
+async function endDrag() {
+    const { node, target, moved } = drag;
+    drag = null;
+    if (!moved) return;                                         // a plain (Ctrl+)click: tap handles it
+    if (target && target.data('kind') !== 'basic') { await dropMenu(node, target); return; }
     if (target) alert(`${target.data('code')} is a basic event and cannot have anything below it -- drop onto a gate.`);
     await loadGraph({ keepViewport: true });                  // nowhere to drop: everything snaps back
 }
@@ -798,6 +848,8 @@ async function loadGraph(options = {}) {
     cy.on('tapend', () => { if (drag) endDrag(); });
     cy.on('tap', 'node[type = "manual_event"]', evt => {
         const oe = evt.originalEvent || {};
+        if (held) return;                                                      // the release of a long-press
+        if (moveSource) { moveToTapped(evt.target); return; }                  // "Move / copy to…" (SFM-183)
         if (oe.ctrlKey || oe.metaKey) { togglePick(evt.target); return; }      // Ctrl+click: pick several
         if (addMode) { placeOn(evt.target); return; }
         if (picked.size) { clearPicks(); return; }                             // a plain click first just unselects
@@ -805,9 +857,19 @@ async function loadGraph(options = {}) {
     });
     cy.on('tap', evt => {                                                      // a plain click on the empty canvas
         const oe = evt.originalEvent || {};
+        if (evt.target === cy) endMoveTo();
         if (evt.target === cy && !oe.ctrlKey && !oe.metaKey && picked.size) clearPicks();
     });
-    cy.on('cxttap', evt => {
+    // a long-press on a touch screen opens the same menu as a right-click (SFM-183)
+    cy.on('tapstart', () => { held = false; });                             // a new touch
+    cy.on('taphold', evt => {
+        const oe = evt.originalEvent || {};
+        if (!(oe.type || '').startsWith('touch') && oe.pointerType !== 'touch') return;
+        held = true;
+        contextMenuFor(evt);
+    });
+    cy.on('cxttap', contextMenuFor);
+    function contextMenuFor(evt) {
         if (evt.target === cy) showMenu(evt.renderedPosition, 'Manual FTA', [{ label: '+ Add top event', run: newTree }]);
         else if (evt.target.isNode() && evt.target.data('type') === 'manual_event') {
             if (picked.has(evt.target.id()) && picked.size > 1) {
@@ -817,7 +879,7 @@ async function loadGraph(options = {}) {
                 showMenu(evt.renderedPosition, `${t.data('code')}: ${t.data('label')}${again}`, eventMenuItems(t));
             }
         }
-    });
+    }
     showPicks();
 }
 
@@ -856,19 +918,21 @@ const TOUR = [
     { nodes: tourNodes('EV-3'), title: 'Repeated event', text: `<p>The <b>same fuse</b> feeds both lamps, so EV-3 appears twice
         &ndash; with the same ID it is the same event, drawn with a <b>dashed</b> box.</p><p>When you change one, you are
         asked: change <b>all occurrences</b>, or <b>only this one</b> (it then gets a new ID and becomes independent).</p>` },
-    { nodes: tourNodes('EV-1'), title: 'Edit an event', text: `<p><b>Click</b> an event to edit its title, description, ID,
+    { nodes: tourNodes('EV-1'), title: 'Edit an event', text: `<p><b>Click</b> (tap) an event to edit its title, description, ID,
         label and safety criticality. ${K('Enter')} saves, ${K('Shift')}+${K('Enter')} new line, ${K('Esc')} cancels.</p>` },
     { el: '#manual-fta-menu', enter: () => tourMenu('GT-1'), leave: hideMenu, title: 'Right-click menu',
-        text: `<p><b>Right-click</b> an event for this menu: add a gate / basic event below, edit, AND / OR, make it a gate
-        or a basic event, move it left / right, safety criticality, colour, delete. Right-click the empty background
-        to add a top event.</p>` },
+        text: `<p><b>Right-click</b> an event for this menu &ndash; on a phone or tablet: <b>long-press</b>. Add a gate / basic
+        event below, edit, select, move / copy, AND / OR, make it a gate or a basic event, move it left / right, safety
+        criticality, colour, delete. Right-click the empty background to add a top event.</p>` },
     { nodes: tourNodes('EV-1', 'EV-2'), enter: () => tourNodes('EV-1', 'EV-2')().addClass('picked'),
         leave: () => cy.nodes('.picked').removeClass('picked'), title: 'Select several',
-        text: `<p>${K('Ctrl')} + <b>click</b> selects events (blue, here the two bulbs). Right-click one of them to set the
+        text: `<p>${K('Ctrl')} + <b>click</b> selects events (blue, here the two bulbs) &ndash; or <b>Select</b> in the menu.
+        Right-click (long-press) one of them to set the
         criticality, colour, AND / OR or to delete them all at once. A plain click anywhere or ${K('Esc')} clears it.</p>` },
     { nodes: tourNodes('EV-1', 'GT-2'), title: 'Move and copy branches', text: `<p>Hold ${K('Ctrl')} and <b>drag</b> an event
         (with everything below it) onto a gate &ndash; e.g. EV-1 onto GT-2. A menu offers <b>Move here</b>, <b>Copy</b>
-        (same IDs: the same event, like the fuse) and <b>Copy with new IDs</b> (an independent copy).</p>` },
+        (same IDs: the same event, like the fuse) and <b>Copy with new IDs</b> (an independent copy).</p>
+        <p>Without a Ctrl key: <b>Move / copy to&hellip;</b> in the event's menu, then tap the gate.</p>` },
     { el: '#add-top', title: 'New top event', text: `<p>Starts a new tree. You are asked whether it goes into this analysis
         or onto a new analysis page.</p>` },
     { el: '#add-gate', title: 'New gate', text: `<p>Click the icon, then click gates or top events: a new gate is added below
@@ -933,7 +997,10 @@ function showTourStep(i) {
         <button type="button" class="secondary" data-tour="back" ${i ? '' : 'disabled'}>Back</button>
         <button type="button" data-tour="next">${i === TOUR.length - 1 ? 'Done' : 'Next'}</button></div>`;
     tourPop.hidden = false;
-    const pw = tourPop.offsetWidth, ph = tourPop.offsetHeight, vw = innerWidth, vh = innerHeight;
+    // the visible screen (on a phone innerWidth can be wider than what is shown)
+    const vw = Math.min(innerWidth, document.documentElement.clientWidth || innerWidth);
+    const vh = Math.min(innerHeight, document.documentElement.clientHeight || innerHeight);
+    const pw = tourPop.offsetWidth, ph = tourPop.offsetHeight;
     const r = tourRect(step);
     if (!r) {
         tourSpot.hidden = true;
@@ -951,9 +1018,10 @@ function showTourStep(i) {
             else if (r.left - pad - 10 - pw >= 8) { top = Math.max(8, Math.min(r.top, vh - ph - 8)); left = r.left - pad - 10 - pw; }
             else top = Math.max(8, r.top + 16);
         }
-        Object.assign(tourPop.style, { left: `${left}px`, top: `${top}px` });
+        Object.assign(tourPop.style, { left: `${Math.max(8, Math.min(left, vw - pw - 8))}px`,
+                                       top: `${Math.max(8, Math.min(top, vh - ph - 8))}px` });
     }
-    tourPop.querySelector('[data-tour="next"]').focus();
+    tourPop.querySelector('[data-tour="next"]').focus({ preventScroll: true });
 }
 async function startTour() {
     const help = document.getElementById('help-dialog');
