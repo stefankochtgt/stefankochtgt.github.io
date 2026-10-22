@@ -54,6 +54,8 @@
 .help-dialog { max-width: 760px; }
 /* guided tour (SFM-178) */
 .tour-btn { font-size: 12px; font-weight: 600; padding: 0 9px; color: #1e3a8a; }
+#tour-block { position: fixed; inset: 0; z-index: 999; background: transparent; }
+#tour-block[hidden] { display: none; }
 #tour-spot { position: fixed; z-index: 1000; border-radius: 6px; box-shadow: 0 0 0 9999px rgba(15, 23, 42, .45);
     outline: 2px solid #f59e0b; pointer-events: none; transition: all .18s ease; }
 #tour-pop { position: fixed; z-index: 1001; width: 340px; max-width: calc(100vw - 32px); background: #fff; color: #111;
@@ -732,7 +734,8 @@ async function loadGraph(options = {}) {
     // the first tree half off-screen) or when asked to fit.
     const viewport = options.keepViewport && cy && cy.nodes().length
         ? { zoom: cy.zoom(), pan: { ...cy.pan() } } : null;
-    const data = await api('GET', '/api/manual-fta/graph?analysis=' + encodeURIComponent(analysisId));
+    // options.data: draw this graph instead of the analysis (the guided tour's example, SFM-182)
+    const data = options.data || await api('GET', '/api/manual-fta/graph?analysis=' + encodeURIComponent(analysisId));
     document.getElementById('manual-fta-empty').hidden = data.nodes.length > 0;
     if (cy) cy.destroy();
     data.nodes.forEach(n => { n.data.svg = blockSvg(n.data); });
@@ -741,7 +744,8 @@ async function loadGraph(options = {}) {
     // an event's label: text right of its description box (own invisible node, so it is not clipped)
     const notes = data.nodes.filter(n => n.data.note).map(n => ({
         data: { id: `${n.data.id}#note`, note: n.data.note }, classes: 'note',
-        position: { x: n.position.x + (BOX_W / 2 + 3) * U, y: n.position.y + (BOX_H / 2 - BLOCK_H / 2) * U },
+        // right of the box -- or of its criticality square, when it has one (it was drawn over it)
+        position: { x: n.position.x + (BOX_W / 2 + (n.data.tag ? TAG_GAP + TAG_W : 0) + 3) * U, y: n.position.y + (BOX_H / 2 - BLOCK_H / 2) * U },
     }));
     cy = cytoscape({
         container: document.getElementById('manual-fta-graph'),
@@ -822,56 +826,69 @@ document.getElementById('import-xml').addEventListener('click', () => document.g
 document.getElementById('export-jpg').addEventListener('click', () => exportGraphJpgIdentified(cy, 'fta_manual_' + analysisId));
 document.getElementById('help-tricks').addEventListener('click', () => document.getElementById('help-dialog').showModal());
 
-// ---- guided tour (SFM-178): every function and shortcut, one step at a time -----------------------
-// A step points at a part of the page (dimmed around it) or, without `el`, is shown in the middle.
-// → / Enter next, ← back, Esc ends. Opened from the Tour button, Help > Guided tour, the help dialog.
+// ---- guided tour (SFM-178, SFM-182): every function and shortcut, shown on an example tree ---------
+// The tour draws a small example fault tree in place of the analysis (only drawn -- nothing is saved; your
+// trees come back when it ends) and points at its parts: a step has `el` (a page element), `nodes` (event
+// codes of the example: the spotlight frames them) or neither (shown in the middle); `enter` / `leave` show
+// things on the example (the right-click menu, a selection, search hits). Clicks on the page are blocked
+// meanwhile. → / Enter next, ← back, Esc ends. Opened from the Tour button, Help > Guided tour, the help dialog.
 const K = k => `<kbd>${k}</kbd>`;
+const tourNodes = (...codes) => () => cy.nodes('[type = "manual_event"]').filter(n => codes.includes(n.data('code')));
+function tourMenu(code) {                           // the real right-click menu of an example event
+    const n = tourNodes(code)().first(), p = n.renderedPosition();
+    showMenu({ x: p.x + 40, y: p.y - 30 }, `${n.data('code')}: ${n.data('label')}`, eventMenuItems(n));
+}
 const TOUR = [
-    { title: 'Welcome', text: `<p>Integrity Workbench &ndash; <b>Fault Tree PRO max</b> draws fault trees by hand: top events,
-        AND / OR gates and basic events.</p><p>This tour shows every function and shortcut. ${K('→')} / ${K('Enter')} next,
-        ${K('←')} back, ${K('Esc')} ends.</p>` },
-    { el: '#menubar .menu:nth-child(1)', title: 'File: analyses', text: `<p>An <b>analysis</b> is a separate set of fault trees
-        (like pages). <b>New</b>, <b>rename</b>, <b>duplicate</b> (the copy gets new IDs) and <b>delete</b> are here.</p>
-        <p>Event IDs (TP-, GT-, EV-) are unique across all analyses.</p>` },
-    { el: '#menubar .menu:nth-child(2)', title: 'Import / Export', text: `<p><b>Export JPG</b>: the diagram as a sharp image,
-        the revision in light grey above each top event.</p><p><b>Export LaTeX</b>: a LaTeX document, each tree a TikZ
-        picture you can copy into your own document (<b>Export PDF</b> compiles it, where available).</p><p><b>Export XML</b>: the trees of this analysis in a readable
-        text format &ndash; good for git, for AI tools and to import again. <b>Import XML</b> checks the file and shows
-        what it will do first.</p>` },
-    { el: '#menubar .menu:nth-child(3)', title: 'Help', text: `<p>This tour again, and a table of all keyboard and mouse
-        shortcuts.</p>` },
-    { el: '#analysis-select', title: 'Choose the analysis', text: `<p>Switches between the analyses. The number of trees is
-        shown next to each name.</p>` },
+    { title: 'Welcome', text: `<p>Integrity Workbench &ndash; <b>Fault Tree PRO max</b> draws fault trees by hand.</p>
+        <p>This tour explains every function on a small <b>example tree</b> (only shown &ndash; nothing is saved; your own
+        trees come back afterwards). ${K('→')} / ${K('Enter')} next, ${K('←')} back, ${K('Esc')} ends.</p>` },
+    { el: '#manual-fta-graph', title: 'The example', text: `<p>Both headlamps of a car go dark at night. The <b>top event</b>
+        is on top; below it, what has to happen for it to occur, down to the <b>basic events</b> (circles).</p>
+        <p>Each event is a box with its title, a symbol and its <b>ID</b> below (TP- top event, GT- gate, EV- basic event).</p>` },
+    { nodes: tourNodes('TP-1'), title: 'Top event and AND gate', text: `<p>The top event uses an <b>AND</b> gate: it happens only
+        when <b>both</b> headlamps are dark. The square next to the box is its <b>safety criticality</b> (here ASIL B);
+        &ldquo;Hazard&rdquo; at the right is its <b>label</b>.</p>` },
+    { nodes: tourNodes('GT-1', 'GT-2'), title: 'OR gates', text: `<p>A headlamp is dark if its bulb burns out <b>OR</b> the fuse
+        blows. A gate with two or more inputs shows its OR / AND symbol; right-click switches it.</p>` },
+    { nodes: tourNodes('EV-1', 'EV-2'), title: 'Basic events', text: `<p>Basic events (circles) end a branch &ndash; nothing goes
+        below them. EV-2 has a <b>colour</b> (yellow) and the criticality <b>QM</b>; EV-1 has none, so no square is drawn.</p>
+        <p>Criticalities: H1&ndash;H4+, ANY, QM, ASIL A&ndash;D.</p>` },
+    { nodes: tourNodes('EV-3'), title: 'Repeated event', text: `<p>The <b>same fuse</b> feeds both lamps, so EV-3 appears twice
+        &ndash; with the same ID it is the same event, drawn with a <b>dashed</b> box.</p><p>When you change one, you are
+        asked: change <b>all occurrences</b>, or <b>only this one</b> (it then gets a new ID and becomes independent).</p>` },
+    { nodes: tourNodes('EV-1'), title: 'Edit an event', text: `<p><b>Click</b> an event to edit its title, description, ID,
+        label and safety criticality. ${K('Enter')} saves, ${K('Shift')}+${K('Enter')} new line, ${K('Esc')} cancels.</p>` },
+    { el: '#manual-fta-menu', enter: () => tourMenu('GT-1'), leave: hideMenu, title: 'Right-click menu',
+        text: `<p><b>Right-click</b> an event for this menu: add a gate / basic event below, edit, AND / OR, make it a gate
+        or a basic event, move it left / right, safety criticality, colour, delete. Right-click the empty background
+        to add a top event.</p>` },
+    { nodes: tourNodes('EV-1', 'EV-2'), enter: () => tourNodes('EV-1', 'EV-2')().addClass('picked'),
+        leave: () => cy.nodes('.picked').removeClass('picked'), title: 'Select several',
+        text: `<p>${K('Ctrl')} + <b>click</b> selects events (blue, here the two bulbs). Right-click one of them to set the
+        criticality, colour, AND / OR or to delete them all at once. A plain click anywhere or ${K('Esc')} clears it.</p>` },
+    { nodes: tourNodes('EV-1', 'GT-2'), title: 'Move and copy branches', text: `<p>Hold ${K('Ctrl')} and <b>drag</b> an event
+        (with everything below it) onto a gate &ndash; e.g. EV-1 onto GT-2. A menu offers <b>Move here</b>, <b>Copy</b>
+        (same IDs: the same event, like the fuse) and <b>Copy with new IDs</b> (an independent copy).</p>` },
     { el: '#add-top', title: 'New top event', text: `<p>Starts a new tree. You are asked whether it goes into this analysis
         or onto a new analysis page.</p>` },
     { el: '#add-gate', title: 'New gate', text: `<p>Click the icon, then click gates or top events: a new gate is added below
-        each one you click. ${K('Esc')} or the icon again ends it.</p><p>A gate with two or more inputs shows its OR / AND
-        symbol.</p>` },
-    { el: '#add-basic', title: 'New basic event', text: `<p>The same for basic events (the circle). A basic event cannot
-        have anything below it.</p>` },
+        each one you click. ${K('Esc')} or the icon again ends it.</p>` },
+    { el: '#add-basic', title: 'New basic event', text: `<p>The same for basic events.</p>` },
     { el: '#fit-window', title: 'Fit to window', text: `<p>Shows the whole analysis. ${K('Mouse wheel')} zooms, dragging the
         background moves the view.</p>` },
-    { el: '#find-gate', title: 'Find gates', text: `<p>Searches gates and top events by <b>ID</b>, words of the
-        <b>title / description / label</b>, a <b>safety criticality</b> (<code>H3+</code>, <code>ASIL B</code>, <code>QM</code>
-        &ndash; exact, H3 does not find H3+) or a <b>colour</b> (<code>yellow</code>, &hellip;; <code>blue</code> = standard).</p>
+    { el: '#find-basic', enter: () => tourNodes('EV-1', 'EV-2')().addClass('found'),
+        leave: () => cy.nodes('.found').removeClass('found'), title: 'Find gates / basic events',
+        text: `<p>The two binocular icons search gates (with top events) or basic events by <b>ID</b>, words of the
+        <b>title / description / label</b>, a <b>criticality</b> (<code>ASIL B</code>, <code>H3+</code> &ndash; exact) or a
+        <b>colour</b> (<code>yellow</code>; <code>blue</code> = standard). Here: &ldquo;bulb&rdquo; finds the two bulbs.</p>
         <p>${K('Enter')} / ${K('Shift')}+${K('Enter')} next / previous match, ${K('Esc')} closes.</p>` },
-    { el: '#find-basic', title: 'Find basic events', text: `<p>The same search for basic events.</p>` },
-    { el: '#manual-fta-graph', title: 'Edit an event', text: `<p><b>Click</b> an event to edit its title, description, ID,
-        label and safety criticality. ${K('Enter')} saves, ${K('Shift')}+${K('Enter')} new line, ${K('Esc')} cancels.</p>
-        <p>The <b>safety criticality</b> (H1&ndash;H4+, ANY, QM, ASIL A&ndash;D) shows as a small square next to the box &ndash;
-        only when one is set.</p>` },
-    { el: '#manual-fta-graph', title: 'Right-click menu', text: `<p><b>Right-click</b> an event: add a gate / basic event
-        below, edit, switch AND / OR, make it a gate or a basic event, move it left / right among its neighbours, set the
-        safety criticality or a colour, delete.</p>` },
-    { el: '#manual-fta-graph', title: 'Select several', text: `<p>${K('Ctrl')} + <b>click</b> selects events (blue).
-        Right-click one of them to set the criticality, colour, AND / OR or to delete them all at once.</p>
-        <p>A plain click anywhere or ${K('Esc')} clears the selection.</p>` },
-    { el: '#manual-fta-graph', title: 'Move and copy branches', text: `<p>Hold ${K('Ctrl')} and <b>drag</b> an event onto a
-        gate: a menu offers <b>Move here</b>, <b>Copy</b> (the same IDs &ndash; the same event in two places, drawn with a
-        dashed box) and <b>Copy with new IDs</b> (an independent copy).</p>` },
-    { el: '#manual-fta-graph', title: 'Repeated events', text: `<p>When you change an event that appears in several places
-        (dashed box), you are asked: change <b>all occurrences</b>, or <b>only this one</b> &ndash; it then gets a new ID and
-        becomes independent.</p>` },
+    { el: '#analysis-select', title: 'Analyses', text: `<p>An <b>analysis</b> is a separate set of fault trees (like pages);
+        choose it here. <b>File</b> creates, renames, duplicates (new IDs) and deletes analyses. IDs are unique across
+        all of them.</p>` },
+    { el: '#menubar .menu:nth-child(2)', title: 'Import / Export', text: `<p><b>Export JPG</b>: a sharp image of the diagram.
+        <b>Export LaTeX</b>: a LaTeX document, each tree a TikZ picture to copy into your own document (<b>Export PDF</b>
+        compiles it, where available). <b>Export XML</b>: readable text &ndash; good for git and AI tools, and to import
+        again with <b>Import XML</b>.</p>` },
     { title: 'All shortcuts', text: `<table>
         <tr><td>Click</td><td>edit an event</td></tr>
         <tr><td>Right-click</td><td>event menu</td></tr>
@@ -881,17 +898,35 @@ const TOUR = [
         <tr><td>${K('Shift')}+${K('Enter')}</td><td>new line / previous match</td></tr>
         <tr><td>${K('Esc')}</td><td>cancel, end adding, clear the selection, close the search</td></tr>
         <tr><td>Wheel / drag</td><td>zoom / move the view</td></tr></table>
-        <p style="margin-top:8px;">Help &gt; Keyboard and mouse shows this table any time.</p>` },
+        <p style="margin-top:8px;">Help &gt; Keyboard and mouse shows this table any time. When the tour ends, your
+        own trees are shown again.</p>` },
 ];
-let tourAt = -1;
+let tourAt = -1, tourDemo = false;
 const tourSpot = Object.assign(document.createElement('div'), { id: 'tour-spot', hidden: true });
 const tourPop = Object.assign(document.createElement('div'), { id: 'tour-pop', hidden: true });
+const tourBlock = Object.assign(document.createElement('div'), { id: 'tour-block', hidden: true });
 tourPop.setAttribute('role', 'dialog');
-document.body.append(tourSpot, tourPop);
+document.body.append(tourBlock, tourSpot, tourPop);
+['click', 'mousedown', 'contextmenu', 'wheel', 'dblclick'].forEach(type =>
+    tourBlock.addEventListener(type, e => { e.preventDefault(); e.stopPropagation(); }, { passive: false }));
+
+function tourRect(step) {                           // the spotlight's rectangle on the screen, or null
+    if (step.nodes && cy) {
+        const nodes = step.nodes();
+        if (!nodes.length) return null;
+        const box = nodes.renderedBoundingBox({ includeLabels: false }), c = cy.container().getBoundingClientRect();
+        return { left: c.left + box.x1, top: c.top + box.y1, right: c.left + box.x2, bottom: c.top + box.y2,
+                 width: box.w, height: box.h };
+    }
+    const target = step.el && document.querySelector(step.el);
+    return target && !target.hidden ? target.getBoundingClientRect() : null;
+}
 
 function showTourStep(i) {
+    if (tourAt >= 0 && TOUR[tourAt].leave) TOUR[tourAt].leave();
     tourAt = i;
-    const step = TOUR[i], target = step.el && document.querySelector(step.el);
+    const step = TOUR[i];
+    if (step.enter) step.enter();
     tourPop.innerHTML = `<h4>${step.title}</h4><div class="tour-text">${step.text}</div><div class="tour-nav">
         <span class="tour-step">${i + 1} / ${TOUR.length}</span>
         <button type="button" class="secondary" data-tour="end">End</button>
@@ -899,31 +934,48 @@ function showTourStep(i) {
         <button type="button" data-tour="next">${i === TOUR.length - 1 ? 'Done' : 'Next'}</button></div>`;
     tourPop.hidden = false;
     const pw = tourPop.offsetWidth, ph = tourPop.offsetHeight, vw = innerWidth, vh = innerHeight;
-    if (!target) {
+    const r = tourRect(step);
+    if (!r) {
         tourSpot.hidden = true;
         Object.assign(tourPop.style, { left: `${(vw - pw) / 2}px`, top: `${Math.max(16, (vh - ph) / 2)}px` });
     } else {
-        const r = target.getBoundingClientRect(), pad = 4;
+        const pad = step.nodes ? 8 : 4;
         tourSpot.hidden = false;
         Object.assign(tourSpot.style, { left: `${r.left - pad}px`, top: `${r.top - pad}px`,
                                         width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
-        // below the target if there is room, else above, else inside it (the big graph area)
-        let top = r.bottom + 10;
-        if (top + ph > vh - 8) top = r.top - ph - 10 >= 8 ? r.top - ph - 10 : Math.max(8, r.top + 16);
-        const left = Math.min(Math.max(8, r.left), vw - pw - 8);
+        // below the target if there is room, else above, else beside it, else inside it (the big graph area)
+        let top = r.bottom + pad + 10, left = Math.min(Math.max(8, r.left), vw - pw - 8);
+        if (top + ph > vh - 8) {
+            if (r.top - pad - ph - 10 >= 8) top = r.top - pad - ph - 10;
+            else if (r.right + pad + 10 + pw <= vw - 8) { top = Math.max(8, Math.min(r.top, vh - ph - 8)); left = r.right + pad + 10; }
+            else if (r.left - pad - 10 - pw >= 8) { top = Math.max(8, Math.min(r.top, vh - ph - 8)); left = r.left - pad - 10 - pw; }
+            else top = Math.max(8, r.top + 16);
+        }
         Object.assign(tourPop.style, { left: `${left}px`, top: `${top}px` });
     }
     tourPop.querySelector('[data-tour="next"]').focus();
 }
-function startTour() {
+async function startTour() {
     const help = document.getElementById('help-dialog');
     if (help.open) help.close();
-    closeMenus();
+    closeMenus(); hideMenu(); setAddMode(null); closeSearch(); clearPicks();
+    if (!tourDemo) {
+        try {
+            const example = await api('GET', '/api/manual-fta/example-graph');
+            await loadGraph({ data: example, keepViewport: false });
+            cy.fit(undefined, 50);
+            if (cy.zoom() > 1.1) { cy.zoom(1.1); cy.center(); }
+            tourDemo = true;
+        } catch (e) { /* the tour still explains, without the example */ }
+    }
+    tourBlock.hidden = false;
     showTourStep(0);
 }
-function endTour() {
-    tourAt = -1; tourSpot.hidden = true; tourPop.hidden = true;
+async function endTour() {
+    if (tourAt >= 0 && TOUR[tourAt].leave) TOUR[tourAt].leave();
+    tourAt = -1; tourSpot.hidden = true; tourPop.hidden = true; tourBlock.hidden = true;
     try { localStorage.setItem('faultTreeTourSeen', '1'); } catch (e) { /* private window */ }
+    if (tourDemo) { tourDemo = false; await loadGraph({ keepViewport: false }); }   // your own trees again
 }
 tourPop.addEventListener('click', e => {
     const b = e.target.closest('[data-tour]');
@@ -937,6 +989,7 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape') endTour();
     else if (e.key === 'ArrowRight' || e.key === 'Enter') { if (tourAt < TOUR.length - 1) showTourStep(tourAt + 1); else endTour(); }
     else if (e.key === 'ArrowLeft') { if (tourAt > 0) showTourStep(tourAt - 1); }
+    else if (e.key !== 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); return; }   // no editing meanwhile
     else return;
     e.preventDefault(); e.stopImmediatePropagation();
 }, true);

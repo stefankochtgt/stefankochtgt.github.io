@@ -402,6 +402,18 @@
         save(data);
     }
 
+    // the guided tour's example tree (SFM-182) -- manual_fta.example_tops(); only drawn, never saved
+    function exampleTops() {
+        const fuse = () => ev({ id: 'EV-3', title: 'Shared fuse blown', description: 'One fuse supplies both headlamps.',
+                                kind: 'basic', criticality: 'ASIL B', color: 'red' });
+        return [ev({ id: 'TP-1', title: 'Both headlamps dark at night', description: 'The driver cannot see the road ahead.',
+            label: 'Hazard', gate: 'and', criticality: 'ASIL B', analysis: 'tour', causes: [
+                ev({ id: 'GT-1', title: 'Left headlamp dark', causes: [ev({ id: 'EV-1', title: 'Left bulb burnt out', kind: 'basic' }), fuse()] }),
+                ev({ id: 'GT-2', title: 'Right headlamp dark', causes: [
+                    ev({ id: 'EV-2', title: 'Right bulb burnt out', kind: 'basic', criticality: 'QM', color: 'yellow' }), fuse()] }),
+            ] })];
+    }
+
     // ---- the routes the page calls ----------------------------------------------------------------
     async function route(method, url, body) {
         const u = new URL(url, API_BASE), p = u.pathname, q = u.searchParams;
@@ -421,6 +433,7 @@
             if (method === 'DELETE') return { deleted: ops.deleteAnalysis(data, id) };
         }
         if (p === '/api/manual-fta/graph') return buildGraph(data, q.get('analysis') || '');
+        if (p === '/api/manual-fta/example-graph') return buildGraph({ tops: exampleTops() }, '');
         if (p === '/api/manual-fta/trees') return ops.newTree(data, body || {});
         if (p === '/api/manual-fta/events/bulk') return { updated: ops.updateEvents(data, body || {}) };
         if (p === '/api/manual-fta/events/bulk-delete') return { deleted: ops.deleteEvents(data, body || {}) };
