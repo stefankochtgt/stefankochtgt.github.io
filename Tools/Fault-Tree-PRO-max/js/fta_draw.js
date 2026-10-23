@@ -23,15 +23,17 @@ const TAG_SIZE = 14, TAG_W = 22, TAG_GAP = 2, TAG_X = BOX_W + TAG_GAP;
 const EVENT_TAG_Y = BOX_H / 2 - TAG_SIZE / 2;
 const NODE_W = BOX_W + 2 * (TAG_GAP + TAG_W);
 
+const TRI_TIP = LABEL_TOP - 7;        // tip of the triangle symbols, 7 units above the ID label
 const GATE_PATHS = {
     or: `M20 0 A${OR_TOP_R} ${OR_TOP_R} 0 0 0 0 ${OR_SIDE_Y} V${SYM_H} `
       + `A${OR_BOTTOM_R} ${OR_BOTTOM_R} 0 0 1 ${SYM_W} ${SYM_H} V${OR_SIDE_Y} `
       + `A${OR_TOP_R} ${OR_TOP_R} 0 0 0 20 0 Z`,
     and: `M0 ${SYM_H} V20 A20 20 0 0 1 ${SYM_W} 20 V${SYM_H} Z`,
     // Manual FTA: a gate with nothing below it yet -- a triangle whose tip sits behind the ID label
-    triangle: `M${SYM_W / 2} ${LABEL_TOP - SYM_TOP} L${SYM_W} ${SYM_H} H0 Z`,
+    // its tip shows above the ID label (user, 2026-10-23), the stub runs down to it
+    triangle: `M${SYM_W / 2} ${TRI_TIP - SYM_TOP} L${SYM_W} ${SYM_H} H0 Z`,
     // Manual FTA: the branch continues on another page (SFM-184) -- transfer triangle, page number in it
-    transfer: `M${SYM_W / 2} ${LABEL_TOP - SYM_TOP} L${SYM_W} ${SYM_H} H0 Z`,
+    transfer: `M${SYM_W / 2} ${TRI_TIP - SYM_TOP} L${SYM_W} ${SYM_H} H0 Z`,
 };
 const TRANSFER_TEXT_Y = (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 0.5;
 
@@ -132,7 +134,7 @@ function blockSvg(d) {
     const isGate = d.type === 'or_gate' || d.type === 'and_gate';
     let body = symbolSvg(d.symbol);
     if (!isGate) {
-        const stubEnd = d.symbol === 'none' || d.symbol === 'triangle' || d.symbol === 'transfer' ? LABEL_TOP : SYM_TOP;
+        const stubEnd = d.symbol === 'none' ? LABEL_TOP : d.symbol === 'triangle' || d.symbol === 'transfer' ? TRI_TIP : SYM_TOP;
         body = `<rect x="0" y="0" width="${BOX_W}" height="${BOX_H}"${d.shared ? ' stroke-dasharray="3 2"' : ''}/>`
              + `<line x1="${BOX_W / 2}" y1="${BOX_H}" x2="${BOX_W / 2}" y2="${stubEnd}"/>`
              + body

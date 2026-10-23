@@ -13,6 +13,7 @@
     const OR_TOP_R = 29.6, OR_SIDE_Y = 28.0;
     const OR_BOTTOM_R = 37.658, OR_BOTTOM_RISE = 5.75;
     const TAG_SIZE = 14.0, TAG_W = 22.0, TAG_GAP = 2.0;
+    const TRI_TIP = LABEL_TOP - 7;
     const SCALE = 0.0322, PT_PER_CM = 28.4528, VIEW_U = 1.5;
     const ADDED_FILL = 'yellow!35', FILL = 'blue!15', TITLE_CHARS = 64;
     const RAD_TO_DEG = 180 / Math.PI;
@@ -56,7 +57,7 @@
         if (sym === 'and') return [`\\path[${style}] ${pt(sx, sy + SYM_H)} -- ${pt(sx, sy + 20)}`
             + ` arc[start angle=180, end angle=0, radius=${cm(20)}]`
             + ` -- ${pt(sx + SYM_W, sy + SYM_H)} -- cycle;`];
-        if (sym === 'transfer') return [`\\path[${style}] ${pt(sx + SYM_W / 2, sy + LABEL_TOP - SYM_TOP)} -- ${pt(sx + SYM_W, sy + SYM_H)}`
+        if (sym === 'triangle' || sym === 'transfer') return [`\\path[${style}] ${pt(sx + SYM_W / 2, sy + TRI_TIP - SYM_TOP)} -- ${pt(sx + SYM_W, sy + SYM_H)}`
             + ` -- ${pt(sx, sy + SYM_H)} -- cycle;`];
         if (sym === 'or') return [`\\path[${style}] ${pt(sx, sy + SYM_H)} -- ${pt(sx, sy + OR_SIDE_Y)}`
             + ` arc[start angle=180, end angle=${fix(OR_TIP_ANGLE, 2)}, radius=${cm(OR_TOP_R)}]`
@@ -74,7 +75,7 @@
         let lines = symbol(data.symbol || '', left + SYM_X, top + SYM_TOP, fill);
         if (isGate) return lines;
         const dashed = data.shared ? ', dashed' : '';
-        const stubEnd = top + (data.symbol === 'none' || data.symbol === 'transfer' ? LABEL_TOP : SYM_TOP);
+        const stubEnd = top + (data.symbol === 'none' ? LABEL_TOP : data.symbol === 'triangle' || data.symbol === 'transfer' ? TRI_TIP : SYM_TOP);
         lines = [
             `\\path[draw, fill=${fill}${dashed}] ${pt(left, top)} rectangle ${pt(left + BOX_W, top + BOX_H)};`,
             `\\draw ${pt(cx, top + BOX_H)} -- ${pt(cx, stubEnd)};`,
