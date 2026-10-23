@@ -33,7 +33,7 @@ const GATE_PATHS = {
     // Manual FTA: the branch continues on another page (SFM-184) -- transfer triangle, page number in it
     transfer: `M${SYM_W / 2} ${LABEL_TOP - SYM_TOP} L${SYM_W} ${SYM_H} H0 Z`,
 };
-const TRANSFER_TEXT_Y = (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 1;
+const TRANSFER_TEXT_Y = (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 0.5;
 
 function escapeXml(s) {
     return String(s).replace(/[<>&"']/g, c => ({'<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -67,8 +67,8 @@ function blockSvg(d) {
              + ` font-family="Arial, Helvetica, sans-serif" font-size="7.5" fill="${d.text_color || '#000'}" stroke="none">${escapeXml(d.code)}</text>`
              + (d.symbol === 'transfer' && d.page_number
                 ? `<text x="${BOX_W / 2}" y="${TRANSFER_TEXT_Y}" dominant-baseline="central" text-anchor="middle"`
-                  + ` font-family="Arial, Helvetica, sans-serif" font-size="6.5" font-weight="bold" fill="${d.text_color || '#000'}"`
-                  + ` stroke="none">p. ${d.page_number}</text>` : '')
+                  + ` font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="bold" fill="${d.text_color || '#000'}"`
+                  + ` stroke="none">…</text>` : '')         // on screen "…": a click on it opens the page (user, 2026-10-23)
              + (d.type === 'manual_event' && !d.tag_box ? '' : tagSvg(TAG_X, EVENT_TAG_Y, d.tag));   // hand-added Semi-manual events: none
     }
     const left = (NODE_W - BOX_W) / 2;

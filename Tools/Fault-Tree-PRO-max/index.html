@@ -201,7 +201,7 @@
                 <tr><td>New gate / basic event icon, then click gates</td><td>adds one below each gate you click; <kbd>Esc</kbd> or the icon again ends</td></tr>
                 <tr><td>Click an event</td><td>selects it (red); a second click (or <kbd>F2</kbd>) renames its title in place &mdash; <kbd>Enter</kbd> or a click elsewhere saves, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Double-click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
-                <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with the page number stands for it &mdash; for big trees and PDFs</td></tr>
+                <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with &ldquo;&hellip;&rdquo; stands for it &mdash; <strong>click the triangle</strong> to jump to that page; for big trees and PDFs (printed with its page number)</td></tr>
                 <tr><td>Right-click an event</td><td>add below, edit, AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
                 <tr><th colspan="2">Moving and copying</th></tr>
                 <tr><td>Phone / tablet</td><td>tap = click, <strong>long-press</strong> = right-click; the event menu has <em>Select</em> and <em>Move / copy to…</em> (then tap the gate); pinch zooms</td></tr>
@@ -700,6 +700,13 @@ function showPages(pages) {
         p.number === 1 ? '1: the trees' : `${p.number}: ${p.code}${p.title ? ' ' + p.title : ''}`, p.id, false, p.id === pageId)));
     rememberAnalysis();
 }
+// Is `pos` (model coordinates) on the "…" triangle of a transfer node -- below its ID label box?
+function onTransfer(node, pos) {
+    if (node.data('symbol') !== 'transfer' || !pos) return false;
+    const c = node.position(), top = c.y - BLOCK_H * U / 2, left = c.x - BOX_W * U / 2;
+    return pos.y >= top + (LABEL_TOP + LABEL_H) * U - 2 && pos.y <= top + BLOCK_H * U + 2
+        && pos.x >= left + SYM_X * U - 2 && pos.x <= left + (SYM_X + SYM_W) * U + 2;
+}
 async function goToPage(id) {
     pageId = id;
     setAddMode(null); clearPicks(); unchoose();
@@ -956,6 +963,7 @@ async function loadGraph(options = {}) {
         if (oe.ctrlKey || oe.metaKey) { togglePick(evt.target); return; }      // Ctrl+click: pick several
         if (addMode) { placeOn(evt.target); return; }
         if (picked.size) { clearPicks(); return; }                             // a plain click first just unselects
+        if (onTransfer(evt.target, evt.position)) { goToPage(evt.target.data('code')); return; }   // "…": its page
         // SFM-185: the first click selects; a click on the selected event renames it -- unless it is the second
         // click of a double-click, which opens the edit dialog (dbltap below)
         if (chosen === evt.target.id()) {
@@ -972,6 +980,13 @@ async function loadGraph(options = {}) {
         editEvent(evt.target);
     });
     cy.on('pan zoom', positionRename);
+    // the "…" triangle of a branch continued on another page: a pointer hand and a tooltip over it
+    cy.on('mousemove', evt => {
+        const over = evt.target !== cy && evt.target.isNode && evt.target.isNode() && onTransfer(evt.target, evt.position);
+        const box = cy.container();
+        box.style.cursor = over ? 'pointer' : '';
+        box.title = over ? `Go to page ${evt.target.data('page_number')} (${evt.target.data('code')} continues there)` : '';
+    });
     cy.on('tap', evt => {                                                      // a plain click on the empty canvas
         const oe = evt.originalEvent || {};
         if (evt.target === cy) { endMoveTo(); unchoose(); }
@@ -1054,8 +1069,9 @@ const TOUR = [
         (same IDs: the same event, like the fuse) and <b>Copy with new IDs</b> (an independent copy).</p>
         <p>Without a Ctrl key: <b>Move / copy to&hellip;</b> in the event's menu, then tap the gate.</p>` },
     { nodes: tourNodes('GT-2'), title: 'Pages for big trees', text: `<p>Right-click a gate &gt; <b>Continue on a new page</b>
-        (a check box): its branch moves onto a page of its own with the gate on top, and here a <b>triangle with the page
-        number</b> stands for it. Choose pages in the <b>Page</b> list; the LaTeX / PDF export prints one page each.</p>` },
+        (a check box): its branch moves onto a page of its own with the gate on top, and here a <b>triangle with
+        &ldquo;&hellip;&rdquo;</b> stands for it &ndash; <b>click the triangle</b> to jump to that page. The <b>Page</b> list
+        switches pages too; the LaTeX / PDF export prints one page each (there the triangle shows the page number).</p>` },
     { el: '#add-top', title: 'New top event', text: `<p>Starts a new tree. You are asked whether it goes into this analysis
         or onto a new analysis page.</p>` },
     { el: '#add-gate', title: 'New gate', text: `<p>Click the icon, then click gates or top events: a new gate is added below
