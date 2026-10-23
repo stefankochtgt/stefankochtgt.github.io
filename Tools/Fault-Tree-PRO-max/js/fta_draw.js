@@ -35,6 +35,80 @@ const GATE_PATHS = {
 };
 const TRANSFER_TEXT_Y = (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 0.5;
 
+// ---- the title always fits its description box (SFM-186) -------------------------------------------
+// app/services/text_fit.py :: fit_title(), line for line (a browser test compares them): measured with the
+// Helvetica / Arial widths, wrapped at spaces (an over-long word broken), the font made smaller in steps
+// of 0.25 units until all lines fit; only at the smallest size the last line ends in "…".
+const TITLE_W = BOX_W - 6, TITLE_H = BOX_H - 4, TITLE_SIZE = 6.0, TITLE_MIN = 2.5, TITLE_STEP = 0.25, TITLE_LEAD = 1.18;
+const HELV_ASCII = [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+    556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+    1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+    667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+    333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+    556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584];
+const HELV = Object.assign(Object.fromEntries(HELV_ASCII.map((w, i) => [String.fromCharCode(32 + i), w])),
+    { '…': 1000, 'ß': 611, '–': 556, '—': 1000, '„': 333, '“': 333, '”': 333, '’': 222, '°': 400 });
+function charWidth(ch) {
+    let w = HELV[ch];
+    if (w === undefined) w = HELV[Array.from(ch.normalize('NFD'))[0]];
+    return w === undefined ? 556 : w;
+}
+const textWidth = t => Array.from(t).reduce((sum, ch) => sum + charWidth(ch), 0);
+const titleFits = (t, size) => textWidth(t) * size <= TITLE_W * 1000;
+function wrapTitle(words, size) {
+    const lines = [];
+    let current = '';
+    for (const word of words) {
+        const candidate = current ? `${current} ${word}` : word;
+        if (titleFits(candidate, size)) { current = candidate; continue; }
+        if (current) { lines.push(current); current = ''; }
+        if (titleFits(word, size)) { current = word; continue; }
+        // a word wider than the box: broken after a "/" (CG/Mass/Inertia), else where it has to be
+        let chunk = '';
+        for (const piece of word.split(/(?<=\/)/)) {
+            if (!piece) continue;
+            if (titleFits(chunk + piece, size)) { chunk += piece; continue; }
+            if (chunk && titleFits(piece, size)) { lines.push(chunk); chunk = piece; continue; }
+            for (const ch of Array.from(piece)) {
+                if (titleFits(chunk + ch, size) || !chunk) chunk += ch;
+                else { lines.push(chunk); chunk = ch; }
+            }
+        }
+        current = chunk;
+    }
+    if (current) lines.push(current);
+    return lines;
+}
+function fitTitle(text) {
+    const words = (text || '').split(/\s+/).filter(Boolean);
+    if (!words.length) return { lines: [], size: TITLE_SIZE };
+    let k = 0, size, lines;
+    while (true) {
+        size = TITLE_SIZE - TITLE_STEP * k;
+        lines = wrapTitle(words, size);
+        if (lines.length * TITLE_LEAD * size <= TITLE_H || size <= TITLE_MIN) break;
+        k += 1;
+    }
+    if (lines.length * TITLE_LEAD * size > TITLE_H) {
+        const keep = Math.max(1, Math.floor(TITLE_H / (TITLE_LEAD * size)));
+        lines = lines.slice(0, keep);
+        let last = Array.from(lines[lines.length - 1]);
+        while (last.length && !titleFits(last.join('') + '…', size)) last = last.slice(0, -1);
+        lines[lines.length - 1] = last.join('').trimEnd() + '…';
+    }
+    return { lines, size };
+}
+// the node data the views draw the title from: `fit_label` (lines) at `fit_size` px
+function fitLabel(d) {
+    const f = fitTitle(d.label || '');
+    d.fit_label = f.lines.join('\n');
+    d.fit_size = f.size * U;
+    return d;
+}
+// the cytoscape style of a fitted title (after the node style; nodes without fit_label keep theirs)
+const FIT_STYLE = { selector: 'node[fit_label]', style: {
+    'label': 'data(fit_label)', 'font-size': 'data(fit_size)', 'line-height': TITLE_LEAD, 'text-max-width': BOX_W * U } };
+
 function escapeXml(s) {
     return String(s).replace(/[<>&"']/g, c => ({'<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;'}[c]));
 }

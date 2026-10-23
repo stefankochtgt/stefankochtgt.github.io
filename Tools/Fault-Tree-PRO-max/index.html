@@ -896,7 +896,7 @@ async function loadGraph(options = {}) {
     if (!options.data) { pageId = data.page || ''; showPages(data.pages || []); }
     document.getElementById('manual-fta-empty').hidden = data.nodes.length > 0;
     if (cy) cy.destroy();
-    data.nodes.forEach(n => { n.data.svg = blockSvg(n.data); });
+    data.nodes.forEach(n => { n.data.svg = blockSvg(n.data); fitLabel(n.data); });
     // the tree edges are kept (hidden) next to the drawn connector segments, for "what is below"
     const treeEdges = data.edges.map(e => ({ data: { ...e.data, tree: true }, classes: 'tree-edge' }));
     // an event's label: text right of its description box (own invisible node, so it is not clipped)
@@ -918,6 +918,7 @@ async function loadGraph(options = {}) {
                 'text-valign': 'center', 'text-halign': 'center',
                 'text-margin-y': (BOX_H / 2 - BLOCK_H / 2) * U,
             }},
+            FIT_STYLE,                                  // the title always fits its box (SFM-186)
             { selector: 'node.junction', style: {
                 'width': 0.1, 'height': 0.1, 'background-image': 'none', 'label': '', 'events': 'no',
             }},

@@ -42,6 +42,13 @@
     const text = (ux, uy, content, size, width) =>
         `\\node[${width ? `text width=${cm(width)}, align=center, ` : ''}inner sep=0pt, font={${size}}] at ${pt(ux, uy)} {${content}};`;
     const breakable = t => esc(t).split('/').join('/\\allowbreak{}');
+    // fta_tikz._title(): the lines and size of fta_draw.js :: fitTitle() (= text_fit.fit_title()), SFM-186
+    function title(ux, uy, label) {
+        const { lines, size } = window.fitTitle(label);
+        const px = size * VIEW_U, p = px / VIEW_U * SCALE * PT_PER_CM;
+        const f = `\\fontfamily{phv}\\fontsize{${fix(p, 2)}}{${fix(p * 1.18, 2)}}\\selectfont`;
+        return text(ux, uy, lines.map(esc).join('\\\\'), f, BOX_W - 4);
+    }
 
     function symbol(sym, sx, sy, fill = FILL) {
         const style = `draw, fill=${fill}`;
@@ -74,7 +81,7 @@
         ].concat(lines, [
             `\\path[draw, fill=${fill}] ${pt(left + LABEL_X, top + LABEL_TOP)}`
             + ` rectangle ${pt(left + LABEL_X + LABEL_W, top + LABEL_TOP + LABEL_H)};`,
-            text(cx, top + BOX_H / 2, breakable(short(data.label || '', TITLE_CHARS)), TITLE_FONT, BOX_W - 6),
+            title(cx, top + BOX_H / 2, data.label || ''),
             text(cx, top + LABEL_TOP + LABEL_H / 2, esc(data.code || ''), CODE_FONT),
         ]);
         if (data.symbol === 'transfer' && data.page_number)
