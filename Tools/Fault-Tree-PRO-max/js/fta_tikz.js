@@ -28,7 +28,7 @@
         const size = px / VIEW_U * SCALE * PT_PER_CM;
         return `\\fontfamily{phv}\\fontsize{${fix(size, 2)}}{${fix(size * 1.18, 2)}}\\selectfont${bold ? '\\bfseries' : ''}`;
     };
-    const TITLE_FONT = font(9), CODE_FONT = font(7.5), TAG_FONT = font(7, true);
+    const TITLE_FONT = font(9), CODE_FONT = font(7.5), TAG_FONT = font(7, true), PAGE_FONT = font(6.5, true);
 
     const ESCAPES = { '\\': '\\textbackslash{}', '&': '\\&', '%': '\\%', '$': '\\$', '#': '\\#', '_': '\\_',
                       '{': '\\{', '}': '\\}', '~': '\\textasciitilde{}', '^': '\\textasciicircum{}' };
@@ -49,6 +49,8 @@
         if (sym === 'and') return [`\\path[${style}] ${pt(sx, sy + SYM_H)} -- ${pt(sx, sy + 20)}`
             + ` arc[start angle=180, end angle=0, radius=${cm(20)}]`
             + ` -- ${pt(sx + SYM_W, sy + SYM_H)} -- cycle;`];
+        if (sym === 'transfer') return [`\\path[${style}] ${pt(sx + SYM_W / 2, sy + LABEL_TOP - SYM_TOP)} -- ${pt(sx + SYM_W, sy + SYM_H)}`
+            + ` -- ${pt(sx, sy + SYM_H)} -- cycle;`];
         if (sym === 'or') return [`\\path[${style}] ${pt(sx, sy + SYM_H)} -- ${pt(sx, sy + OR_SIDE_Y)}`
             + ` arc[start angle=180, end angle=${fix(OR_TIP_ANGLE, 2)}, radius=${cm(OR_TOP_R)}]`
             + ` arc[start angle=${fix(180 - OR_TIP_ANGLE, 2)}, end angle=0, radius=${cm(OR_TOP_R)}]`
@@ -65,7 +67,7 @@
         let lines = symbol(data.symbol || '', left + SYM_X, top + SYM_TOP, fill);
         if (isGate) return lines;
         const dashed = data.shared ? ', dashed' : '';
-        const stubEnd = top + (data.symbol === 'none' ? LABEL_TOP : SYM_TOP);
+        const stubEnd = top + (data.symbol === 'none' || data.symbol === 'transfer' ? LABEL_TOP : SYM_TOP);
         lines = [
             `\\path[draw, fill=${fill}${dashed}] ${pt(left, top)} rectangle ${pt(left + BOX_W, top + BOX_H)};`,
             `\\draw ${pt(cx, top + BOX_H)} -- ${pt(cx, stubEnd)};`,
@@ -75,6 +77,8 @@
             text(cx, top + BOX_H / 2, breakable(short(data.label || '', TITLE_CHARS)), TITLE_FONT, BOX_W - 6),
             text(cx, top + LABEL_TOP + LABEL_H / 2, esc(data.code || ''), CODE_FONT),
         ]);
+        if (data.symbol === 'transfer' && data.page_number)
+            lines.push(text(cx, top + (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 1, `p.~${data.page_number}`, PAGE_FONT));
         const tag = data.tag || '';
         if (tag) {
             const tagX = left + BOX_W + TAG_GAP, tagY = top + BOX_H / 2 - TAG_SIZE / 2;
@@ -163,9 +167,10 @@
         return figure(body, 'line width=0.3pt, line cap=round, line join=round');
     }
 
-    // fta_export.export_tex_source() for the standalone: `ident` = {name, revision, changed, exported, tool}
-    function document_(graph, ident) {
-        const tops = graph.nodes.filter(n => n.data.depth === 0);
+    // fta_export.export_tex_source() for the standalone: `sheets` = [{number, graph}] (one per page, SFM-184),
+    // `ident` = {name, revision, changed, exported, tool}
+    function document_(sheets, ident) {
+        const tops = sheets.flatMap(s => s.graph.nodes.filter(n => n.data.depth === 0).map(n => ({ ...n, number: s.number, graph: s.graph })));
         const lines = [
             `% Fault trees -- ${ident.name}. Exported by ${ident.tool}, revision ${ident.revision}, ${ident.exported}.`,
             "% Compile with pdflatex. To use a tree in another document: copy the lines between its",
@@ -192,8 +197,9 @@
         if (!tops.length) lines.push('No fault tree is recorded.');
         for (const t of tops) {
             const code = t.data.code || t.data.id;
-            lines.push('\\clearpage', `\\subsection*{Top event ${esc(code)}: ${esc(t.data.label || '')}}`, `% ---- tree ${code} ----`);
-            const pic = picture(graph, t.data.id, esc(ident.revision));
+            const heading = t.number > 1 ? `Page ${t.number}: ` : 'Top event ';
+            lines.push('\\clearpage', `\\subsection*{${heading}${esc(code)}: ${esc(t.data.label || '')}}`, `% ---- tree ${code} ----`);
+            const pic = picture(t.graph, t.data.id, esc(ident.revision));
             lines.push(...(pic.length ? pic : ['This top event has no causes yet.']));
             lines.push(`% ---- end of tree ${code} ----`);
         }

@@ -53,7 +53,8 @@
 
     const ev = (o = {}) => ({ id: o.id, title: o.title || '', description: o.description || '', label: o.label || '',
         kind: KINDS.includes(o.kind) ? o.kind : 'intermediate', gate: GATES.includes(o.gate) ? o.gate : 'or',
-        causes: o.causes || [], criticality: o.criticality || '', color: o.color || '', analysis: o.analysis || '' });
+        causes: o.causes || [], criticality: o.criticality || '', color: o.color || '', analysis: o.analysis || '',
+        new_page: !!o.new_page });
     const clone = e => JSON.parse(JSON.stringify(e));
     function* walk(events) { for (const e of events) { yield e; yield* walk(e.causes); } }
     const clean = t => (t || '').trim();
@@ -102,10 +103,10 @@
         throw new NeedsScope(id, occ.length);
     }
     const parentPath = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
-    const signature = e => JSON.stringify([e.id, e.title, e.description, e.label, e.kind, e.gate, e.criticality, e.color,
+    const signature = e => JSON.stringify([e.id, e.title, e.description, e.label, e.kind, e.gate, e.criticality, e.color, !!e.new_page,
                                           e.causes.map(signature)]);
     function cloneNewIds(e, tops, counters, asTop) {
-        const n = ev({ ...e, id: newId(tops, counters, asTop ? 'top' : e.kind), causes: [], analysis: '' });
+        const n = ev({ ...e, id: newId(tops, counters, asTop ? 'top' : e.kind), causes: [], analysis: '', new_page: e.new_page && !asTop });
         const holder = [n];
         for (const c of e.causes) n.causes.push(cloneNewIds(c, tops.concat(holder), counters, false));
         return n;
@@ -180,6 +181,10 @@
             if (b.gate !== undefined && !GATES.includes(b.gate)) throw new FtaError(`Unknown gate '${b.gate}'.`);
             const crit = b.criticality !== undefined ? checkCrit(b.criticality) : null;
             const col = b.color !== undefined ? checkColor(b.color) : null;
+            if (b.new_page) {                                    // SFM-184
+                if (!tg[0][1]) throw new FtaError(`${id} is a top event -- it already starts a page.`);
+                if ((b.kind || first.kind) === 'basic') throw new FtaError(`${id} is a basic event -- only a gate's branch can continue on a new page.`);
+            }
             const kindId = b.kind !== undefined && b.kind !== first.kind && tg[0][1] ? newId(data.tops, data.counters, b.kind) : null;
             for (const [e] of tg) {
                 if (newIdV) e.id = newIdV;
@@ -190,6 +195,7 @@
                 if (b.gate !== undefined) e.gate = b.gate;
                 if (crit !== null) e.criticality = crit;
                 if (col !== null) e.color = col;
+                if (b.new_page !== undefined) e.new_page = !!b.new_page;
             }
             save(data); return first;
         },
@@ -284,19 +290,42 @@
 
     // ---- layout (manual_fta.build_graph) -------------------------------------------------------
     function symbol(e) { if (e.causes.length > 1) return e.gate; if (!e.causes.length) return e.kind === 'basic' ? 'basic' : 'triangle'; return 'none'; }
-    function width(e) { if (!e.causes.length) return LEAF_W; const w = e.causes.map(width); return Math.max(LEAF_W, w.reduce((a, b) => a + b, 0) + H_GAP * (w.length - 1)); }
-    function buildGraph(data, analysis) {
+    function width(e, root = true) {
+        if (!e.causes.length || (e.new_page && !root)) return LEAF_W;
+        const w = e.causes.map(c => width(c, false));
+        return Math.max(LEAF_W, w.reduce((a, b) => a + b, 0) + H_GAP * (w.length - 1));
+    }
+    // manual_fta.pages(): page 1 = the trees, then one page per event marked new_page (once per ID, tree order)
+    function pagesOf(tops) {
+        const result = [{ id: '', number: 1, code: '', title: '', at: '' }], seen = new Set();
+        (function visit(list, paths) {
+            list.forEach((e, k) => {
+                for (const c of e.causes) {
+                    const here = `${paths[k]}/${c.id}`;
+                    if (c.new_page && !seen.has(c.id)) { seen.add(c.id); result.push({ id: c.id, number: result.length + 1, code: c.id, title: c.title, at: here }); }
+                    visit([c], [here]);
+                }
+            });
+        })(tops, tops.map(t => t.id));
+        return result;
+    }
+    function buildGraph(data, analysis, page = '') {
         const counts = {};
         for (const e of walk(data.tops)) counts[e.id] = (counts[e.id] || 0) + 1;
         const tops = analysis ? data.tops.filter(t => t.analysis === analysis) : data.tops;
         const nodes = [], edges = [];
+        const pageList = pagesOf(tops), pageNo = Object.fromEntries(pageList.map(p => [p.id, p.number]));
+        const start = page ? pageList.find(p => p.id === page) : null;
         function place(e, x, row, topId, path) {
             const nodeId = path ? `${path}/${e.id}` : e.id;
+            const transfer = e.new_page && row > 0;
             nodes.push({ data: { id: nodeId, type: 'manual_event', symbol: symbol(e), label: e.title, shared: (counts[e.id] || 0) > 1,
                 occurrences: counts[e.id] || 0, code: e.id, depth: row, kind: e.kind, gate: e.gate, top: topId,
                 description: e.description, note: e.label, tag: e.criticality, tag_box: true, color: e.color,
-                fill: e.color ? COLORS[e.color] : '', tikz_fill: e.color ? TIKZ_COLORS[e.color] : '', causes: e.causes.length }, position: { x, y: row * ROW_PITCH } });
-            const w = e.causes.map(width);
+                fill: e.color ? COLORS[e.color] : '', tikz_fill: e.color ? TIKZ_COLORS[e.color] : '', causes: e.causes.length,
+                new_page: !!e.new_page, page_number: e.new_page ? (pageNo[e.id] || 0) : 0 }, position: { x, y: row * ROW_PITCH } });
+            if (transfer) { nodes[nodes.length - 1].data.symbol = 'transfer'; return; }
+            const w = e.causes.map(c => width(c, false));
             let cursor = x - (w.reduce((a, b) => a + b, 0) + H_GAP * (w.length - 1)) / 2;
             e.causes.forEach((c, i) => {
                 const child = `${nodeId}/${c.id}`;
@@ -304,6 +333,11 @@
                 place(c, cursor + w[i] / 2, row + 1, topId, nodeId);
                 cursor += w[i] + H_GAP;
             });
+        }
+        if (start) {                                       // a continuation page: the branch alone
+            const [e, , path] = resolve(tops, start.code, start.at);
+            place(e, width(e) / 2, 0, path.split('/')[0], path.slice(0, path.lastIndexOf('/')));
+            return { nodes, edges };
         }
         let cursor = 0;
         for (const t of tops) { const w = width(t); place(t, cursor + w / 2, 0, t.id, ''); cursor += w + H_GAP * 3; }
@@ -318,6 +352,7 @@
         if (e.label) a += ` label="${esc(e.label)}"`;
         if (e.criticality) a += ` criticality="${esc(e.criticality)}"`;
         if (e.color) a += ` color="${esc(e.color)}"`;
+        if (e.new_page) a += ` newPage="true"`;
         let s = `${pad}<event${a}>\n${pad}  <title>${esc(e.title)}</title>\n`;
         if (e.description) s += `${pad}  <description>${esc(e.description)}</description>\n`;
         for (const c of e.causes) s += eventXml(c, indent + 1);
@@ -339,6 +374,7 @@
             kind: el.getAttribute('kind'), gate: el.getAttribute('gate'),
             criticality: CRITICALITY_LEVELS.includes(el.getAttribute('criticality')) ? el.getAttribute('criticality') : '',
             color: (el.getAttribute('color') || '') in COLORS ? el.getAttribute('color') : '',
+            new_page: el.getAttribute('newPage') === 'true',
             causes: [...el.children].filter(c => c.tagName === 'event').map(parseEvent) });
     }
     function checkEvents(el, path, errors) {
@@ -432,7 +468,13 @@
             if (method === 'PUT') return ops.renameAnalysis(data, id, body.name);
             if (method === 'DELETE') return { deleted: ops.deleteAnalysis(data, id) };
         }
-        if (p === '/api/manual-fta/graph') return buildGraph(data, q.get('analysis') || '');
+        if (p === '/api/manual-fta/graph') {                // one page of the analysis + its pages (SFM-184)
+            const analysis = q.get('analysis') || '', tops = analysis ? data.tops.filter(t => t.analysis === analysis) : data.tops;
+            const pageList = pagesOf(tops);
+            let page = q.get('page') || '';
+            if (!pageList.some(x => x.id === page)) page = '';
+            return { ...buildGraph(data, analysis, page), pages: pageList, page };
+        }
         if (p === '/api/manual-fta/example-graph') return buildGraph({ tops: exampleTops() }, '');
         if (p === '/api/manual-fta/trees') return ops.newTree(data, body || {});
         if (p === '/api/manual-fta/events/bulk') return { updated: ops.updateEvents(data, body || {}) };
@@ -490,7 +532,10 @@
     }
     function exportTex(data, analysis) {
         const a = data.analyses.find(x => x.id === analysis);
-        return window.FtaTikz.document(buildGraph(data, analysis), {
+        const sheets = [];                                     // one picture per page (SFM-184)
+        for (const id of analysis ? [analysis] : data.analyses.map(x => x.id))
+            for (const p of pagesOf(data.tops.filter(t => t.analysis === id))) sheets.push({ number: p.number, graph: buildGraph(data, id, p.id) });
+        return window.FtaTikz.document(sheets, {
             name: a ? a.name : 'all analyses', revision: revisionId(data), changed: data.changed || '',
             exported: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), tool: TOOL });
     }

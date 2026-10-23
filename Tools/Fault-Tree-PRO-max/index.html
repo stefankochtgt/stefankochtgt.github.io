@@ -52,6 +52,14 @@
 .menubar .menu-list hr { margin: 4px 0; border: 0; border-top: 1px solid #e5e7eb; }
 .fta-toolbar { align-items: center; }
 .help-dialog { max-width: 760px; }
+.page-picker { display: flex; gap: 4px; align-items: center; }
+.page-picker[hidden] { display: none; }
+#page-select { max-width: 260px; }
+/* the selected event (SFM-185): red with a dashed frame, like a selected file; renamed in place */
+.rename-box { position: absolute; z-index: 25; box-sizing: border-box; resize: none; overflow: hidden; margin: 0;
+    padding: 2px; border: 1px solid #2563eb; outline: 2px solid #93c5fd; background: #fff; color: #000;
+    font-family: Arial, Helvetica, sans-serif; text-align: center; line-height: 1.15; }
+.context-menu-item .check { display: inline-block; width: 1.2em; }
 /* phones and narrow windows (SFM-183): everything wraps inside the screen, nothing makes the page wider */
 .fta-toolbar { flex-wrap: wrap; row-gap: 6px; }
 @media (max-width: 760px) {
@@ -145,6 +153,10 @@
             <label for="analysis-select" style="margin:0;">Analysis</label>
             <select id="analysis-select" style="min-width:180px;"></select>
         </div>
+        <div id="page-picker" class="page-picker" hidden title="Pages of this analysis: a branch marked &quot;Continue on a new page&quot; (right-click a gate) continues on a page of its own">
+            <label for="page-select" style="margin:0;">Page</label>
+            <select id="page-select"></select>
+        </div>
         <span class="icon-sep"></span>
         <div class="icon-bar">
             <!-- own icons in the style of a classic FTA tool's toolbar (SFM-174) -->
@@ -187,7 +199,9 @@
                 <tr><th colspan="2">Building</th></tr>
                 <tr><td>New top event icon</td><td>a new tree &mdash; asks: this analysis or a new analysis page</td></tr>
                 <tr><td>New gate / basic event icon, then click gates</td><td>adds one below each gate you click; <kbd>Esc</kbd> or the icon again ends</td></tr>
-                <tr><td>Click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
+                <tr><td>Click an event</td><td>selects it (red); a second click (or <kbd>F2</kbd>) renames its title in place &mdash; <kbd>Enter</kbd> or a click elsewhere saves, <kbd>Esc</kbd> cancels</td></tr>
+                <tr><td>Double-click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
+                <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with the page number stands for it &mdash; for big trees and PDFs</td></tr>
                 <tr><td>Right-click an event</td><td>add below, edit, AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
                 <tr><th colspan="2">Moving and copying</th></tr>
                 <tr><td>Phone / tablet</td><td>tap = click, <strong>long-press</strong> = right-click; the event menu has <em>Select</em> and <em>Move / copy to…</em> (then tap the gate); pinch zooms</td></tr>
@@ -496,7 +510,7 @@ function showMenu(renderedPos, headerText, items) {
     header.className = 'context-menu-header';
     header.textContent = headerText;
     menu.appendChild(header);
-    for (const { label, className, run, row, title } of items) {
+    for (const { label, className, run, row, title, check } of items) {
         if (row) {                                   // a compact row of small buttons: H categories, colours
             const line = document.createElement('div');
             line.className = 'context-menu-row';
@@ -519,7 +533,13 @@ function showMenu(renderedPos, headerText, items) {
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'context-menu-item' + (className ? ' ' + className : '');
-        item.textContent = label;
+        if (check !== undefined) {                    // a check box item (SFM-184)
+            const box = document.createElement('input');
+            box.type = 'checkbox'; box.checked = check; box.tabIndex = -1; box.className = 'check';
+            box.style.pointerEvents = 'none';
+            item.append(box, document.createTextNode(' ' + label));
+            item.setAttribute('role', 'menuitemcheckbox'); item.setAttribute('aria-checked', String(check));
+        } else item.textContent = label;
         item.addEventListener('click', () => { hideMenu(); run(); });
         menu.appendChild(item);
     }
@@ -551,6 +571,11 @@ function eventMenuItems(node) {
     items.push({ label: picked.has(node.id()) ? 'Unselect' : 'Select (for several)', run: () => togglePick(node) });
     if (d.id !== d.top || cy.nodes('[type = "manual_event"]').length > 1)
         items.push({ label: 'Move / copy to…', run: () => startMoveTo(node) });
+    // pages (SFM-184): the branch below a gate continues on a page of its own, the gate on top there
+    if (d.kind !== 'basic' && d.id !== d.top)
+        items.push({ label: 'Continue on a new page', check: !!d.new_page, run: () => put({ new_page: !d.new_page }) });
+    if (d.symbol === 'transfer' && d.page_number)
+        items.push({ label: `Open page ${d.page_number}`, run: () => goToPage(d.code) });
     if (d.causes >= 2) {
         const other = d.gate === 'and' ? 'or' : 'and';
         items.push({ label: `Change to ${other.toUpperCase()} gate`, run: () => put({ gate: other }) });
@@ -664,6 +689,80 @@ document.addEventListener('keydown', e => {
 // move follows the pointer itself (tapstart / tapdrag / tapend): cytoscape keeps Ctrl+drag for box
 // selection and would not move a grabbed node. While Ctrl is held the view does not pan.
 let drag = null, moveModeOn = false, held = false;
+
+// ---- pages (SFM-184): page 1 = the trees; a gate marked "Continue on a new page" ends there in a transfer
+// triangle with its page number, and its branch is a page of its own with that gate on top --------------
+let pageId = new URLSearchParams(location.search).get('page') || '';
+const pagePicker = document.getElementById('page-picker'), pageSelect = document.getElementById('page-select');
+function showPages(pages) {
+    pagePicker.hidden = pages.length < 2;
+    pageSelect.replaceChildren(...pages.map(p => new Option(
+        p.number === 1 ? '1: the trees' : `${p.number}: ${p.code}${p.title ? ' ' + p.title : ''}`, p.id, false, p.id === pageId)));
+    rememberAnalysis();
+}
+async function goToPage(id) {
+    pageId = id;
+    setAddMode(null); clearPicks(); unchoose();
+    await loadGraph({ keepViewport: false });
+}
+pageSelect.addEventListener('change', () => goToPage(pageSelect.value));
+
+// ---- selecting and renaming (SFM-185), like files in Windows: a click selects (red, dashed frame), a second
+// click on the selected event renames its title in place (Enter or a click elsewhere saves, Esc cancels;
+// F2 does the same), a double-click opens the full edit dialog ---------------------------------------
+const CHOSEN_FILL = '#FF0000';
+let chosen = null, renameTimer = null, renaming = null;
+function paintChosen() {
+    if (!cy) return;
+    cy.nodes('.chosen').forEach(n => { n.removeClass('chosen'); n.data('svg', blockSvg({ ...n.data() })); });
+    const node = chosen && cy.$id(chosen);
+    if (!node || !node.length) { chosen = null; return; }
+    node.addClass('chosen');
+    node.data('svg', blockSvg({ ...node.data(), fill: CHOSEN_FILL, text_color: '#fff' }));
+}
+function choose(node) { chosen = node.id(); paintChosen(); }
+function unchoose() { clearTimeout(renameTimer); if (chosen) { chosen = null; paintChosen(); } }
+function startRename(node) {
+    if (tourAt >= 0 || renaming || !node || !node.length) return;
+    hideMenu();
+    const box = document.createElement('textarea');
+    box.className = 'rename-box';
+    box.value = node.data('label') || '';
+    box.setAttribute('aria-label', `New title of ${node.data('code')}`);
+    document.getElementById('manual-fta-graph').parentElement.appendChild(box);
+    renaming = { node, box };
+    positionRename();
+    node.addClass('renaming');
+    box.focus(); box.select();
+    box.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); endRename(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); endRename(false); }
+    });
+    box.addEventListener('blur', () => endRename(true));
+}
+function positionRename() {
+    if (!renaming) return;
+    const { node, box } = renaming, z = cy.zoom(), p = node.renderedPosition();
+    Object.assign(box.style, { left: `${p.x - BOX_W * U * z / 2}px`, top: `${p.y - BLOCK_H * U * z / 2}px`,
+        width: `${BOX_W * U * z}px`, height: `${BOX_H * U * z}px`, fontSize: `${Math.max(9, 9 * z)}px` });
+}
+async function endRename(save) {
+    if (!renaming) return;
+    const { node, box } = renaming;
+    renaming = null;
+    const title = box.value.replace(/\s+/g, ' ').trim();
+    box.remove();
+    if (node.removed()) return;
+    node.removeClass('renaming');
+    if (!save || title === (node.data('label') || '')) return;
+    await run(() => withScope(scope => api('PUT', eventUrl(node), { title, at: node.id(), scope })));
+}
+document.addEventListener('keydown', e => {
+    if (dialog.open || renaming || tourAt >= 0) return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName)) return;
+    if (e.key === 'F2' && chosen && cy) { e.preventDefault(); startRename(cy.$id(chosen)); }
+    else if (e.key === 'Escape' && chosen && menu.hidden) unchoose();
+});
 // The graph area moves or changes size when a hint line wraps in (narrow screens) -- the graph then has to
 // measure itself again, or taps land beside the boxes (SFM-183).
 new ResizeObserver(() => { if (cy) cy.resize(); }).observe(document.getElementById('manual-fta-graph'));
@@ -785,7 +884,9 @@ async function loadGraph(options = {}) {
     const viewport = options.keepViewport && cy && cy.nodes().length
         ? { zoom: cy.zoom(), pan: { ...cy.pan() } } : null;
     // options.data: draw this graph instead of the analysis (the guided tour's example, SFM-182)
-    const data = options.data || await api('GET', '/api/manual-fta/graph?analysis=' + encodeURIComponent(analysisId));
+    const data = options.data || await api('GET', '/api/manual-fta/graph?analysis=' + encodeURIComponent(analysisId)
+                                                 + '&page=' + encodeURIComponent(pageId));
+    if (!options.data) { pageId = data.page || ''; showPages(data.pages || []); }
     document.getElementById('manual-fta-empty').hidden = data.nodes.length > 0;
     if (cy) cy.destroy();
     data.nodes.forEach(n => { n.data.svg = blockSvg(n.data); });
@@ -829,6 +930,8 @@ async function loadGraph(options = {}) {
             { selector: 'node.drop-ok', style: { 'overlay-color': '#16a34a', 'overlay-opacity': 0.25, 'overlay-padding': 4 } },
             { selector: 'node.drop-no', style: { 'overlay-color': '#dc2626', 'overlay-opacity': 0.25, 'overlay-padding': 4 } },
             // Ctrl+click selection
+            { selector: 'node.chosen', style: { 'color': '#fff', 'border-width': 1, 'border-style': 'dashed', 'border-color': '#000' } },
+            { selector: 'node.renaming', style: { 'label': '' } },
             { selector: 'node.picked', style: { 'overlay-color': '#2563eb', 'overlay-opacity': 0.22, 'overlay-padding': 5 } },
             // search (SFM-174): matches marked, the current one stronger, the rest faded
             { selector: 'node.search-dim', style: { 'opacity': 0.25 } },
@@ -853,11 +956,25 @@ async function loadGraph(options = {}) {
         if (oe.ctrlKey || oe.metaKey) { togglePick(evt.target); return; }      // Ctrl+click: pick several
         if (addMode) { placeOn(evt.target); return; }
         if (picked.size) { clearPicks(); return; }                             // a plain click first just unselects
+        // SFM-185: the first click selects; a click on the selected event renames it -- unless it is the second
+        // click of a double-click, which opens the edit dialog (dbltap below)
+        if (chosen === evt.target.id()) {
+            clearTimeout(renameTimer);
+            const node = evt.target;
+            renameTimer = setTimeout(() => startRename(node), 450);
+        } else choose(evt.target);
+    });
+    cy.on('dbltap', 'node[type = "manual_event"]', evt => {
+        const oe = evt.originalEvent || {};
+        if (addMode || moveSource || held || oe.ctrlKey || oe.metaKey) return;
+        clearTimeout(renameTimer);
+        choose(evt.target);
         editEvent(evt.target);
     });
+    cy.on('pan zoom', positionRename);
     cy.on('tap', evt => {                                                      // a plain click on the empty canvas
         const oe = evt.originalEvent || {};
-        if (evt.target === cy) endMoveTo();
+        if (evt.target === cy) { endMoveTo(); unchoose(); }
         if (evt.target === cy && !oe.ctrlKey && !oe.metaKey && picked.size) clearPicks();
     });
     // a long-press on a touch screen opens the same menu as a right-click (SFM-183)
@@ -881,6 +998,7 @@ async function loadGraph(options = {}) {
         }
     }
     showPicks();
+    paintChosen();
 }
 
 // ---- XML import (SFM-169): check and show first, then write ---------------------------------------
@@ -918,8 +1036,10 @@ const TOUR = [
     { nodes: tourNodes('EV-3'), title: 'Repeated event', text: `<p>The <b>same fuse</b> feeds both lamps, so EV-3 appears twice
         &ndash; with the same ID it is the same event, drawn with a <b>dashed</b> box.</p><p>When you change one, you are
         asked: change <b>all occurrences</b>, or <b>only this one</b> (it then gets a new ID and becomes independent).</p>` },
-    { nodes: tourNodes('EV-1'), title: 'Edit an event', text: `<p><b>Click</b> (tap) an event to edit its title, description, ID,
-        label and safety criticality. ${K('Enter')} saves, ${K('Shift')}+${K('Enter')} new line, ${K('Esc')} cancels.</p>` },
+    { nodes: tourNodes('EV-1'), enter: () => choose(tourNodes('EV-1')().first()), leave: unchoose, title: 'Select, rename, edit',
+        text: `<p>A <b>click</b> (tap) selects an event &ndash; red with a dashed frame. A <b>second click</b> on it (or ${K('F2')})
+        renames its title right in the box, like a file in Windows: ${K('Enter')} saves, ${K('Esc')} cancels.</p>
+        <p>A <b>double-click</b> opens everything: title, description, ID, label and safety criticality.</p>` },
     { el: '#manual-fta-menu', enter: () => tourMenu('GT-1'), leave: hideMenu, title: 'Right-click menu',
         text: `<p><b>Right-click</b> an event for this menu &ndash; on a phone or tablet: <b>long-press</b>. Add a gate / basic
         event below, edit, select, move / copy, AND / OR, make it a gate or a basic event, move it left / right, safety
@@ -933,6 +1053,9 @@ const TOUR = [
         (with everything below it) onto a gate &ndash; e.g. EV-1 onto GT-2. A menu offers <b>Move here</b>, <b>Copy</b>
         (same IDs: the same event, like the fuse) and <b>Copy with new IDs</b> (an independent copy).</p>
         <p>Without a Ctrl key: <b>Move / copy to&hellip;</b> in the event's menu, then tap the gate.</p>` },
+    { nodes: tourNodes('GT-2'), title: 'Pages for big trees', text: `<p>Right-click a gate &gt; <b>Continue on a new page</b>
+        (a check box): its branch moves onto a page of its own with the gate on top, and here a <b>triangle with the page
+        number</b> stands for it. Choose pages in the <b>Page</b> list; the LaTeX / PDF export prints one page each.</p>` },
     { el: '#add-top', title: 'New top event', text: `<p>Starts a new tree. You are asked whether it goes into this analysis
         or onto a new analysis page.</p>` },
     { el: '#add-gate', title: 'New gate', text: `<p>Click the icon, then click gates or top events: a new gate is added below
@@ -1131,6 +1254,7 @@ function rememberAnalysis() {
     try { localStorage.setItem(ANALYSIS_KEY, analysisId); } catch (e) { /* private window */ }
     const url = new URL(location.href);
     url.searchParams.set('analysis', analysisId);
+    if (pageId) url.searchParams.set('page', pageId); else url.searchParams.delete('page');
     url.searchParams.delete('flash'); url.searchParams.delete('flash_kind');
     history.replaceState(null, '', url);
     if (window.parent !== window) window.parent.postMessage({ type: 'tile-url', url: url.pathname + url.search }, location.origin);
@@ -1141,6 +1265,7 @@ function rememberAnalysis() {
 async function switchAnalysis(id, fit = true) {
     setAddMode(null);
     picked.clear();
+    if (id !== analysisId) pageId = '';                // another analysis starts on its page 1
     await loadAnalyses(id);
     await loadGraph({ keepViewport: !fit });
 }

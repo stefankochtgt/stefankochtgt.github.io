@@ -30,7 +30,10 @@ const GATE_PATHS = {
     and: `M0 ${SYM_H} V20 A20 20 0 0 1 ${SYM_W} 20 V${SYM_H} Z`,
     // Manual FTA: a gate with nothing below it yet -- a triangle whose tip sits behind the ID label
     triangle: `M${SYM_W / 2} ${LABEL_TOP - SYM_TOP} L${SYM_W} ${SYM_H} H0 Z`,
+    // Manual FTA: the branch continues on another page (SFM-184) -- transfer triangle, page number in it
+    transfer: `M${SYM_W / 2} ${LABEL_TOP - SYM_TOP} L${SYM_W} ${SYM_H} H0 Z`,
 };
+const TRANSFER_TEXT_Y = (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 1;
 
 function escapeXml(s) {
     return String(s).replace(/[<>&"']/g, c => ({'<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -55,13 +58,17 @@ function blockSvg(d) {
     const isGate = d.type === 'or_gate' || d.type === 'and_gate';
     let body = symbolSvg(d.symbol);
     if (!isGate) {
-        const stubEnd = d.symbol === 'none' || d.symbol === 'triangle' ? LABEL_TOP : SYM_TOP;
+        const stubEnd = d.symbol === 'none' || d.symbol === 'triangle' || d.symbol === 'transfer' ? LABEL_TOP : SYM_TOP;
         body = `<rect x="0" y="0" width="${BOX_W}" height="${BOX_H}"${d.shared ? ' stroke-dasharray="3 2"' : ''}/>`
              + `<line x1="${BOX_W / 2}" y1="${BOX_H}" x2="${BOX_W / 2}" y2="${stubEnd}"/>`
              + body
              + `<rect x="${LABEL_X}" y="${LABEL_TOP}" width="${LABEL_W}" height="${LABEL_H}"/>`
              + `<text x="${BOX_W / 2}" y="${LABEL_TOP + LABEL_H / 2}" dominant-baseline="central" text-anchor="middle"`
-             + ` font-family="Arial, Helvetica, sans-serif" font-size="7.5" fill="#000" stroke="none">${escapeXml(d.code)}</text>`
+             + ` font-family="Arial, Helvetica, sans-serif" font-size="7.5" fill="${d.text_color || '#000'}" stroke="none">${escapeXml(d.code)}</text>`
+             + (d.symbol === 'transfer' && d.page_number
+                ? `<text x="${BOX_W / 2}" y="${TRANSFER_TEXT_Y}" dominant-baseline="central" text-anchor="middle"`
+                  + ` font-family="Arial, Helvetica, sans-serif" font-size="6.5" font-weight="bold" fill="${d.text_color || '#000'}"`
+                  + ` stroke="none">p. ${d.page_number}</text>` : '')
              + (d.type === 'manual_event' && !d.tag_box ? '' : tagSvg(TAG_X, EVENT_TAG_Y, d.tag));   // hand-added Semi-manual events: none
     }
     const left = (NODE_W - BOX_W) / 2;
