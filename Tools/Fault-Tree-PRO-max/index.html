@@ -60,6 +60,7 @@
     padding: 2px; border: 1px solid #2563eb; outline: 2px solid #93c5fd; background: #fff; color: #000;
     font-family: Arial, Helvetica, sans-serif; text-align: center; line-height: 1.15; }
 .context-menu-item .check { display: inline-block; width: 1.2em; }
+.rename-box.rename-id { font-family: Arial, Helvetica, sans-serif; padding: 0 2px; }
 /* phones and narrow windows (SFM-183): everything wraps inside the screen, nothing makes the page wider */
 .fta-toolbar { flex-wrap: wrap; row-gap: 6px; }
 @media (max-width: 760px) {
@@ -199,7 +200,7 @@
                 <tr><th colspan="2">Building</th></tr>
                 <tr><td>New top event icon</td><td>a new tree &mdash; asks: this analysis or a new analysis page</td></tr>
                 <tr><td>New gate / basic event icon, then click gates</td><td>adds one below each gate you click; <kbd>Esc</kbd> or the icon again ends</td></tr>
-                <tr><td>Click an event</td><td>selects it (red); a second click (or <kbd>F2</kbd>) renames its title in place &mdash; <kbd>Enter</kbd> or a click elsewhere saves, <kbd>Esc</kbd> cancels</td></tr>
+                <tr><td>Click an event</td><td>selects it (red); a second click on the title (or <kbd>F2</kbd>) renames the title in place, a second click on the <strong>ID box</strong> renames the ID &mdash; <kbd>Enter</kbd> or a click elsewhere saves, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Double-click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with &ldquo;&hellip;&rdquo; stands for it &mdash; <strong>click the triangle</strong> to jump to that page; for big trees and PDFs (printed with its page number)</td></tr>
                 <tr><td>Right-click an event</td><td>add below, edit, AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
@@ -729,15 +730,24 @@ function paintChosen() {
 }
 function choose(node) { chosen = node.id(); paintChosen(); }
 function unchoose() { clearTimeout(renameTimer); if (chosen) { chosen = null; paintChosen(); } }
-function startRename(node) {
+// Is `pos` (model coordinates) on the ID label box of `node`? A second click there renames the ID (SFM-188).
+function onIdLabel(node, pos) {
+    if (!pos) return false;
+    const c = node.position(), top = c.y - BLOCK_H * U / 2, left = c.x - BOX_W * U / 2;
+    return pos.x >= left + LABEL_X * U && pos.x <= left + (LABEL_X + LABEL_W) * U
+        && pos.y >= top + LABEL_TOP * U && pos.y <= top + (LABEL_TOP + LABEL_H) * U;
+}
+// part: 'title' (in the description box) or 'id' (in the ID label box, SFM-188)
+function startRename(node, part = 'title') {
     if (tourAt >= 0 || renaming || !node || !node.length) return;
     hideMenu();
-    const box = document.createElement('textarea');
-    box.className = 'rename-box';
-    box.value = node.data('label') || '';
-    box.setAttribute('aria-label', `New title of ${node.data('code')}`);
+    const box = document.createElement(part === 'id' ? 'input' : 'textarea');
+    box.className = 'rename-box' + (part === 'id' ? ' rename-id' : '');
+    box.value = part === 'id' ? node.data('code') : node.data('label') || '';
+    box.spellcheck = part !== 'id';
+    box.setAttribute('aria-label', part === 'id' ? `New ID of ${node.data('code')}` : `New title of ${node.data('code')}`);
     document.getElementById('manual-fta-graph').parentElement.appendChild(box);
-    renaming = { node, box };
+    renaming = { node, box, part };
     positionRename();
     node.addClass('renaming');
     box.focus(); box.select();
@@ -749,20 +759,35 @@ function startRename(node) {
 }
 function positionRename() {
     if (!renaming) return;
-    const { node, box } = renaming, z = cy.zoom(), p = node.renderedPosition();
-    Object.assign(box.style, { left: `${p.x - BOX_W * U * z / 2}px`, top: `${p.y - BLOCK_H * U * z / 2}px`,
+    const { node, box, part } = renaming, z = cy.zoom(), p = node.renderedPosition();
+    const left = p.x - BOX_W * U * z / 2, top = p.y - BLOCK_H * U * z / 2;
+    if (part === 'id') Object.assign(box.style, { left: `${left + LABEL_X * U * z}px`, top: `${top + LABEL_TOP * U * z}px`,
+        width: `${LABEL_W * U * z}px`, height: `${LABEL_H * U * z}px`, fontSize: `${Math.max(9, 7.5 * z)}px` });
+    else Object.assign(box.style, { left: `${left}px`, top: `${top}px`,
         width: `${BOX_W * U * z}px`, height: `${BOX_H * U * z}px`, fontSize: `${Math.max(9, 9 * z)}px` });
 }
 async function endRename(save) {
     if (!renaming) return;
-    const { node, box } = renaming;
+    const { node, box, part } = renaming;
     renaming = null;
-    const title = box.value.replace(/\s+/g, ' ').trim();
+    const value = box.value.replace(/\s+/g, ' ').trim();
     box.remove();
     if (node.removed()) return;
     node.removeClass('renaming');
-    if (!save || title === (node.data('label') || '')) return;
-    await run(() => withScope(scope => api('PUT', eventUrl(node), { title, at: node.id(), scope })));
+    if (part === 'id') {                              // the ID (SFM-188): checked by the server -- unique, no spaces
+        const old = node.data('code');
+        if (!save || !value || value === old) return;
+        const path = node.id();
+        await run(async () => {
+            await withScope(scope => api('PUT', eventUrl(node), { id: value, at: path, scope }));
+            // keep it selected (its occurrence path ends in the new ID) and its page, if it starts one
+            chosen = path.slice(0, path.length - old.length) + value;
+            if (pageId === old) pageId = value;
+        });
+        return;
+    }
+    if (!save || value === (node.data('label') || '')) return;
+    await run(() => withScope(scope => api('PUT', eventUrl(node), { title: value, at: node.id(), scope })));
 }
 document.addEventListener('keydown', e => {
     if (dialog.open || renaming || tourAt >= 0) return;
@@ -969,8 +994,8 @@ async function loadGraph(options = {}) {
         // click of a double-click, which opens the edit dialog (dbltap below)
         if (chosen === evt.target.id()) {
             clearTimeout(renameTimer);
-            const node = evt.target;
-            renameTimer = setTimeout(() => startRename(node), 450);
+            const node = evt.target, part = onIdLabel(node, evt.position) ? 'id' : 'title';   // ID box: the ID
+            renameTimer = setTimeout(() => startRename(node, part), 450);
         } else choose(evt.target);
     });
     cy.on('dbltap', 'node[type = "manual_event"]', evt => {
@@ -1053,8 +1078,9 @@ const TOUR = [
         &ndash; with the same ID it is the same event, drawn with a <b>dashed</b> box.</p><p>When you change one, you are
         asked: change <b>all occurrences</b>, or <b>only this one</b> (it then gets a new ID and becomes independent).</p>` },
     { nodes: tourNodes('EV-1'), enter: () => choose(tourNodes('EV-1')().first()), leave: unchoose, title: 'Select, rename, edit',
-        text: `<p>A <b>click</b> (tap) selects an event &ndash; red with a dashed frame. A <b>second click</b> on it (or ${K('F2')})
-        renames its title right in the box, like a file in Windows: ${K('Enter')} saves, ${K('Esc')} cancels.</p>
+        text: `<p>A <b>click</b> (tap) selects an event &ndash; red with a dashed frame. A <b>second click</b> on its title (or ${K('F2')})
+        renames the title right in the box, like a file in Windows; a second click on the <b>ID box</b> (EV-1) renames the ID.
+        ${K('Enter')} saves, ${K('Esc')} cancels.</p>
         <p>A <b>double-click</b> opens everything: title, description, ID, label and safety criticality.</p>` },
     { el: '#manual-fta-menu', enter: () => tourMenu('GT-1'), leave: hideMenu, title: 'Right-click menu',
         text: `<p><b>Right-click</b> an event for this menu &ndash; on a phone or tablet: <b>long-press</b>. Add a gate / basic
