@@ -292,6 +292,32 @@
     function symbol(e) { if (e.causes.length > 1) return e.gate; if (!e.causes.length) return e.kind === 'basic' ? 'basic' : 'triangle'; return 'none'; }
     // compact display (SFM-200): the same blocks, neighbours 10 and rows 110 units apart (manual_fta.COMPACT_*)
     const COMPACT_H_GAP = 10 * UNIT, COMPACT_ROW_PITCH = 110 * UNIT;
+    // compact stage 2 (SFM-201): branches packed row by row -- manual_fta._contour(), the same arithmetic
+    const BAND_GAP = 6 * UNIT, EXIT_HALF = 17 * UNIT;
+    function contour(e, path, root, gap) {
+        const half = LEAF_W / 2;
+        if (!e.causes.length || (e.new_page && !root)) return [{ [path]: 0 }, [[-half, half]], []];
+        const kids = e.causes.map(c => contour(c, `${path}/${c.id}`, false, gap));
+        const offsets = [], rowsU = [], bandsU = [];
+        for (const [, rows, bands] of kids) {
+            let need = null;
+            rows.forEach(([left], d) => { if (d < rowsU.length) { const n = rowsU[d][1] + gap - left; need = need === null ? n : Math.max(need, n); } });
+            bands.forEach(([left], d) => { if (d < bandsU.length) { const n = bandsU[d][1] + BAND_GAP - left; need = need === null ? n : Math.max(need, n); } });
+            const o = need === null ? 0 : need;
+            offsets.push(o);
+            for (const [union, own] of [[rowsU, rows], [bandsU, bands]])
+                own.forEach(([left, right], d) => {
+                    if (d < union.length) union[d] = [Math.min(union[d][0], left + o), Math.max(union[d][1], right + o)];
+                    else union.push([left + o, right + o]);
+                });
+        }
+        const mid = (offsets[0] + offsets[offsets.length - 1]) / 2, pos = { [path]: 0 };
+        kids.forEach(([childPos], i) => { for (const [key, x] of Object.entries(childPos)) pos[key] = x + offsets[i] - mid; });
+        const exitHalf = kids.length > 1 ? EXIT_HALF : 0;
+        const band0 = [Math.min(offsets[0] - mid, -exitHalf), Math.max(offsets[offsets.length - 1] - mid, exitHalf)];
+        return [pos, [[-half, half]].concat(rowsU.map(([a, b]) => [a - mid, b - mid])),
+                [band0].concat(bandsU.map(([a, b]) => [a - mid, b - mid]))];
+    }
     function width(e, root = true, gap = H_GAP) {
         if (!e.causes.length || (e.new_page && !root)) return LEAF_W;
         const w = e.causes.map(c => width(c, false, gap));
@@ -556,8 +582,9 @@
         folderHandle = await loadFolderHandle() || null;
         updateFolderUi();
     });
-    function buildGraph(data, analysis, page = '', compact = false) {
-        const gap = compact ? COMPACT_H_GAP : H_GAP, pitch = compact ? COMPACT_ROW_PITCH : ROW_PITCH;
+    function buildGraph(data, analysis, page = '', compact = 0) {    // compact: 0, 1 (SFM-200), 2 stacked (SFM-201)
+        const stage = Number(compact) || 0, tight = {};
+        const gap = stage ? COMPACT_H_GAP : H_GAP, pitch = stage ? COMPACT_ROW_PITCH : ROW_PITCH;
         const counts = {};
         for (const e of walk(data.tops)) counts[e.id] = (counts[e.id] || 0) + 1;
         const tops = analysis ? data.tops.filter(t => t.analysis === analysis) : data.tops;
@@ -572,21 +599,26 @@
                 description: e.description, note: e.label, tag: e.criticality, tag_box: true, color: e.color,
                 fill: e.color ? COLORS[e.color] : '', tikz_fill: e.color ? TIKZ_COLORS[e.color] : '', causes: e.causes.length,
                 new_page: !!e.new_page, page_number: e.new_page ? (pageNo[e.id] || 0) : 0 }, position: { x, y: row * pitch } });
-            if (compact) nodes[nodes.length - 1].data.compact = true;
+            if (stage) { nodes[nodes.length - 1].data.compact = true; if (stage === 2) nodes[nodes.length - 1].data.stacked = true; }
             if (transfer) { nodes[nodes.length - 1].data.symbol = 'transfer'; return; }
             const w = e.causes.map(c => width(c, false, gap));
             let cursor = x - (w.reduce((a, b) => a + b, 0) + gap * (w.length - 1)) / 2;
             e.causes.forEach((c, i) => {
                 const child = `${nodeId}/${c.id}`;
                 edges.push({ data: { id: `mfta-${child}`, source: nodeId, target: child, input_index: i, input_count: e.causes.length } });
-                place(c, cursor + w[i] / 2, row + 1, topId, nodeId);
+                place(c, stage === 2 ? tight[child] : cursor + w[i] / 2, row + 1, topId, nodeId);
                 cursor += w[i] + gap;
             });
         }
         if (start) {                                       // a continuation page: the branch alone; or a tree on its own page
             const [e, , path] = resolve(tops, start.code, start.at);
             const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-            place(e, width(e, true, gap) / 2, 0, path.split('/')[0], parent);
+            if (stage === 2) {
+                const [pos, rows] = contour(e, parent ? `${parent}/${e.id}` : e.id, true, gap);
+                const base = -Math.min(...rows.map(r => r[0]));
+                for (const [key, x] of Object.entries(pos)) tight[key] = base + x;
+                place(e, base, 0, path.split('/')[0], parent);
+            } else place(e, width(e, true, gap) / 2, 0, path.split('/')[0], parent);
             if (parent) {                                  // continued from an earlier page: the side triangle, "…" (SFM-193)
                 const back = start.parent || '';
                 Object.assign(nodes[0].data, { page_start: true, from_page_id: back, from_page: pageNo[back] || 0 });
@@ -594,7 +626,25 @@
             return { nodes, edges };
         }
         let cursor = 0;
-        for (const t of tops.filter(x => !x.new_page)) { const w = width(t, true, gap); place(t, cursor + w / 2, 0, t.id, ''); cursor += w + gap * 3; }
+        const placedRows = [];
+        for (const t of tops.filter(x => !x.new_page)) {
+            if (stage === 2) {                             // trees side by side, also packed row by row
+                const [pos, rows] = contour(t, t.id, true, gap);
+                let base = -Math.min(...rows.map(r => r[0]));
+                if (placedRows.length) {
+                    base = -Infinity;
+                    for (let d = 0; d < Math.min(rows.length, placedRows.length); d++) base = Math.max(base, placedRows[d][1] + gap * 3 - rows[d][0]);
+                }
+                for (const [key, x] of Object.entries(pos)) tight[key] = base + x;
+                place(t, base, 0, t.id, '');
+                rows.forEach(([a, b], d) => {
+                    if (d < placedRows.length) placedRows[d] = [Math.min(placedRows[d][0], a + base), Math.max(placedRows[d][1], b + base)];
+                    else placedRows.push([a + base, b + base]);
+                });
+                continue;
+            }
+            const w = width(t, true, gap); place(t, cursor + w / 2, 0, t.id, ''); cursor += w + gap * 3;
+        }
         return { nodes, edges };
     }
 
@@ -885,7 +935,7 @@
             const pageList = pagesOf(tops);
             let page = q.get('page') || '';
             if (!pageList.some(x => x.id === page)) page = pageList.length ? pageList[0].id : '';   // SFM-192
-            return { ...buildGraph(data, analysis, page, ['1', 'true'].includes(q.get('compact'))), pages: pageList, page };
+            return { ...buildGraph(data, analysis, page, q.get('compact') === 'true' ? 1 : Number(q.get('compact')) || 0), pages: pageList, page };
         }
         if (p === '/api/manual-fta/example-graph') return buildGraph({ tops: exampleTops() }, '');
         if (p === '/api/manual-fta/trees') return ops.newTree(data, body || {});
@@ -942,7 +992,7 @@
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
-    function exportTex(data, analysis, compact = false) {
+    function exportTex(data, analysis, compact = 0) {
         const a = data.analyses.find(x => x.id === analysis);
         const sheets = [];                                     // one picture per page (SFM-184)
         for (const id of analysis ? [analysis] : data.analyses.map(x => x.id))
@@ -959,7 +1009,7 @@
         const data = load(), base = `fault_trees_${analysis || 'all'}_${revisionId(data)}`;
         if (link.id === 'export-xml') download(exportXml(data, analysis), 'application/xml', base + '.xml');
         else if (link.id === 'export-rwb') download(exportRwbXml(data, analysis), 'application/xml', base + '_rwb.xml');
-        else download(exportTex(data, analysis, params.get('compact') === '1'), 'application/x-tex', base + '.tex');   // SFM-200
+        else download(exportTex(data, analysis, Number(params.get('compact')) || 0), 'application/x-tex', base + '.tex');   // SFM-200/201
     }, true);
 
     window.FaultTreeProMax = { load, STORE, exportXml: a => exportXml(load(), a), exportRwbXml: a => exportRwbXml(load(), a), exportTex: a => exportTex(load(), a),

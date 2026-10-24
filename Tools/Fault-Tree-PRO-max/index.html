@@ -72,6 +72,9 @@ main.content.fill .fill-graph.with-explorer > .cy-graph { left: 248px; }
 .xp-tog.none { visibility: hidden; }
 .xp-ico { width: 17px; height: 15px; flex: none; }
 .icon-btn.active { background: #dbeafe; border-color: #93c5fd; }
+#toggle-compact { position: relative; }
+.stage-badge { position: absolute; right: 1px; bottom: 0; font-size: 9px; font-weight: 700; line-height: 1; color: #1e3a8a; }
+.stage-badge[hidden] { display: none; }
 /* Diagram / Grid (SFM-195) */
 .view-tabs { display: flex; gap: 2px; margin-right: 6px; }
 .view-tab { display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 13px; background: #f8fafc; color: #111;
@@ -254,7 +257,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
             <span class="icon-sep"></span>
             <!-- SFM-200: compact display -- the same blocks closer together, ASIL / H square and label in the box -->
             <button type="button" class="secondary icon-btn" id="toggle-compact" title="Compact display: the gates and events closer together, the ASIL / H square and the label inside the box" aria-label="Compact display" aria-pressed="false">
-                <svg viewBox="0 0 26 22"><use href="#ico-compact"/></svg></button>
+                <svg viewBox="0 0 26 22"><use href="#ico-compact"/></svg><span id="compact-stage" class="stage-badge" hidden>2</span></button>
             <button type="button" class="secondary icon-btn" id="fit-window" title="Fit to window" aria-label="Fit to window" onclick="cy && cy.fit(undefined, 30)">
                 <svg viewBox="0 0 26 22"><use href="#ico-fit"/></svg></button>
             <span class="icon-sep"></span>
@@ -288,7 +291,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <tr><td>Double-click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with &ldquo;&hellip;&rdquo; stands for it &mdash; <strong>click the triangle</strong> to jump to that page; for big trees and PDFs (printed with its page number)</td></tr>
                 <tr><td>Explorer (left) / Diagram &middot; Grid</td><td>the tree on the left lists the analyses and their fault tree pages (a continued page below the page it continues from) &mdash; click a page to open it, the boxes open / close a branch, the toolbar icon shows / hides it; <b>Grid</b>: all gates or all basic events as a table with every field &mdash; search all columns, filter each column, click a header to sort, double-click a row to show it in the diagram</td></tr>
-                <tr><td>Compact icon</td><td>compact display: the same gates and events, closer together; the ASIL / H square and the label are drawn inside the description box; also for the JPG, LaTeX and PDF export; click again for the normal display</td></tr>
+                <tr><td>Compact icon</td><td>first click: compact display &mdash; the same gates and events, closer together; the ASIL / H square and the label are drawn inside the description box; second click: <b>compact 2</b> (&ldquo;2&rdquo; on the icon) &mdash; branches may also go below each other where the rows allow (lines stay separate); third click: normal display; also for the JPG, LaTeX and PDF export</td></tr>
                 <tr><td>Save (Ctrl+S) / Version control</td><td>every change is kept at once; <b>Save</b> also creates a numbered revision with what changed and when (the button is marked while there are unsaved changes); the <b>Version control</b> tab lists the revisions with their changes &mdash; <b>Restore</b> makes one current again (unsaved changes are saved first)</td></tr>
                 <tr><td>Small triangle on the side / &#9650; &#9660;</td><td>on its own page the continued gate has a small triangle with &ldquo;&hellip;&rdquo; &mdash; click it to go back to the page it continues from; &#9650; next to the Page list: the page above, &#9660;: the page of the selected transfer triangle, else the first page continued from here</td></tr>
                 <tr><td>Right-click an event</td><td>add below, edit, AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
@@ -673,13 +676,16 @@ function showMenu(renderedPos, headerText, items) {
         item.addEventListener('click', () => { hideMenu(); run(); });
         menu.appendChild(item);
     }
-    menu.style.left = renderedPos.x + 'px';
-    menu.style.top = renderedPos.y + 'px';
+    // renderedPos is in the diagram's coordinates; the menu lives in the graph area, where the diagram starts after the
+    // explorer tree (SFM-194) -- so its offset is added (user, 2026-10-24: the menu / edit field opened left of the box)
+    const { x: ox, y: oy } = diagramOffset();
+    menu.style.left = renderedPos.x + ox + 'px';
+    menu.style.top = renderedPos.y + oy + 'px';
     menu.hidden = false;
     // kept inside the graph area: moved left / up when it would stick out (a phone, or near the edge)
     const area = menu.parentElement.getBoundingClientRect();
-    menu.style.left = Math.max(0, Math.min(renderedPos.x, area.width - menu.offsetWidth - 4)) + 'px';
-    menu.style.top = Math.max(0, Math.min(renderedPos.y, area.height - menu.offsetHeight - 4)) + 'px';
+    menu.style.left = Math.max(0, Math.min(renderedPos.x + ox, area.width - menu.offsetWidth - 4)) + 'px';
+    menu.style.top = Math.max(0, Math.min(renderedPos.y + oy, area.height - menu.offsetHeight - 4)) + 'px';
 }
 
 async function run(action) {
@@ -847,16 +853,23 @@ function onTransfer(node, pos) {
 // ---- compact display (SFM-200): the same blocks closer together, the ASIL / H square and the label in the box;
 // remembered per browser, also for the JPG / LaTeX / PDF export
 const COMPACT_KEY = 'manualFtaCompact';
-let compactOn = false;
-try { compactOn = localStorage.getItem(COMPACT_KEY) === '1'; } catch (e) { /* private window */ }
+let compactOn = 0;                                 // 0 normal, 1 compact, 2 compact with stacked branches (SFM-201)
+try { compactOn = Number(localStorage.getItem(COMPACT_KEY)) || 0; } catch (e) { /* private window */ }
+if (![0, 1, 2].includes(compactOn)) compactOn = 0;
+const COMPACT_TITLES = [
+    'Compact display: click once -- the gates and events closer together, the ASIL / H square and the label inside the box',
+    'Compact (1 of 2) -- click for stage 2: branches may also go below each other where the rows allow',
+    'Compact 2: branches below each other where the rows allow -- click for the normal display'];
 function showCompactButton() {
     const b = document.getElementById('toggle-compact');
-    b.classList.toggle('active', compactOn); b.setAttribute('aria-pressed', String(compactOn));
+    b.classList.toggle('active', !!compactOn); b.setAttribute('aria-pressed', String(!!compactOn));
+    b.title = COMPACT_TITLES[compactOn];
+    document.getElementById('compact-stage').hidden = compactOn !== 2;
 }
 showCompactButton();
 document.getElementById('toggle-compact').addEventListener('click', async () => {
-    compactOn = !compactOn;
-    try { localStorage.setItem(COMPACT_KEY, compactOn ? '1' : '0'); } catch (e) { /* private window */ }
+    compactOn = (compactOn + 1) % 3;                 // off -> compact -> compact 2 -> off
+    try { localStorage.setItem(COMPACT_KEY, String(compactOn)); } catch (e) { /* private window */ }
     showCompactButton();
     rememberAnalysis();                              // the export links follow
     await loadGraph({ keepViewport: false });
@@ -1236,10 +1249,15 @@ function startRename(node, part = 'title') {
     });
     box.addEventListener('blur', () => endRename(true));
 }
+// where the diagram sits in the graph area: right of the explorer tree when it is shown (SFM-194)
+function diagramOffset() {
+    const g = document.getElementById('manual-fta-graph');
+    return { x: g.offsetLeft, y: g.offsetTop };
+}
 function positionRename() {
     if (!renaming) return;
-    const { node, box, part } = renaming, z = cy.zoom(), p = node.renderedPosition();
-    const left = p.x - BOX_W * U * z / 2, top = p.y - BLOCK_H * U * z / 2;
+    const { node, box, part } = renaming, z = cy.zoom(), p = node.renderedPosition(), o = diagramOffset();
+    const left = o.x + p.x - BOX_W * U * z / 2, top = o.y + p.y - BLOCK_H * U * z / 2;
     if (part === 'id') Object.assign(box.style, { left: `${left + LABEL_X * U * z}px`, top: `${top + LABEL_TOP * U * z}px`,
         width: `${LABEL_W * U * z}px`, height: `${LABEL_H * U * z}px`, fontSize: `${Math.max(9, 7.5 * z)}px` });
     else Object.assign(box.style, { left: `${left}px`, top: `${top}px`,
@@ -1395,7 +1413,7 @@ async function loadGraph(options = {}) {
         ? { zoom: cy.zoom(), pan: { ...cy.pan() } } : null;
     // options.data: draw this graph instead of the analysis (the guided tour's example, SFM-182)
     const data = options.data || await api('GET', '/api/manual-fta/graph?analysis=' + encodeURIComponent(analysisId)
-                                                 + '&page=' + encodeURIComponent(pageId) + (compactOn ? '&compact=1' : ''));
+                                                 + '&page=' + encodeURIComponent(pageId) + (compactOn ? '&compact=' + compactOn : ''));
     if (options.data && compactOn) options.data.nodes.forEach(n => { n.data.compact = true; });   // the tour's example too
     if (!options.data) { pageId = data.page || ''; showPages(data.pages || []); }
     document.getElementById('manual-fta-empty').hidden = data.nodes.length > 0;
@@ -1788,7 +1806,7 @@ function rememberAnalysis() {
     for (const kind of ['xml', 'tex', 'pdf'])
         document.getElementById('export-' + kind).href = `/fta-export/manual.${kind}?analysis=` + encodeURIComponent(analysisId);
     document.getElementById('export-rwb').href = '/fta-export/rwb/manual.xml?analysis=' + encodeURIComponent(analysisId);
-    for (const kind of ['tex', 'pdf']) if (compactOn) document.getElementById('export-' + kind).href += '&compact=1';   // SFM-200
+    for (const kind of ['tex', 'pdf']) if (compactOn) document.getElementById('export-' + kind).href += '&compact=' + compactOn;   // SFM-200/201
 }
 
 async function switchAnalysis(id, fit = true) {
