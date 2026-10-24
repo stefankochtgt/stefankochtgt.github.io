@@ -14,6 +14,8 @@
     const OR_BOTTOM_R = 37.658, OR_BOTTOM_RISE = 5.75;
     const TAG_SIZE = 14.0, TAG_W = 22.0, TAG_GAP = 2.0;
     const TRI_TIP = LABEL_TOP - 7;
+    // compact display (SFM-200), as fta_tikz.py; cTagWidth / cNoteText / TITLE_H / C_* come from fta_draw.js
+    const COMPACT_BUS_SPAN = 8.0;
     const SIDE_Y = SYM_TOP - 2, SIDE_DX = 28.0, SIDE_TRI_H = 12.0, SIDE_TRI_HALF = 7.0;   // transfer-in triangle
     const SCALE = 0.0322, PT_PER_CM = 28.4528, VIEW_U = 1.5;
     const ADDED_FILL = 'yellow!35', FILL = 'blue!15', TITLE_CHARS = 64;
@@ -32,6 +34,7 @@
     };
     const TITLE_FONT = font(9), CODE_FONT = font(7.5), TAG_FONT = font(7, true), PAGE_FONT = font(6.5, true);
     const SIDE_FONT = font(5.5, true);                // page number in the small side triangle (SFM-193)
+    const C_FONT = font(5.6 * VIEW_U, true);         // the square / label in the box, compact (SFM-200)
 
     const ESCAPES = { '\\': '\\textbackslash{}', '&': '\\&', '%': '\\%', '$': '\\$', '#': '\\#', '_': '\\_',
                       '{': '\\{', '}': '\\}', '~': '\\textasciitilde{}', '^': '\\textasciicircum{}' };
@@ -46,8 +49,8 @@
         `\\node[${width ? `text width=${cm(width)}, align=center, ` : ''}inner sep=0pt, font={${size}}] at ${pt(ux, uy)} {${content}};`;
     const breakable = t => esc(t).split('/').join('/\\allowbreak{}');
     // fta_tikz._title(): the lines and size of fta_draw.js :: fitTitle() (= text_fit.fit_title()), SFM-186
-    function title(ux, uy, label) {
-        const { lines, size } = window.fitTitle(label);
+    function title(ux, uy, label, maxH) {
+        const { lines, size } = window.fitTitle(label, maxH);
         const px = size * VIEW_U, p = px / VIEW_U * SCALE * PT_PER_CM;
         const f = `\\fontfamily{phv}\\fontsize{${fix(p, 2)}}{${fix(p * 1.18, 2)}}\\selectfont`;
         return text(ux, uy, lines.map(esc).join('\\\\'), f, BOX_W - 4);
@@ -77,6 +80,7 @@
         let lines = symbol(data.symbol || '', left + SYM_X, top + SYM_TOP, fill);
         if (isGate) return lines;
         const dashed = data.shared ? ', dashed' : '';
+        const corner = !!data.compact && !!(data.tag || data.note);
         const stubEnd = top + (data.symbol === 'none' ? LABEL_TOP : data.symbol === 'triangle' || data.symbol === 'transfer' ? TRI_TIP : SYM_TOP);
         const side = [];
         if (data.page_start) {                                       // continued from an earlier page
@@ -92,13 +96,26 @@
         ].concat(side, lines, [
             `\\path[draw, fill=${fill}] ${pt(left + LABEL_X, top + LABEL_TOP)}`
             + ` rectangle ${pt(left + LABEL_X + LABEL_W, top + LABEL_TOP + LABEL_H)};`,
-            title(cx, top + BOX_H / 2, data.label || ''),
+            title(cx, top + BOX_H / 2 + (corner ? C_TITLE_DROP / 2 : 0), data.label || '', corner ? TITLE_H - C_TITLE_DROP : TITLE_H),
             text(cx, top + LABEL_TOP + LABEL_H / 2, esc(data.code || ''), CODE_FONT),
         ]);
         if (data.symbol === 'transfer' && data.page_number)
             lines.push(text(cx, top + (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 1, `p.~${data.page_number}`, PAGE_FONT));
         const tag = data.tag || '';
-        if (tag) {
+        if (data.compact) {                  // SFM-200: the square (top right) and the label (top left) in the box
+            let tagW = 0;
+            if (tag) {
+                tagW = cTagWidth(tag);
+                const tx = left + BOX_W - C_INSET - tagW, ty = top + C_INSET;
+                lines.push(`\\path[draw, fill=white, line width=0.2pt] ${pt(tx, ty)} rectangle ${pt(tx + tagW, ty + C_TAG_H)};`,
+                           text(tx + tagW / 2, ty + C_TAG_H / 2, esc(tag), C_FONT));
+            }
+            if (data.note) {
+                const room = BOX_W - 2 * C_INSET - 1 - (tagW ? tagW + 2 : 0);
+                lines.push(`\\node[anchor=west, inner sep=0pt, font={${C_FONT}}] at ${pt(left + C_INSET + 1, top + C_INSET + C_TAG_H / 2)}`
+                           + ` {${esc(cNoteText(data.note, room))}};`);
+            }
+        } else if (tag) {
             const tagX = left + BOX_W + TAG_GAP, tagY = top + BOX_H / 2 - TAG_SIZE / 2;
             lines.push(`\\path[draw, fill=white] ${pt(tagX, tagY)} rectangle ${pt(tagX + TAG_W, tagY + TAG_SIZE)};`,
                 text(tagX + TAG_W / 2, tagY + TAG_SIZE / 2,
@@ -129,7 +146,8 @@
             const lefts = items.filter(i => i[2] < i[1] - 0.01).sort((a, b) => a[2] - b[2]);
             const rights = items.filter(i => i[2] > i[1] + 0.01).sort((a, b) => b[2] - a[2]);
             const ranks = Math.max(lefts.length, rights.length);
-            const step = ranks > 1 ? Math.min(BUS_STEP, BUS_SPAN / (ranks - 1)) : 0.0;
+            const span = upper.data.compact ? COMPACT_BUS_SPAN : BUS_SPAN;
+            const step = ranks > 1 ? Math.min(BUS_STEP, span / (ranks - 1)) : 0.0;
             for (const [id] of items) level[id] = BUS_FIRST;
             for (const side of [lefts, rights]) side.forEach(([id], k) => { level[id] = BUS_FIRST + k * step; });
         }

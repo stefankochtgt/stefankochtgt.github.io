@@ -87,18 +87,18 @@ function wrapTitle(words, size) {
     if (current) lines.push(current);
     return lines;
 }
-function fitTitle(text) {
+function fitTitle(text, maxH = TITLE_H) {      // maxH: compact display, a lower title area (SFM-200)
     const words = (text || '').split(/\s+/).filter(Boolean);
     if (!words.length) return { lines: [], size: TITLE_SIZE };
     let k = 0, size, lines;
     while (true) {
         size = TITLE_SIZE - TITLE_STEP * k;
         lines = wrapTitle(words, size);
-        if (lines.length * TITLE_LEAD * size <= TITLE_H || size <= TITLE_MIN) break;
+        if (lines.length * TITLE_LEAD * size <= maxH || size <= TITLE_MIN) break;
         k += 1;
     }
-    if (lines.length * TITLE_LEAD * size > TITLE_H) {
-        const keep = Math.max(1, Math.floor(TITLE_H / (TITLE_LEAD * size)));
+    if (lines.length * TITLE_LEAD * size > maxH) {
+        const keep = Math.max(1, Math.floor(maxH / (TITLE_LEAD * size)));
         lines = lines.slice(0, keep);
         let last = Array.from(lines[lines.length - 1]);
         while (last.length && !titleFits(last.join('') + '…', size)) last = last.slice(0, -1);
@@ -106,16 +106,47 @@ function fitTitle(text) {
     }
     return { lines, size };
 }
-// the node data the views draw the title from: `fit_label` (lines) at `fit_size` px
+// ---- compact display (SFM-200): the same blocks, closer together; the ASIL / H square (top right) and the label (top
+// left) inside the description box, the title below them. fta_tikz.py / standalone/fta_tikz.js draw the same.
+const C_TAG_H = 9, C_TAG_FONT = 5.6, C_INSET = 1.5, C_TITLE_DROP = 11;
+const compactCorner = d => !!d.compact && !!(d.tag || d.note);
+const cTagWidth = tag => Math.max(C_TAG_H, textWidth(tag) * C_TAG_FONT / 1000 + 3);
+function cNoteText(note, room) {                       // the label, shortened with "…" to the room left of the square
+    let t = Array.from(note);
+    if (textWidth(note) * C_TAG_FONT / 1000 <= room) return note;
+    while (t.length && textWidth(t.join('') + '…') * C_TAG_FONT / 1000 > room) t = t.slice(0, -1);
+    return t.join('').trimEnd() + '…';
+}
+function compactCornerSvg(d) {
+    let s = '', tagW = 0;
+    if (d.tag) {
+        tagW = cTagWidth(d.tag);
+        s += `<rect x="${BOX_W - C_INSET - tagW}" y="${C_INSET}" width="${tagW}" height="${C_TAG_H}" fill="#fff" stroke-width="0.45"/>`
+           + `<text x="${BOX_W - C_INSET - tagW / 2}" y="${C_INSET + C_TAG_H / 2}" dominant-baseline="central" text-anchor="middle"`
+           + ` font-family="Arial, Helvetica, sans-serif" font-size="${C_TAG_FONT}" font-weight="bold" fill="#000" stroke="none">${escapeXml(d.tag)}</text>`;
+    }
+    if (d.note) {
+        const room = BOX_W - 2 * C_INSET - 1 - (tagW ? tagW + 2 : 0);
+        s += `<text x="${C_INSET + 1}" y="${C_INSET + C_TAG_H / 2}" dominant-baseline="central" font-family="Arial, Helvetica, sans-serif"`
+           + ` font-size="${C_TAG_FONT}" font-weight="bold" fill="${d.text_color || '#000'}" stroke="none">${escapeXml(cNoteText(d.note, room))}</text>`;
+    }
+    return s;
+}
+// the node data the views draw the title from: `fit_label` (lines) at `fit_size` px; compact with a square / label in
+// the box: a lower title area, moved down (`fit_shift`, FIT_SHIFT_STYLE)
 function fitLabel(d) {
-    const f = fitTitle(d.label || '');
+    const corner = compactCorner(d);
+    const f = fitTitle(d.label || '', corner ? TITLE_H - C_TITLE_DROP : TITLE_H);
     d.fit_label = f.lines.join('\n');
     d.fit_size = f.size * U;
+    if (corner) d.fit_shift = 1; else delete d.fit_shift;
     return d;
 }
 // the cytoscape style of a fitted title (after the node style; nodes without fit_label keep theirs)
 const FIT_STYLE = { selector: 'node[fit_label]', style: {
     'label': 'data(fit_label)', 'font-size': 'data(fit_size)', 'line-height': TITLE_LEAD, 'text-max-width': BOX_W * U } };
+// compact display: the title below the square / label in the box (SFM-200)
+const FIT_SHIFT_STYLE = { selector: 'node[fit_shift]', style: { 'text-margin-y': (BOX_H / 2 - BLOCK_H / 2 + C_TITLE_DROP / 2) * U } };
 
 function escapeXml(s) {
     return String(s).replace(/[<>&"']/g, c => ({'<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -158,7 +189,8 @@ function blockSvg(d) {
                 ? `<text x="${BOX_W / 2}" y="${TRANSFER_TEXT_Y}" dominant-baseline="central" text-anchor="middle"`
                   + ` font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="bold" fill="${d.text_color || '#000'}"`
                   + ` stroke="none">…</text>` : '')         // on screen "…": a click on it opens the page (user, 2026-10-23)
-             + (d.type === 'manual_event' && !d.tag_box ? '' : tagSvg(TAG_X, EVENT_TAG_Y, d.tag));   // hand-added Semi-manual events: none
+             + (d.compact ? compactCornerSvg(d)                          // compact: square and label in the box (SFM-200)
+                : d.type === 'manual_event' && !d.tag_box ? '' : tagSvg(TAG_X, EVENT_TAG_Y, d.tag));   // hand-added Semi-manual events: none
     }
     const left = (NODE_W - BOX_W) / 2;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${NODE_W * U}" height="${BLOCK_H * U}" `
@@ -187,6 +219,7 @@ function inputPoint(symbol, index, count) {
 // side of the gate the outermost input turns closest to the gate, each further one a step lower;
 // an input straight below its exit point has no horizontal run. Keyed by edge id.
 const BUS_FIRST = BLOCK_H + 4, BUS_STEP = 4, BUS_SPAN = 22;
+const COMPACT_BUS_SPAN = 8;                 // compact rows (110 apart): the lines stay between 100 and 108 (SFM-200)
 function busLevels(nodes, edges) {
     const byId = Object.fromEntries(nodes.map(n => [n.data.id, n]));
     const groups = {};
@@ -204,7 +237,8 @@ function busLevels(nodes, edges) {
         const lefts = items.filter(i => i.childX < i.exitX - 0.5).sort((a, b) => a.childX - b.childX);
         const rights = items.filter(i => i.childX > i.exitX + 0.5).sort((a, b) => b.childX - a.childX);
         const ranks = Math.max(lefts.length, rights.length);
-        const step = ranks > 1 ? Math.min(BUS_STEP, BUS_SPAN / (ranks - 1)) : 0;
+        const span = upper.data.compact ? COMPACT_BUS_SPAN : BUS_SPAN;
+        const step = ranks > 1 ? Math.min(BUS_STEP, span / (ranks - 1)) : 0;
         items.forEach(i => { level[i.id] = BUS_FIRST; });
         [lefts, rights].forEach(side => side.forEach((i, k) => { level[i.id] = BUS_FIRST + k * step; }));
     }

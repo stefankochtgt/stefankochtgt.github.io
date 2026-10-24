@@ -252,6 +252,9 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
             <button type="button" class="secondary icon-btn" id="add-basic" title="New basic event -- then click a gate to add it below (Esc ends)" aria-label="New basic event">
                 <svg viewBox="0 0 26 22"><use href="#ico-basic"/></svg></button>
             <span class="icon-sep"></span>
+            <!-- SFM-200: compact display -- the same blocks closer together, ASIL / H square and label in the box -->
+            <button type="button" class="secondary icon-btn" id="toggle-compact" title="Compact display: the gates and events closer together, the ASIL / H square and the label inside the box" aria-label="Compact display" aria-pressed="false">
+                <svg viewBox="0 0 26 22"><use href="#ico-compact"/></svg></button>
             <button type="button" class="secondary icon-btn" id="fit-window" title="Fit to window" aria-label="Fit to window" onclick="cy && cy.fit(undefined, 30)">
                 <svg viewBox="0 0 26 22"><use href="#ico-fit"/></svg></button>
             <span class="icon-sep"></span>
@@ -285,6 +288,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <tr><td>Double-click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with &ldquo;&hellip;&rdquo; stands for it &mdash; <strong>click the triangle</strong> to jump to that page; for big trees and PDFs (printed with its page number)</td></tr>
                 <tr><td>Explorer (left) / Diagram &middot; Grid</td><td>the tree on the left lists the analyses and their fault tree pages (a continued page below the page it continues from) &mdash; click a page to open it, the boxes open / close a branch, the toolbar icon shows / hides it; <b>Grid</b>: all gates or all basic events as a table with every field &mdash; search all columns, filter each column, click a header to sort, double-click a row to show it in the diagram</td></tr>
+                <tr><td>Compact icon</td><td>compact display: the same gates and events, closer together; the ASIL / H square and the label are drawn inside the description box; also for the JPG, LaTeX and PDF export; click again for the normal display</td></tr>
                 <tr><td>Save (Ctrl+S) / Version control</td><td>every change is kept at once; <b>Save</b> also creates a numbered revision with what changed and when (the button is marked while there are unsaved changes); the <b>Version control</b> tab lists the revisions with their changes &mdash; <b>Restore</b> makes one current again (unsaved changes are saved first)</td></tr>
                 <tr><td>Small triangle on the side / &#9650; &#9660;</td><td>on its own page the continued gate has a small triangle with &ldquo;&hellip;&rdquo; &mdash; click it to go back to the page it continues from; &#9650; next to the Page list: the page above, &#9660;: the page of the selected transfer triangle, else the first page continued from here</td></tr>
                 <tr><td>Right-click an event</td><td>add below, edit, AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
@@ -383,6 +387,11 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
         <g id="ico-save" stroke="#1e3a8a" stroke-width="1.1" stroke-linejoin="round">
             <path d="M5 2.5 H18.5 L21.5 5.5 V19.5 H5 Z" fill="url(#ico-fill)"/><rect x="8" y="2.5" width="9" height="5.5" fill="#fff"/>
             <rect x="14" y="3.5" width="2" height="3.5" fill="#1e3a8a" stroke="none"/><rect x="8" y="12" width="10.5" height="7.5" fill="#fff"/>
+        </g>
+        <g id="ico-compact" stroke="#3a5ca8" stroke-width="1.1" fill="url(#ico-fill)">
+            <rect x="9" y="2" width="8" height="5"/><rect x="3.5" y="14" width="8" height="5"/><rect x="14.5" y="14" width="8" height="5"/>
+            <path d="M13 7 V10.5 M7.5 10.5 H18.5 M7.5 10.5 V14 M18.5 10.5 V14" fill="none"/>
+            <path d="M1 16.5 L3 15 L3 18 Z M25 16.5 L23 15 L23 18 Z" fill="#3a5ca8" stroke="none"/>
         </g>
         <g id="ico-explorer" fill="none" stroke="#3a5ca8" stroke-width="1.2">
             <rect x="3" y="2.5" width="6" height="4.5" fill="url(#ico-fill)"/><path d="M6 7 V18.5 M6 11.5 H11 M6 17 H11"/>
@@ -835,6 +844,24 @@ function onTransfer(node, pos) {
     return pos.y >= top + (LABEL_TOP + LABEL_H) * U - 2 && pos.y <= top + BLOCK_H * U + 2
         && pos.x >= left + SYM_X * U - 2 && pos.x <= left + (SYM_X + SYM_W) * U + 2;
 }
+// ---- compact display (SFM-200): the same blocks closer together, the ASIL / H square and the label in the box;
+// remembered per browser, also for the JPG / LaTeX / PDF export
+const COMPACT_KEY = 'manualFtaCompact';
+let compactOn = false;
+try { compactOn = localStorage.getItem(COMPACT_KEY) === '1'; } catch (e) { /* private window */ }
+function showCompactButton() {
+    const b = document.getElementById('toggle-compact');
+    b.classList.toggle('active', compactOn); b.setAttribute('aria-pressed', String(compactOn));
+}
+showCompactButton();
+document.getElementById('toggle-compact').addEventListener('click', async () => {
+    compactOn = !compactOn;
+    try { localStorage.setItem(COMPACT_KEY, compactOn ? '1' : '0'); } catch (e) { /* private window */ }
+    showCompactButton();
+    rememberAnalysis();                              // the export links follow
+    await loadGraph({ keepViewport: false });
+});
+
 // ---- explorer (SFM-194): the project, its analyses and their fault tree pages as a tree, like Reliability
 // Workbench's "Fault Tree Pages"; a continuation page sits below the page it continues from. A click on a page
 // opens it, on an analysis its first page; the boxes open / close a branch.
@@ -1368,7 +1395,8 @@ async function loadGraph(options = {}) {
         ? { zoom: cy.zoom(), pan: { ...cy.pan() } } : null;
     // options.data: draw this graph instead of the analysis (the guided tour's example, SFM-182)
     const data = options.data || await api('GET', '/api/manual-fta/graph?analysis=' + encodeURIComponent(analysisId)
-                                                 + '&page=' + encodeURIComponent(pageId));
+                                                 + '&page=' + encodeURIComponent(pageId) + (compactOn ? '&compact=1' : ''));
+    if (options.data && compactOn) options.data.nodes.forEach(n => { n.data.compact = true; });   // the tour's example too
     if (!options.data) { pageId = data.page || ''; showPages(data.pages || []); }
     document.getElementById('manual-fta-empty').hidden = data.nodes.length > 0;
     if (cy) cy.destroy();
@@ -1376,7 +1404,7 @@ async function loadGraph(options = {}) {
     // the tree edges are kept (hidden) next to the drawn connector segments, for "what is below"
     const treeEdges = data.edges.map(e => ({ data: { ...e.data, tree: true }, classes: 'tree-edge' }));
     // an event's label: text right of its description box (own invisible node, so it is not clipped)
-    const notes = data.nodes.filter(n => n.data.note).map(n => ({
+    const notes = data.nodes.filter(n => n.data.note && !n.data.compact).map(n => ({
         data: { id: `${n.data.id}#note`, note: n.data.note }, classes: 'note',
         // right of the box -- or of its criticality square, when it has one (it was drawn over it)
         position: { x: n.position.x + (BOX_W / 2 + (n.data.tag ? TAG_GAP + TAG_W : 0) + 3) * U, y: n.position.y + (BOX_H / 2 - BLOCK_H / 2) * U },
@@ -1395,6 +1423,7 @@ async function loadGraph(options = {}) {
                 'text-margin-y': (BOX_H / 2 - BLOCK_H / 2) * U,
             }},
             FIT_STYLE,                                  // the title always fits its box (SFM-186)
+            FIT_SHIFT_STYLE,                            // compact: below the square / label in the box (SFM-200)
             { selector: 'node.junction', style: {
                 'width': 0.1, 'height': 0.1, 'background-image': 'none', 'label': '', 'events': 'no',
             }},
@@ -1759,6 +1788,7 @@ function rememberAnalysis() {
     for (const kind of ['xml', 'tex', 'pdf'])
         document.getElementById('export-' + kind).href = `/fta-export/manual.${kind}?analysis=` + encodeURIComponent(analysisId);
     document.getElementById('export-rwb').href = '/fta-export/rwb/manual.xml?analysis=' + encodeURIComponent(analysisId);
+    for (const kind of ['tex', 'pdf']) if (compactOn) document.getElementById('export-' + kind).href += '&compact=1';   // SFM-200
 }
 
 async function switchAnalysis(id, fit = true) {
