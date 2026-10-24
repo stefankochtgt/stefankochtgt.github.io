@@ -43,6 +43,7 @@
         return data;
     }
     function save(data) {
+        ensureUids(data.tops);
         const known = new Set(data.analyses.map(a => a.id));
         data.tops.forEach(t => { if (!known.has(t.analysis)) t.analysis = data.analyses[0].id; });
         data.revision = (data.revision || 0) + 1;                       // one revision per change
@@ -55,8 +56,19 @@
     const ev = (o = {}) => ({ id: o.id, title: o.title || '', description: o.description || '', label: o.label || '',
         kind: KINDS.includes(o.kind) ? o.kind : 'intermediate', gate: GATES.includes(o.gate) ? o.gate : 'or',
         causes: o.causes || [], criticality: o.criticality || '', color: o.color || '', analysis: o.analysis || '',
-        new_page: !!o.new_page });
+        new_page: !!o.new_page, uid: o.uid || '' });
     const clone = e => JSON.parse(JSON.stringify(e));
+    // the internal ID that never changes (manual_fta._ensure_uids(), SFM-202): kept; new events get one; every
+    // occurrence of a repeated event shares one; one used by two different events is replaced for the later one
+    const newUid = () => 'u' + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
+    function ensureUids(tops) {
+        const byId = new Map(), owner = new Map();
+        for (const e of walk(tops)) {
+            if (byId.has(e.id)) { e.uid = byId.get(e.id); continue; }
+            if (!e.uid || (owner.has(e.uid) && owner.get(e.uid) !== e.id)) { do e.uid = newUid(); while (owner.has(e.uid)); }
+            byId.set(e.id, e.uid); owner.set(e.uid, e.id);
+        }
+    }
     function* walk(events) { for (const e of events) { yield e; yield* walk(e.causes); } }
     const clean = t => (t || '').trim();
 
@@ -99,6 +111,7 @@
         if (scope === 'this') {
             const [e, parent] = resolve(tops, id, at);
             e.id = newId(tops, counters, parent ? e.kind : 'top');
+            e.uid = '';                                      // an independent event now: its own internal ID
             return [[e, parent]];
         }
         throw new NeedsScope(id, occ.length);
@@ -107,7 +120,7 @@
     const signature = e => JSON.stringify([e.id, e.title, e.description, e.label, e.kind, e.gate, e.criticality, e.color, !!e.new_page,
                                           e.causes.map(signature)]);
     function cloneNewIds(e, tops, counters, asTop) {
-        const n = ev({ ...e, id: newId(tops, counters, asTop ? 'top' : e.kind), causes: [], analysis: '', new_page: !!e.new_page });
+        const n = ev({ ...e, id: newId(tops, counters, asTop ? 'top' : e.kind), causes: [], analysis: '', new_page: !!e.new_page, uid: '' });
         const holder = [n];
         for (const c of e.causes) n.causes.push(cloneNewIds(c, tops.concat(holder), counters, false));
         return n;
@@ -357,7 +370,7 @@
             let row = rows.get(e.id);
             if (!row) {
                 const n = e.causes.length;
-                row = { id: e.id, kind: parent ? (e.kind === 'intermediate' ? 'gate' : e.kind) : 'top',
+                row = { id: e.id, uid: e.uid || '', kind: parent ? (e.kind === 'intermediate' ? 'gate' : e.kind) : 'top',
                         title: e.title, description: e.description, label: e.label, criticality: e.criticality, color: e.color,
                         type: e.kind === 'basic' ? '' : n > 1 ? e.gate.toUpperCase() : n === 1 ? 'single input' : 'not developed',
                         inputs: e.causes.map(c => c.id), parents: [], trees: [], occurrences: 0,
@@ -390,7 +403,35 @@
         }
         for (const a of old.analyses) if (!(a.id in newNames)) lines.push(`Analysis '${a.name}' deleted`);
         const rows = d => { const t = tableOf(d, ''); return new Map(t.gates.concat(t.events).map(r => [r.id, r])); };
-        const before = rows(old), after = rows(neu), kinds = { top: 'Top event', gate: 'Gate', basic: 'Basic event' };
+        let before = rows(old);
+        const after = rows(neu), kinds = { top: 'Top event', gate: 'Gate', basic: 'Basic event' };
+        // an ID changed: by the internal ID (SFM-202), else by the place in the tree (manual_fta_versions._renames())
+        const byUid = new Map([...after].filter(([, r]) => r.uid).map(([id, r]) => [r.uid, id]));
+        const renamed = new Map();
+        for (const [id, r] of before) {
+            const to = r.uid ? byUid.get(r.uid) : undefined;
+            if (to !== undefined && to !== id && !before.has(to)) renamed.set(id, to);
+        }
+        const oldIds = new Set([...before.keys()].filter(i => !renamed.has(i)));
+        const newIds = new Set([...after.keys()].filter(i => ![...renamed.values()].includes(i)));
+        const found = new Map();
+        (function pairs(list) {
+            for (const [a, b, top] of list) {
+                const ka = top ? 'top' : a.kind, kb = top ? 'top' : b.kind;
+                if (a.id !== b.id && ka === kb && !newIds.has(a.id) && !oldIds.has(b.id)
+                    && !found.has(a.id) && ![...found.values()].includes(b.id)) found.set(a.id, b.id);
+                pairs(a.causes.slice(0, Math.min(a.causes.length, b.causes.length)).map((x, i) => [x, b.causes[i], false]));
+            }
+        })(old.tops.slice(0, Math.min(old.tops.length, neu.tops.length)).map((t, i) => [t, neu.tops[i], true]));
+        for (const [a, b] of found) if (!renamed.has(a)) renamed.set(a, b);
+        for (const [a, b] of renamed) lines.push(`${a}: ID changed to ${b}`);
+        if (renamed.size) {
+            const ren = ids => ids.map(i => renamed.get(i) || i);
+            before = new Map([...before].map(([id, r]) => {
+                const to = renamed.get(id) || id;
+                return [to, { ...r, id: to, inputs: ren(r.inputs), parents: ren(r.parents), trees: ren(r.trees) }];
+            }));
+        }
         for (const [id, r] of after) {
             const o = before.get(id);
             if (!o) { lines.push(`${kinds[r.kind]} ${id} '${r.title}' added`); continue; }
@@ -653,6 +694,7 @@
     function eventXml(e, indent) {
         const pad = '  '.repeat(indent);
         let a = ` id="${esc(e.id)}" kind="${e.kind}" gate="${e.gate}"`;
+        if (e.uid) a += ` uid="${esc(e.uid)}"`;
         if (e.label) a += ` label="${esc(e.label)}"`;
         if (e.criticality) a += ` criticality="${esc(e.criticality)}"`;
         if (e.color) a += ` color="${esc(e.color)}"`;
@@ -734,7 +776,7 @@
             kind: el.getAttribute('kind'), gate: el.getAttribute('gate'),
             criticality: CRITICALITY_LEVELS.includes(el.getAttribute('criticality')) ? el.getAttribute('criticality') : '',
             color: (el.getAttribute('color') || '') in COLORS ? el.getAttribute('color') : '',
-            new_page: el.getAttribute('newPage') === 'true',
+            new_page: el.getAttribute('newPage') === 'true', uid: el.getAttribute('uid') || '',
             causes: [...el.children].filter(c => c.tagName === 'event').map(parseEvent) });
     }
     function checkEvents(el, path, errors) {
