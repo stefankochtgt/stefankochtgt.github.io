@@ -304,7 +304,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <tr><td>Right-click a selected event</td><td>H category, colour, AND / OR gates or delete for all of them</td></tr>
                 <tr><td>Plain click anywhere, <kbd>Esc</kbd></td><td>clear the selection</td></tr>
                 <tr><th colspan="2">Finding and viewing</th></tr>
-                <tr><td>Find gates / basic events icon</td><td>by ID, text, H category / ASIL (exact: H3 &ne; H3+) or colour; <kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> next / previous, <kbd>Esc</kbd> closes</td></tr>
+                <tr><td>Find gates / basic events icon</td><td>by ID, text, H category / ASIL (exact: H3 &ne; H3+) or colour &mdash; in <b>all pages and analyses</b> (the open analysis first); <kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> next / previous, opening the match's page; <kbd>Esc</kbd> closes</td></tr>
                 <tr><td>Mouse wheel / drag the background</td><td>zoom / move the view; fit-to-window icon shows everything</td></tr>
                 <tr><th colspan="2">Import / Export</th></tr>
                 <tr><td>Export JPG / LaTeX / PDF / XML</td><td>the chosen analysis, with the model revision (light grey above each top event); LaTeX: each tree a TikZ picture to copy into your own document</td></tr>
@@ -1612,7 +1612,8 @@ const TOUR = [
         text: `<p>The two binocular icons search gates (with top events) or basic events by <b>ID</b>, words of the
         <b>title / description / label</b>, a <b>criticality</b> (<code>ASIL B</code>, <code>H3+</code> &ndash; exact) or a
         <b>colour</b> (<code>yellow</code>; <code>blue</code> = standard). Here: &ldquo;bulb&rdquo; finds the two bulbs.</p>
-        <p>${K('Enter')} / ${K('Shift')}+${K('Enter')} next / previous match, ${K('Esc')} closes.</p>` },
+        <p>They search <b>all pages and analyses</b>: ${K('Enter')} / ${K('Shift')}+${K('Enter')} goes to the next / previous
+        match and opens its page; ${K('Esc')} closes.</p>` },
     { el: '#fta-explorer', title: 'Analyses', text: `<p>An <b>analysis</b> is a separate set of fault trees (like pages);
         choose it here. <b>File</b> creates, renames, duplicates (new IDs) and deletes analyses. IDs are unique across
         all of them.</p>` },
@@ -1849,57 +1850,97 @@ document.getElementById('analysis-delete').addEventListener('click', async () =>
 const searchBar = document.getElementById('search-bar'), searchInput = document.getElementById('search-input');
 const CRITICALITY_QUERY = /^(h[1-4]\+?|any|qm|asil\s*[a-d])$/i;
 const norm = v => (v || '').toLowerCase().replace(/\s+/g, '');
-let searchKind = '', matches = [], matchAt = -1;
+// global (user, 2026-10-24: "the search buttons shall be global (not only on the current page)", SFM-203): every
+// event of every analysis (the Grid's rows, GET /api/manual-fta/table, loaded when the search opens and after changes),
+// the current analysis first, then page and tree order; the next match opens its page (and analysis) and is selected
+let searchKind = '', matches = [], matchAt = -1, searchRows = null, searchToken = 0, searchJumping = false;
+let searchHome = '';                               // the analysis the search was opened in: its matches first, a fixed order
 
-function searchPool() {
-    return cy ? cy.nodes('[type = "manual_event"]').filter(n => searchKind === 'gate' ? n.data('kind') !== 'basic'
-                                                                                        : n.data('kind') === 'basic') : [];
+function rowMatches(r, q) {
+    if (CRITICALITY_QUERY.test(q)) return norm(r.criticality) === norm(q);    // "asil b" = "ASIL B"
+    const colour = r.color || 'blue';
+    if (q === colour || (q === 'standard' && !r.color)) return true;
+    return [r.id, r.title, r.description, r.label].some(v => (v || '').toLowerCase().includes(q));
 }
 
-function nodeMatches(n, q) {
-    if (CRITICALITY_QUERY.test(q)) return norm(n.data('tag')) === norm(q);      // "asil b" = "ASIL B"
-    const colour = n.data('color') || 'blue';
-    if (q === colour || (q === 'standard' && !n.data('color'))) return true;
-    return [n.data('code'), n.data('label'), n.data('description'), n.data('note')].some(v => (v || '').toLowerCase().includes(q));
+async function loadSearchRows() {
+    const token = ++searchToken;
+    try {
+        const t = await api('GET', '/api/manual-fta/table');
+        if (token === searchToken) searchRows = t;
+    } catch (e) { if (token === searchToken) searchRows = { gates: [], events: [] }; }
 }
 
-function runSearch(keepAt = false) {
+function markSearchOnPage() {
     if (!cy) return;
     cy.nodes().removeClass('found found-current search-dim');
-    const q = searchInput.value.trim().toLowerCase();
-    const count = document.getElementById('search-count');
-    if (!q) { matches = []; matchAt = -1; count.textContent = ''; return; }
-    matches = searchPool().filter(n => nodeMatches(n, q)).toArray()
-        .sort((a, b) => a.position('y') - b.position('y') || a.position('x') - b.position('x'));
-    cy.nodes('[type = "manual_event"]').filter(n => !matches.includes(n)).addClass('search-dim');
-    matches.forEach(n => n.addClass('found'));
-    if (!matches.length) { matchAt = -1; count.textContent = 'no match'; return; }
-    showMatch(keepAt ? Math.min(Math.max(matchAt, 0), matches.length - 1) : 0);
+    if (!matches.length) return;
+    const ids = new Set(matches.map(r => r.id));
+    const all = cy.nodes('[type = "manual_event"]');
+    all.filter(n => !ids.has(n.data('code'))).addClass('search-dim');
+    all.filter(n => ids.has(n.data('code'))).addClass('found');
 }
 
-function showMatch(i) {
+async function runSearch(keepAt = false, reload = false) {
+    if (searchBar.hidden) return;
+    if (reload || !searchRows) await loadSearchRows();
+    const q = searchInput.value.trim().toLowerCase();
+    const count = document.getElementById('search-count');
+    if (!q || !searchRows) { matches = []; matchAt = -1; count.textContent = ''; markSearchOnPage(); return; }
+    const order = new Map(analyses.map((a, i) => [a.id, a.id === searchHome ? -1 : i]));
+    const current = keepAt && matchAt >= 0 && matches[matchAt] ? matches[matchAt].id : null;   // stay on this event
+    const pool = searchKind === 'gate' ? searchRows.gates : searchRows.events;
+    matches = pool.filter(r => rowMatches(r, q)).map((r, i) => ({ ...r, _i: i }))
+        .sort((a, b) => (order.get(a.analysis) ?? 99) - (order.get(b.analysis) ?? 99)
+                        || (a.page_number || 0) - (b.page_number || 0) || a._i - b._i);
+    markSearchOnPage();
+    if (!matches.length) { matchAt = -1; count.textContent = 'no match'; return; }
+    const again = current === null ? -1 : matches.findIndex(r => r.id === current);
+    await showMatch(again >= 0 ? again : keepAt ? Math.min(Math.max(matchAt, 0), matches.length - 1) : 0, !keepAt);
+}
+
+// the match's place for the counter: its page, and its analysis when it is another one
+function matchPlace(r) {
+    const page = r.page ? `page ${r.page_number} ${r.page}` : `page ${r.page_number || 1}`;
+    return r.analysis !== analysisId ? `${r.analysis_name}, ${page}` : page;
+}
+
+async function showMatch(i, go = true) {
     if (!matches.length) return;
     matchAt = (i + matches.length) % matches.length;
+    const r = matches[matchAt];
+    document.getElementById('search-count').textContent = `${matchAt + 1} of ${matches.length} \u00b7 ${matchPlace(r)}`;
+    if (go && (r.analysis !== analysisId || r.page !== pageId)) {         // on another page: open it there
+        setView('diagram');
+        searchJumping = true;
+        try {
+            if (r.analysis !== analysisId) await switchAnalysis(r.analysis);   // the reloads mark the matches again
+            if (r.page !== pageId) await goToPage(r.page);
+        } finally { searchJumping = false; }
+    }
+    if (!cy) return;
     cy.nodes('.found-current').removeClass('found-current');
-    const n = matches[matchAt];
+    let n = cy.$id(r.at);
+    if (!n.length) n = cy.nodes(`[type = "manual_event"]`).filter(x => x.data('code') === r.id).first();
+    if (!n.length) return;
     n.addClass('found-current');
-    document.getElementById('search-count').textContent = `${matchAt + 1} of ${matches.length}`;
     cy.animate({ center: { eles: n } }, { duration: 200 });
 }
 
 function openSearch(kind) {
     searchKind = kind;
-    document.getElementById('search-what').textContent = kind === 'gate' ? 'Find gates' : 'Find basic events';
+    searchHome = analysisId;
+    document.getElementById('search-what').textContent = kind === 'gate' ? 'Find gates (all pages)' : 'Find basic events (all pages)';
     searchBar.hidden = false;
     searchInput.focus();
     searchInput.select();
-    runSearch();
+    runSearch(false, true);
 }
 
 function closeSearch() {
     searchBar.hidden = true;
     if (cy) cy.nodes().removeClass('found found-current search-dim');
-    matches = []; matchAt = -1;
+    matches = []; matchAt = -1; searchRows = null;
 }
 
 document.getElementById('find-gate').addEventListener('click', () => openSearch('gate'));
@@ -1917,7 +1958,7 @@ searchInput.addEventListener('keydown', e => {
 const _loadGraph = loadGraph;
 loadGraph = async function (options = {}) {
     await _loadGraph(options);
-    if (!searchBar.hidden) runSearch(true);
+    if (!searchBar.hidden) runSearch(true, !searchJumping);      // after an edit: fresh rows; after a jump: the same
     const count = cy ? cy.nodes('[type = "manual_event"]').filter(n => n.id() === n.data('top')).length : 0;
     const current = analyses.find(a => a.id === analysisId);
     if (current && current.trees !== count) {
