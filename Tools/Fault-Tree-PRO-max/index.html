@@ -97,6 +97,21 @@ main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
 .grid-table tbody tr:hover { background: #eef2ff; }
 .grid-table tbody tr.selected { background: #dbeafe; }
 .grid-table td.num { text-align: right; }
+/* version control (SFM-197) */
+#save-version.dirty { border-color: #f59e0b; box-shadow: inset 0 0 0 1px #f59e0b; }
+#save-version.dirty::after { content: ""; position: absolute; top: 2px; right: 2px; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; }
+#save-version { position: relative; }
+.save-status { font-size: 12px; color: #166534; min-width: 0; white-space: nowrap; }
+#fta-versions { position: absolute; inset: 0; display: flex; flex-direction: column; box-sizing: border-box; background: #fff;
+    border: 1px solid var(--border, #e5e7eb); border-radius: 6px; }
+#fta-versions[hidden] { display: none; }
+main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
+#versions-state { font-size: 13px; }
+#versions-state.dirty { color: #92400e; font-weight: 600; }
+.versions-table td { vertical-align: top; }
+.versions-table td.changes { white-space: normal; max-width: 720px; }
+.versions-table ul { margin: 4px 0 0; padding-left: 18px; }
+.versions-table li { margin: 1px 0; }
 /* the selected event (SFM-185): red with a dashed frame, like a selected file; renamed in place */
 .rename-box { position: absolute; z-index: 25; box-sizing: border-box; resize: none; overflow: hidden; margin: 0;
     padding: 2px; border: 1px solid #2563eb; outline: 2px solid #93c5fd; background: #fff; color: #000;
@@ -114,12 +129,11 @@ main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
     #fta-explorer { width: 70vw; z-index: 20; box-shadow: 0 6px 18px rgba(15, 23, 42, .16); }   /* over the diagram */
     main.content.fill .fill-graph.with-explorer > .cy-graph { left: 0; }
     main.content.fill .fill-graph.with-explorer > #fta-grid { left: 0; }
+    main.content.fill .fill-graph.with-explorer > #fta-versions { left: 0; }
     .view-tab { padding: 3px 7px; }
     .icon-sep { display: none; }
-    #move-mode-badge { display: none; }
     .help-table td:first-child { white-space: normal; }
 }
-@media (hover: none) { #move-mode-badge { display: none; } }
 /* guided tour (SFM-178) */
 .tour-btn { font-size: 12px; font-weight: 600; padding: 0 9px; color: #1e3a8a; }
 #tour-block { position: fixed; inset: 0; z-index: 999; background: transparent; }
@@ -167,6 +181,8 @@ main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
         <div class="menu">
             <button type="button" class="menu-title" aria-haspopup="true">File</button>
             <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="menu-save" title="Save a new revision with its changes and time (Version control)">Save (new revision)&nbsp;&nbsp;Ctrl+S</button>
+                <hr>
                 <button type="button" role="menuitem" id="analysis-new" title="A new, empty analysis">New analysis…</button>
                 <button type="button" role="menuitem" id="analysis-rename" title="Rename this analysis">Rename analysis…</button>
                 <button type="button" role="menuitem" id="analysis-copy" title="A copy of this analysis with all its trees (the copies get new IDs)">Duplicate analysis</button>
@@ -210,8 +226,15 @@ main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
                 <svg viewBox="0 0 16 16"><path d="M2 14 L3 10.5 L11 2.5 L13.5 5 L5.5 13 Z" fill="#fde68a" stroke="#b45309"/><path d="M2 14 L3 10.5 L5.5 13 Z" fill="#374151"/></svg>Diagram</button>
             <button type="button" class="view-tab" id="view-grid" role="tab" aria-selected="false" title="All gates or all basic events as a table, with filters">
                 <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" fill="#fff" stroke="#3a5ca8"/><path d="M1.5 6 H14.5 M1.5 9.5 H14.5 M6 2.5 V13.5 M10.5 2.5 V13.5" stroke="#3a5ca8"/><rect x="1.5" y="2.5" width="13" height="3.5" fill="#dbeafe" stroke="#3a5ca8"/></svg>Grid</button>
+            <button type="button" class="view-tab" id="view-versions" role="tab" aria-selected="false" title="Saved revisions: what changed and when; restore one">
+                <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="#fff" stroke="#3a5ca8" stroke-width="1.2"/><path d="M8 4.2 V8 L10.8 9.6" fill="none" stroke="#3a5ca8" stroke-width="1.4" stroke-linecap="round"/></svg>Version control</button>
         </div>
         <div class="icon-bar">
+            <!-- SFM-197: Save = a new revision (Version control); marked while there are unsaved changes -->
+            <button type="button" class="secondary icon-btn" id="save-version" title="Save a new revision (Ctrl+S)" aria-label="Save">
+                <svg viewBox="0 0 26 22"><use href="#ico-save"/></svg></button>
+            <span id="save-status" class="save-status" aria-live="polite"></span>
+            <span class="icon-sep"></span>
             <!-- SFM-194: the explorer tree of analyses and fault tree pages, left of the diagram (like RWB's) -->
             <button type="button" class="secondary icon-btn" id="toggle-explorer" title="Show / hide the fault tree pages (explorer)" aria-label="Fault tree pages" aria-pressed="false">
                 <svg viewBox="0 0 26 22"><use href="#ico-explorer"/></svg></button>
@@ -236,8 +259,6 @@ main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
                 <svg viewBox="0 0 26 22"><use href="#ico-find-gate"/></svg></button>
             <button type="button" class="secondary icon-btn" id="find-basic" title="Find basic events -- by ID, text, H category or colour" aria-label="Find basic events">
                 <svg viewBox="0 0 26 22"><use href="#ico-find-basic"/></svg></button>
-            <span class="icon-sep"></span>
-            <button type="button" class="secondary icon-btn tour-btn" id="tour-start" title="Guided tour of all functions and keyboard shortcuts" aria-label="Guided tour">Tour</button>
         </div>
         <div id="search-bar" class="search-bar" hidden>
             <span id="search-what"></span>
@@ -247,7 +268,6 @@ main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
             <button type="button" class="secondary" id="search-next" title="Next match (Enter)">&darr;</button>
             <button type="button" class="secondary" id="search-close" title="Close the search (Esc)">&times;</button>
         </div>
-        <div><span id="move-mode-badge" class="badge" title="Hold Ctrl and drag an event onto a gate or top event to move or copy it with everything below it">Move: hold Ctrl</span></div>
         <div id="manual-fta-hint" style="font-size:13px;" hidden></div>
         <div><span id="pick-badge" class="badge" style="background:#dbeafe; border-color:#93c5fd;" hidden></span></div>
         <div id="manual-fta-empty" style="color:var(--muted); font-size:13px;" hidden>No fault tree in this analysis yet &mdash; click the <strong>new top event</strong> icon.</div>
@@ -265,6 +285,7 @@ main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
                 <tr><td>Double-click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with &ldquo;&hellip;&rdquo; stands for it &mdash; <strong>click the triangle</strong> to jump to that page; for big trees and PDFs (printed with its page number)</td></tr>
                 <tr><td>Explorer (left) / Diagram &middot; Grid</td><td>the tree on the left lists the analyses and their fault tree pages (a continued page below the page it continues from) &mdash; click a page to open it, the boxes open / close a branch, the toolbar icon shows / hides it; <b>Grid</b>: all gates or all basic events as a table with every field &mdash; search all columns, filter each column, click a header to sort, double-click a row to show it in the diagram</td></tr>
+                <tr><td>Save (Ctrl+S) / Version control</td><td>every change is kept at once; <b>Save</b> also creates a numbered revision with what changed and when (the button is marked while there are unsaved changes); the <b>Version control</b> tab lists the revisions with their changes &mdash; <b>Restore</b> makes one current again (unsaved changes are saved first)</td></tr>
                 <tr><td>Small triangle on the side / &#9650; &#9660;</td><td>on its own page the continued gate has a small triangle with &ldquo;&hellip;&rdquo; &mdash; click it to go back to the page it continues from; &#9650; next to the Page list: the page above, &#9660;: the page of the selected transfer triangle, else the first page continued from here</td></tr>
                 <tr><td>Right-click an event</td><td>add below, edit, AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
                 <tr><th colspan="2">Moving and copying</th></tr>
@@ -298,6 +319,14 @@ main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
                 <span id="grid-count"></span>
             </div>
             <div class="grid-scroll"><table id="grid-table" class="grid-table"><thead></thead><tbody></tbody></table></div>
+        </div>
+        <div id="fta-versions" hidden>
+            <div class="grid-bar">
+                <button type="button" id="versions-save">Save now</button>
+                <span id="versions-state"></span>
+            </div>
+            <div class="grid-scroll"><table id="versions-table" class="grid-table versions-table">
+                <thead><tr><th>Revision</th><th>Saved</th><th>Changes</th><th></th></tr></thead><tbody></tbody></table></div>
         </div>
         <div id="manual-fta-menu" class="context-menu" role="menu" hidden></div>
     </div>
@@ -350,6 +379,10 @@ main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
             <use href="#ico-plus" transform="translate(0 3)"/>
             <path d="M18 2 V8" stroke="#3a5ca8" stroke-width="2.2"/>
             <circle cx="18" cy="14" r="6" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width="1.1"/>
+        </g>
+        <g id="ico-save" stroke="#1e3a8a" stroke-width="1.1" stroke-linejoin="round">
+            <path d="M5 2.5 H18.5 L21.5 5.5 V19.5 H5 Z" fill="url(#ico-fill)"/><rect x="8" y="2.5" width="9" height="5.5" fill="#fff"/>
+            <rect x="14" y="3.5" width="2" height="3.5" fill="#1e3a8a" stroke="none"/><rect x="8" y="12" width="10.5" height="7.5" fill="#fff"/>
         </g>
         <g id="ico-explorer" fill="none" stroke="#3a5ca8" stroke-width="1.2">
             <rect x="3" y="2.5" width="6" height="4.5" fill="url(#ico-fill)"/><path d="M6 7 V18.5 M6 11.5 H11 M6 17 H11"/>
@@ -792,6 +825,7 @@ function showPages(pages) {
         p.id === '' ? '1: the trees' : `${p.number}: ${p.code}${p.title ? ' ' + p.title : ''}`, p.id, false, p.id === pageId)));
     rememberAnalysis();
     renderExplorer();
+    refreshSaveState();
     if (view === 'grid') loadGrid();
 }
 // Is `pos` (model coordinates) on the "…" triangle of a transfer node -- below its ID label box?
@@ -857,6 +891,13 @@ async function xpOpenPage(analysis, page) {
     if (analysis !== analysisId) await switchAnalysis(analysis);
     if (page !== pageId) await goToPage(page);
 }
+// page 1 (the trees without a page of their own): named after its top event when it holds one tree, like every other
+// page; with several their IDs (SFM-196)
+function pageOneName(p) {
+    const trees = p.trees || [];
+    if (trees.length === 1) return `${trees[0].id}: ${trees[0].title || ''}`;
+    return trees.length ? `Page 1: ${trees.map(t => t.id).join(', ')}` : 'Page 1 (empty)';
+}
 async function renderExplorer(refetch = true) {
     if (!explorerShown) return;
     try {
@@ -874,7 +915,7 @@ async function renderExplorer(refetch = true) {
     }
     const analysesItems = xpData.analyses.map(a => {
         const below = id => a.pages.filter(p => p.parent === id);
-        const pageItem = p => xpItem(`p:${a.id}:${p.id}`, 'page', p.id === '' ? 'Page 1: the trees' : `${p.code}: ${p.title || ''}`,
+        const pageItem = p => xpItem(`p:${a.id}:${p.id}`, 'page', p.id === '' ? pageOneName(p) : `${p.code}: ${p.title || ''}`,
             below(p.id).map(pageItem), () => xpOpenPage(a.id, p.id), a.id === analysisId && p.id === pageId);
         const roots = a.pages.filter(p => p.parent == null).map(pageItem);
         const folder = xpItem('f:' + a.id, 'folder', 'Fault Tree Pages', roots);
@@ -916,17 +957,105 @@ const GRID_COLUMNS = {
 function setView(v) {
     if (v === view) return;
     view = v;
-    const grid = v === 'grid';
-    document.getElementById('fta-grid').hidden = !grid;
-    document.getElementById('manual-fta-graph').style.visibility = grid ? 'hidden' : '';
-    for (const [id, on] of [['view-diagram', !grid], ['view-grid', grid]]) {
+    document.getElementById('fta-grid').hidden = v !== 'grid';
+    document.getElementById('fta-versions').hidden = v !== 'versions';
+    document.getElementById('manual-fta-graph').style.visibility = v === 'diagram' ? '' : 'hidden';
+    for (const [id, on] of [['view-diagram', v === 'diagram'], ['view-grid', v === 'grid'], ['view-versions', v === 'versions']]) {
         const b = document.getElementById(id);
         b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on));
     }
-    if (grid) loadGrid(); else if (cy) cy.resize();
+    if (v === 'grid') loadGrid(); else if (v === 'versions') loadVersions(); else if (cy) cy.resize();
 }
 document.getElementById('view-diagram').addEventListener('click', () => setView('diagram'));
 document.getElementById('view-grid').addEventListener('click', () => setView('grid'));
+document.getElementById('view-versions').addEventListener('click', () => setView('versions'));
+
+// ---- version control (SFM-197): Save creates a revision of the whole Manual FTA with its changes and time
+// (manual_fta_versions.py); the Save button is marked while something changed since the last revision
+let versionInfo = null, saveStatusTimer = null;
+function showSaveState(info) {
+    versionInfo = info;
+    const btn = document.getElementById('save-version');
+    btn.classList.toggle('dirty', !!info.dirty);
+    btn.title = info.dirty ? `Save a new revision (Ctrl+S) -- changed since ${info.current ? 'revision ' + info.current : 'never saved'}`
+                           : `Save a new revision (Ctrl+S) -- everything is saved in revision ${info.current}`;
+    const state = document.getElementById('versions-state');
+    state.textContent = info.dirty ? (info.current ? `Changed since revision ${info.current} -- not saved yet.` : 'Not saved yet.')
+                                   : info.current ? `Everything is saved in revision ${info.current}.` : 'Nothing to save yet.';
+    state.classList.toggle('dirty', !!info.dirty);
+    if (info.folder) state.textContent += ` Kept in the folder "${info.folder}" on this computer (browser app).`;
+}
+async function refreshSaveState() {
+    try { showSaveState(await api('GET', '/api/manual-fta/versions')); } catch (e) { /* not available */ }
+}
+function flashSaveStatus(text) {
+    const el = document.getElementById('save-status');
+    el.textContent = text;
+    clearTimeout(saveStatusTimer);
+    saveStatusTimer = setTimeout(() => { el.textContent = ''; }, 4000);
+}
+async function saveVersion() {
+    try {
+        const r = await api('POST', '/api/manual-fta/versions');
+        showSaveState(r);
+        flashSaveStatus(r.saved ? `Saved: revision ${r.saved.n} (${r.saved.summary})` : `No changes since revision ${r.current}`);
+        if (view === 'versions') renderVersions();
+    } catch (e) { alert(e.message); }
+}
+function localTime(iso) { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString(); }
+async function loadVersions() { await refreshSaveState(); renderVersions(); }
+function renderVersions() {
+    const body = document.querySelector('#versions-table tbody');
+    const versions = (versionInfo && versionInfo.versions) || [];
+    if (!versions.length) {
+        const tr = document.createElement('tr'), td = document.createElement('td');
+        td.colSpan = 4; td.textContent = 'No revision yet -- Save (Ctrl+S) creates the first one.';
+        tr.append(td); body.replaceChildren(tr); return;
+    }
+    body.replaceChildren(...versions.map(v => {
+        const tr = document.createElement('tr');
+        tr.dataset.n = v.n;
+        const rev = document.createElement('td'); rev.textContent = v.n + (v.n === versionInfo.current ? ' (current)' : '');
+        const when = document.createElement('td'); when.textContent = localTime(v.saved); when.title = v.saved;
+        const what = document.createElement('td'); what.className = 'changes';
+        const head = document.createElement('div');
+        head.textContent = v.note ? `${v.note} -- ${v.summary}` : v.summary;              // e.g. "Restored revision 1"
+        what.append(head);
+        if (v.changes.length) {
+            const det = document.createElement('details'), sum = document.createElement('summary');
+            sum.textContent = `${v.total} line${v.total === 1 ? '' : 's'}`;
+            const ul = document.createElement('ul');
+            ul.append(...v.changes.map(c => { const li = document.createElement('li'); li.textContent = c; return li; }));
+            if (v.total > v.changes.length) { const li = document.createElement('li'); li.textContent = `... and ${v.total - v.changes.length} more`; ul.append(li); }
+            det.append(sum, ul); what.append(det);
+        }
+        const act = document.createElement('td'), btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'secondary'; btn.textContent = 'Restore';
+        btn.title = `Make revision ${v.n} the current Manual FTA (unsaved changes are saved as a revision first)`;
+        btn.addEventListener('click', () => restoreVersion(v.n));
+        act.append(btn);
+        tr.append(rev, when, what, act);
+        return tr;
+    }));
+}
+async function restoreVersion(n) {
+    if (!confirm(`Restore revision ${n}? It becomes the current Manual FTA. Unsaved changes are saved as a revision first, `
+                 + 'so nothing is lost.')) return;
+    try {
+        const r = await api('POST', `/api/manual-fta/versions/${n}/restore`);
+        showSaveState(r);
+        renderVersions();
+        flashSaveStatus(`Revision ${n} restored`);
+        await loadAnalyses();
+        await loadGraph({ keepViewport: false });
+    } catch (e) { alert(e.message); }
+}
+document.getElementById('save-version').addEventListener('click', saveVersion);
+document.getElementById('versions-save').addEventListener('click', saveVersion);
+document.getElementById('menu-save').addEventListener('click', saveVersion);
+document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); saveVersion(); }
+});
 async function loadGrid() {
     const all = document.getElementById('grid-scope').value === 'all';
     try { gridData = await api('GET', '/api/manual-fta/table?analysis=' + encodeURIComponent(all ? '' : analysisId)); }
@@ -1127,7 +1256,6 @@ for (const el of [document.getElementById('manual-fta-hint'), document.getElemen
 
 function setMoveMode(on) {
     moveModeOn = on;
-    document.getElementById('move-mode-badge').textContent = on ? 'Move: ON — drag onto a gate' : 'Move: hold Ctrl';
     if (cy) { cy.userPanningEnabled(!on); cy.boxSelectionEnabled(false); }
 }
 document.addEventListener('keydown', e => { if (e.key === 'Control' && !moveModeOn) setMoveMode(true); });
@@ -1378,7 +1506,7 @@ document.getElementById('help-tricks').addEventListener('click', () => document.
 // trees come back when it ends) and points at its parts: a step has `el` (a page element), `nodes` (event
 // codes of the example: the spotlight frames them) or neither (shown in the middle); `enter` / `leave` show
 // things on the example (the right-click menu, a selection, search hits). Clicks on the page are blocked
-// meanwhile. → / Enter next, ← back, Esc ends. Opened from the Tour button, Help > Guided tour, the help dialog.
+// meanwhile. → / Enter next, ← back, Esc ends. Opened from Help > Guided tour and the help dialog (no toolbar button, user 2026-10-24).
 const K = k => `<kbd>${k}</kbd>`;
 const tourNodes = (...codes) => () => cy.nodes('[type = "manual_event"]').filter(n => codes.includes(n.data('code')));
 function tourMenu(code) {                           // the real right-click menu of an example event
@@ -1554,7 +1682,6 @@ document.addEventListener('keydown', e => {
     e.preventDefault(); e.stopImmediatePropagation();
 }, true);
 addEventListener('resize', () => { if (tourAt >= 0) showTourStep(tourAt); });
-document.getElementById('tour-start').addEventListener('click', startTour);
 document.getElementById('help-tour').addEventListener('click', startTour);
 document.getElementById('help-tour-start').addEventListener('click', startTour);
 
@@ -1765,8 +1892,9 @@ loadAnalyses().then(() => loadGraph()).then(() => {
 });
 </script>
 
-        <div class="standalone-note">Your fault trees are stored only in this browser (nothing is uploaded) &mdash;
-        use Import / Export &gt; Export XML to keep a copy or move them to another computer.
+        <div class="standalone-note">Your fault trees are stored in this browser (nothing is uploaded) &mdash;
+        File &gt; Keep on this computer saves them and their revisions in a folder of yours (Chrome, Edge);
+        Import / Export &gt; Export XML keeps a copy or moves them to another computer.
         &copy; TEGRITY &middot; <a href="https://tegrity.eu" target="_blank" rel="noopener">tegrity.eu</a>
         <button type="button" class="secondary" id="install-app" hidden title="Install as an app: own window, Start menu / taskbar icon, works offline">Install as app</button></div>
     </main>

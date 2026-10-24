@@ -299,7 +299,8 @@
     // a top event marked new_page: its tree on a page of its own, page 1 only for the other trees (SFM-192)
     function pagesOf(tops) {
         const loose = tops.filter(t => !t.new_page);
-        const result = loose.length || !tops.length ? [{ id: '', number: 1, code: '', title: '', at: '', parent: null }] : [], seen = new Set();
+        const result = loose.length || !tops.length ? [{ id: '', number: 1, code: '', title: '', at: '', parent: null,
+            trees: loose.map(t => ({ id: t.id, title: t.title })) }] : [], seen = new Set();   // page 1's trees (SFM-196)
         // parent: the page the gate's transfer triangle is on (null for page 1 and an own-page tree, SFM-193)
         function visit(e, path, owner) {
             for (const c of e.causes) {
@@ -345,6 +346,214 @@
         const all = [...rows.values()];
         return { gates: all.filter(r => r.kind !== 'basic'), events: all.filter(r => r.kind === 'basic') };
     }
+    // ---- version control (manual_fta_versions.py, SFM-197): Save keeps a copy of everything plus its changes and time
+    // under STORE + '.versions' -- the change texts are the app's, keep them in step
+    const VERSIONS = STORE + '.versions', MAX_CHANGES = 500;
+    const VFIELDS = [['title', 'title'], ['description', 'description'], ['label', 'label'], ['criticality', 'H category / ASIL'],
+                     ['color', 'colour'], ['type', 'type'], ['inputs', 'inputs'], ['parents', 'below'], ['new_page', 'own page']];
+    const loadVersions = () => { try { return JSON.parse(localStorage.getItem(VERSIONS) || '[]'); } catch (e) { return []; } };
+    const fmtV = v => Array.isArray(v) ? (v.join(', ') || 'none') : typeof v === 'boolean' ? (v ? 'yes' : 'no') : (v ? `'${v}'` : 'none');
+    function changesOf(old, neu) {
+        const lines = [], oldNames = Object.fromEntries(old.analyses.map(a => [a.id, a.name]));
+        const newNames = Object.fromEntries(neu.analyses.map(a => [a.id, a.name]));
+        for (const a of neu.analyses) {
+            if (!(a.id in oldNames)) lines.push(`Analysis '${a.name}' added`);
+            else if (oldNames[a.id] !== a.name) lines.push(`Analysis '${oldNames[a.id]}' renamed to '${a.name}'`);
+        }
+        for (const a of old.analyses) if (!(a.id in newNames)) lines.push(`Analysis '${a.name}' deleted`);
+        const rows = d => { const t = tableOf(d, ''); return new Map(t.gates.concat(t.events).map(r => [r.id, r])); };
+        const before = rows(old), after = rows(neu), kinds = { top: 'Top event', gate: 'Gate', basic: 'Basic event' };
+        for (const [id, r] of after) {
+            const o = before.get(id);
+            if (!o) { lines.push(`${kinds[r.kind]} ${id} '${r.title}' added`); continue; }
+            if (o.kind !== r.kind) lines.push(`${id}: ${kinds[o.kind].toLowerCase()} -> ${kinds[r.kind].toLowerCase()}`);
+            for (const [key, name] of VFIELDS)
+                if (JSON.stringify(o[key]) !== JSON.stringify(r[key])) lines.push(`${id}: ${name} ${fmtV(o[key])} -> ${fmtV(r[key])}`);
+            if (o.analysis !== r.analysis) lines.push(`${id}: moved to analysis '${r.analysis_name}'`);
+        }
+        for (const [id, o] of before) if (!after.has(id)) lines.push(`${kinds[o.kind]} ${id} '${o.title}' deleted`);
+        return lines;
+    }
+    function summaryOf(lines) {
+        const added = lines.filter(x => x.endsWith(' added')).length, deleted = lines.filter(x => x.endsWith(' deleted')).length;
+        const changed = lines.length - added - deleted;
+        return [added ? `${added} added` : '', changed ? `${changed} changed` : '', deleted ? `${deleted} deleted` : '']
+            .filter(Boolean).join(', ') || 'no changes';
+    }
+    const stateOf = d => JSON.stringify({ analyses: d.analyses, tops: d.tops });
+    const hashOf = text => {                      // cyrb53: a short fingerprint of a state, to see "changed?" without a copy
+        let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+        for (let i = 0; i < text.length; i++) {
+            const c = text.charCodeAt(i);
+            h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+    };
+    const shownVersion = ({ snapshot, hash, onDisk, ...v }) => v;          // what the page gets (the app's fields)
+    const versionHash = v => v.hash || (v.snapshot ? hashOf(stateOf(v.snapshot)) : '');
+    function versionStatus(data) {
+        const versions = loadVersions(), last = versions[versions.length - 1];
+        return { versions: versions.slice().reverse().map(shownVersion), current: last ? last.n : 0,
+                 dirty: last ? hashOf(stateOf(data)) !== versionHash(last) : data.tops.length > 0,
+                 folder: folderHandle ? folderHandle.name : '' };
+    }
+    async function snapshotOf(v) {                // a revision's copy: in the browser, or in the linked folder (SFM-199)
+        if (v.snapshot) return v.snapshot;
+        const dir = await folderAccess(true);
+        const text = dir ? await readText(await dir.getDirectoryHandle('versions', { create: true }), revisionFile(v.n)) : null;
+        if (!text) throw new FtaError(`Revision ${v.n} is kept in the folder "${folderHandle ? folderHandle.name : '?'}" on this `
+                                      + 'computer -- connect it again (File > Keep on this computer).', 409);
+        return JSON.parse(text);
+    }
+    async function saveVersion(data, note = '') {
+        const versions = loadVersions(), last = versions[versions.length - 1], hash = hashOf(stateOf(data));
+        const dir = await folderAccess(true);
+        if (last && hash === versionHash(last)) {     // nothing changed: no revision -- the folder still gets the state
+            if (dir) await writeFolder(dir, data);
+            return null;
+        }
+        const lines = changesOf(last ? await snapshotOf(last) : { analyses: [], tops: [] }, data);
+        const snapshot = JSON.parse(JSON.stringify({ analyses: data.analyses, tops: data.tops, counters: data.counters }));
+        const v = { n: last ? last.n + 1 : 1, saved: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), summary: summaryOf(lines),
+                    note, total: lines.length, changes: lines.slice(0, MAX_CHANGES), hash };
+        if (dir) {                                    // the copy goes to the folder, not into the browser's storage
+            await writeText(await dir.getDirectoryHandle('versions', { create: true }), revisionFile(v.n), JSON.stringify(snapshot));
+            v.onDisk = true;
+        } else v.snapshot = snapshot;
+        try { localStorage.setItem(VERSIONS, JSON.stringify(versions.concat([v]))); }
+        catch (e) {
+            throw new FtaError('Not enough browser storage for another revision -- keep the fault trees in a folder on this '
+                               + 'computer (File > Keep on this computer) or export the XML.', 507);
+        }
+        if (dir) await writeFolder(dir, data);
+        return shownVersion(v);
+    }
+    async function restoreVersion(data, n) {
+        const v = loadVersions().find(x => x.n === n);
+        if (!v) throw new FtaError(`There is no revision ${n}.`, 404);
+        const snapshot = await snapshotOf(v);
+        if (versionStatus(data).dirty) await saveVersion(data, `Saved before restoring revision ${n}`);
+        save({ ...load(), ...JSON.parse(JSON.stringify(snapshot)) });
+        return (await saveVersion(load(), `Restored revision ${n}`)) || { n };
+    }
+
+    // ---- a folder on this computer (SFM-199, user 2026-10-24: "in browser cannot select to make local copy on harddisk?"):
+    // with the File System Access API (Chrome, Edge) the fault trees and their revisions are kept in a folder the user
+    // picks -- fault-trees.json (everything, to open again), fault-trees.xml (readable, imports into the app),
+    // versions/versions.json + versions/rNNNN.json (the revisions; their copies then live only there). The folder is
+    // remembered (IndexedDB); after a restart the browser asks once for permission again, on the next Save.
+    const HAS_FOLDER_API = typeof window.showDirectoryPicker === 'function';
+    let folderHandle = null;
+    const revisionFile = n => `r${String(n).padStart(4, '0')}.json`;
+    function idbRun(mode, fn) {
+        return new Promise((resolve, reject) => {
+            const open = indexedDB.open('faultTreeProMax', 1);
+            open.onupgradeneeded = () => open.result.createObjectStore('handles');
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+                const tx = open.result.transaction('handles', mode), req = fn(tx.objectStore('handles'));
+                tx.oncomplete = () => { resolve(req && req.result); open.result.close(); };
+                tx.onerror = () => reject(tx.error);
+            };
+        });
+    }
+    const loadFolderHandle = () => idbRun('readonly', s => s.get('folder')).catch(() => null);
+    const storeFolderHandle = h => idbRun('readwrite', s => (h ? s.put(h, 'folder') : s.delete('folder'))).catch(() => null);
+    async function folderAccess(ask) {
+        if (!folderHandle) return null;
+        try {
+            let p = await folderHandle.queryPermission({ mode: 'readwrite' });
+            if (p !== 'granted' && ask) p = await folderHandle.requestPermission({ mode: 'readwrite' });
+            return p === 'granted' ? folderHandle : null;
+        } catch (e) { return null; }
+    }
+    async function writeText(dir, name, text) {
+        const file = await dir.getFileHandle(name, { create: true }), w = await file.createWritable();
+        await w.write(text); await w.close();
+    }
+    async function readText(dir, name) {
+        try { return await (await (await dir.getFileHandle(name)).getFile()).text(); } catch (e) { return null; }
+    }
+    async function writeFolder(dir, data) {
+        const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+        await writeText(dir, 'fault-trees.json', JSON.stringify({ format: 'fault-tree-pro-max', saved: now, analyses: data.analyses,
+                                                                  tops: data.tops, counters: data.counters }));
+        await writeText(dir, 'fault-trees.xml', exportXml(data, ''));
+        const vdir = await dir.getDirectoryHandle('versions', { create: true });
+        const versions = loadVersions();
+        for (const v of versions) if (v.snapshot) await writeText(vdir, revisionFile(v.n), JSON.stringify(v.snapshot));
+        const moved = versions.map(v => { const { snapshot, ...rest } = v; return { ...rest, hash: versionHash(v), onDisk: true }; });
+        await writeText(vdir, 'versions.json', JSON.stringify(moved.map(({ onDisk, ...v }) => v), null, 1));
+        localStorage.setItem(VERSIONS, JSON.stringify(moved));           // the copies now live in the folder
+    }
+    async function chooseFolder() {
+        if (!HAS_FOLDER_API) {
+            alert('Keeping the fault trees in a folder needs Chrome or Edge. Here: Import / Export > Export XML keeps a copy.');
+            return;
+        }
+        let dir;
+        try { dir = await window.showDirectoryPicker({ id: 'fault-tree-pro-max', mode: 'readwrite' }); } catch (e) { return; }
+        const there = await readText(dir, 'fault-trees.json');
+        if (there) {
+            let stored = null;
+            try { stored = JSON.parse(there); } catch (e) { /* not ours */ }
+            if (stored && Array.isArray(stored.analyses) && Array.isArray(stored.tops) && confirm(
+                `The folder "${dir.name}" already holds fault trees (saved ${stored.saved || '?'}).\n\nOK: open them here `
+                + '(the fault trees in this browser are replaced).\nCancel: keep the fault trees of this browser and save them '
+                + 'into the folder.')) {
+                const vtext = await readText(await dir.getDirectoryHandle('versions', { create: true }), 'versions.json');
+                let versions = [];
+                try { versions = (JSON.parse(vtext || '[]') || []).map(v => ({ ...v, onDisk: true })); } catch (e) { /* none */ }
+                save({ ...load(), analyses: stored.analyses, tops: stored.tops, counters: stored.counters || {} });
+                localStorage.setItem(VERSIONS, JSON.stringify(versions));
+                folderHandle = dir; await storeFolderHandle(dir);
+                location.reload();
+                return;
+            }
+        }
+        folderHandle = dir; await storeFolderHandle(dir);
+        try { await writeFolder(dir, load()); } catch (e) { alert(`Could not write into "${dir.name}": ${e.message}`); }
+        updateFolderUi();
+    }
+    async function stopFolder() {
+        if (!folderHandle) return;
+        if (!confirm(`Stop keeping the fault trees in "${folderHandle.name}"? The files there stay; revisions saved there can `
+                     + 'only be restored after linking the folder again.')) return;
+        folderHandle = null; await storeFolderHandle(null);
+        updateFolderUi();
+    }
+    function updateFolderUi() {
+        const link = document.getElementById('folder-link'), stop = document.getElementById('folder-stop');
+        const state = document.getElementById('folder-status');
+        if (!link) return;
+        link.textContent = folderHandle ? `Folder on this computer: ${folderHandle.name}…` : 'Keep on this computer (folder)…';
+        link.disabled = !HAS_FOLDER_API;
+        link.title = HAS_FOLDER_API ? 'Keep the fault trees and their revisions in a folder on this computer (written on Save)'
+                                    : 'Needs Chrome or Edge -- use Import / Export > Export XML';
+        stop.hidden = !folderHandle;
+        state.textContent = folderHandle ? `Folder: ${folderHandle.name}` : '';
+        state.title = folderHandle ? 'Save writes the fault trees and the revision into this folder on your computer' : '';
+    }
+    document.addEventListener('DOMContentLoaded', async () => {          // File menu items + status (standalone only)
+        const anchor = document.getElementById('menu-save');
+        if (!anchor) return;
+        const mk = (id, text, run) => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem'); b.id = id; b.textContent = text;
+            b.addEventListener('click', run);
+            return b;
+        };
+        anchor.after(mk('folder-link', 'Keep on this computer (folder)…', chooseFolder),
+                     mk('folder-stop', 'Stop using the folder', stopFolder));
+        const state = document.createElement('span');
+        state.id = 'folder-status'; state.className = 'save-status'; state.style.color = '#1e3a8a';
+        const saveState = document.getElementById('save-status');
+        if (saveState) saveState.after(state);
+        folderHandle = await loadFolderHandle() || null;
+        updateFolderUi();
+    });
     function buildGraph(data, analysis, page = '') {
         const counts = {};
         for (const e of walk(data.tops)) counts[e.id] = (counts[e.id] || 0) + 1;
@@ -647,6 +856,12 @@
         }
         if (p === '/api/manual-fta/analyses' && method === 'GET') return ops.listAnalyses(data);
         if (p === '/api/manual-fta/table') return tableOf(data, q.get('analysis') || '');   // SFM-195
+        if (p === '/api/manual-fta/versions' && method === 'GET') return versionStatus(data);   // SFM-197
+        if (p === '/api/manual-fta/versions' && method === 'POST') { const saved = await saveVersion(data); return { saved, ...versionStatus(load()) }; }
+        if ((m = /^\/api\/manual-fta\/versions\/(\d+)\/restore$/.exec(p))) {
+            const saved = await restoreVersion(data, +m[1]);
+            return { restored: +m[1], saved, ...versionStatus(load()) };
+        }
         if (p === '/api/manual-fta/explorer') {             // manual_fta.explorer() (SFM-194)
             return { analyses: data.analyses.map(a => {
                 const tops = data.tops.filter(t => t.analysis === a.id);
