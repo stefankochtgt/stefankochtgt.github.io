@@ -299,24 +299,51 @@
     // a top event marked new_page: its tree on a page of its own, page 1 only for the other trees (SFM-192)
     function pagesOf(tops) {
         const loose = tops.filter(t => !t.new_page);
-        const result = loose.length || !tops.length ? [{ id: '', number: 1, code: '', title: '', at: '' }] : [], seen = new Set();
-        function visit(list, paths) {
-            list.forEach((e, k) => {
-                for (const c of e.causes) {
-                    const here = `${paths[k]}/${c.id}`;
-                    if (c.new_page && !seen.has(c.id)) { seen.add(c.id); result.push({ id: c.id, number: result.length + 1, code: c.id, title: c.title, at: here }); }
-                    visit([c], [here]);
-                }
-            });
+        const result = loose.length || !tops.length ? [{ id: '', number: 1, code: '', title: '', at: '', parent: null }] : [], seen = new Set();
+        // parent: the page the gate's transfer triangle is on (null for page 1 and an own-page tree, SFM-193)
+        function visit(e, path, owner) {
+            for (const c of e.causes) {
+                const here = `${path}/${c.id}`;
+                if (c.new_page && !seen.has(c.id)) { seen.add(c.id); result.push({ id: c.id, number: result.length + 1, code: c.id, title: c.title, at: here, parent: owner }); }
+                visit(c, here, c.new_page ? c.id : owner);
+            }
         }
-        visit(loose, loose.map(t => t.id));
+        for (const t of loose) visit(t, t.id, '');
         for (const t of tops) {
             if (!t.new_page || seen.has(t.id)) continue;
             seen.add(t.id);
-            result.push({ id: t.id, number: result.length + 1, code: t.id, title: t.title, at: t.id });
-            visit([t], [t.id]);
+            result.push({ id: t.id, number: result.length + 1, code: t.id, title: t.title, at: t.id, parent: null });
+            visit(t, t.id, t.id);
         }
         return result;
+    }
+    // manual_fta.table(): the Grid view's rows, one per event ID (SFM-195) -- keep in step
+    function tableOf(data, analysis) {
+        const names = Object.fromEntries(data.analyses.map(a => [a.id, a.name]));
+        const numbers = Object.fromEntries(data.analyses.map(a => [a.id,
+            Object.fromEntries(pagesOf(data.tops.filter(t => t.analysis === a.id)).map(p => [p.id, p.number]))]));
+        const rows = new Map();
+        function walk(e, parent, path, top, owner) {
+            const page = e.new_page ? e.id : owner;
+            let row = rows.get(e.id);
+            if (!row) {
+                const n = e.causes.length;
+                row = { id: e.id, kind: parent ? (e.kind === 'intermediate' ? 'gate' : e.kind) : 'top',
+                        title: e.title, description: e.description, label: e.label, criticality: e.criticality, color: e.color,
+                        type: e.kind === 'basic' ? '' : n > 1 ? e.gate.toUpperCase() : n === 1 ? 'single input' : 'not developed',
+                        inputs: e.causes.map(c => c.id), parents: [], trees: [], occurrences: 0,
+                        page, page_number: (numbers[top.analysis] || {})[page] || 0, new_page: !!e.new_page,
+                        analysis: top.analysis, analysis_name: names[top.analysis] || '', at: path };
+                rows.set(e.id, row);
+            }
+            row.occurrences += 1;
+            if (parent && !row.parents.includes(parent.id)) row.parents.push(parent.id);
+            if (!row.trees.includes(top.id)) row.trees.push(top.id);
+            for (const c of e.causes) walk(c, e, `${path}/${c.id}`, top, page);
+        }
+        for (const t of data.tops) if (!analysis || t.analysis === analysis) walk(t, null, t.id, t, t.new_page ? t.id : '');
+        const all = [...rows.values()];
+        return { gates: all.filter(r => r.kind !== 'basic'), events: all.filter(r => r.kind === 'basic') };
     }
     function buildGraph(data, analysis, page = '') {
         const counts = {};
@@ -347,7 +374,10 @@
             const [e, , path] = resolve(tops, start.code, start.at);
             const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
             place(e, width(e) / 2, 0, path.split('/')[0], parent);
-            if (parent) nodes[0].data.page_start = true;   // continued from an earlier page: the side triangle
+            if (parent) {                                  // continued from an earlier page: the side triangle, "…" (SFM-193)
+                const back = start.parent || '';
+                Object.assign(nodes[0].data, { page_start: true, from_page_id: back, from_page: pageNo[back] || 0 });
+            }
             return { nodes, edges };
         }
         let cursor = 0;
@@ -616,6 +646,13 @@
                      line: `${TOOL} | revision ${revisionId(data)}` };
         }
         if (p === '/api/manual-fta/analyses' && method === 'GET') return ops.listAnalyses(data);
+        if (p === '/api/manual-fta/table') return tableOf(data, q.get('analysis') || '');   // SFM-195
+        if (p === '/api/manual-fta/explorer') {             // manual_fta.explorer() (SFM-194)
+            return { analyses: data.analyses.map(a => {
+                const tops = data.tops.filter(t => t.analysis === a.id);
+                return { id: a.id, name: a.name, trees: tops.length, pages: pagesOf(tops) };
+            }) };
+        }
         if (p === '/api/manual-fta/analyses' && method === 'POST') {
             return body.copy_of ? ops.duplicateAnalysis(data, body.copy_of, body.name) : ops.createAnalysis(data, body.name);
         }

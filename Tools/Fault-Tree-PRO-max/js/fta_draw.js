@@ -40,6 +40,7 @@ const TRANSFER_TEXT_Y = (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 0.5;
 // transfer-in triangle on the side, joined to the stub by a short line -- as Reliability Workbench draws it
 // (user, 2026-10-23, screenshot). fta_tikz.py / standalone/fta_tikz.js draw the same.
 const SIDE_Y = SYM_TOP - 2, SIDE_DX = 28, SIDE_TRI_H = 12, SIDE_TRI_HALF = 7;
+const SIDE_TEXT_Y = SIDE_Y + SIDE_TRI_H * 0.68;   // "…" in the lower, wider part of the side triangle
 const pageStart = d => !!d.page_start;      // not a tree on a page of its own (SFM-192): nothing continues there
 
 // ---- the title always fits its description box (SFM-186) -------------------------------------------
@@ -145,7 +146,10 @@ function blockSvg(d) {
              + (pageStart(d)
                 ? `<line x1="${BOX_W / 2}" y1="${SIDE_Y}" x2="${BOX_W / 2 + SIDE_DX}" y2="${SIDE_Y}"/>`
                   + `<path class="page-start" d="M${BOX_W / 2 + SIDE_DX} ${SIDE_Y} L${BOX_W / 2 + SIDE_DX + SIDE_TRI_HALF} ${SIDE_Y + SIDE_TRI_H}`
-                  + ` H${BOX_W / 2 + SIDE_DX - SIDE_TRI_HALF} Z"/>` : '')
+                  + ` H${BOX_W / 2 + SIDE_DX - SIDE_TRI_HALF} Z"/>`
+                  + `<text x="${BOX_W / 2 + SIDE_DX}" y="${SIDE_TEXT_Y}" dominant-baseline="central" text-anchor="middle"`
+                  + ` font-family="Arial, Helvetica, sans-serif" font-size="6" font-weight="bold" fill="${d.text_color || '#000'}"`
+                  + ` stroke="none">…</text>` : '')       // a click on it goes back to the page it continues from (SFM-193)
              + body
              + `<rect x="${LABEL_X}" y="${LABEL_TOP}" width="${LABEL_W}" height="${LABEL_H}"/>`
              + `<text x="${BOX_W / 2}" y="${LABEL_TOP + LABEL_H / 2}" dominant-baseline="central" text-anchor="middle"`

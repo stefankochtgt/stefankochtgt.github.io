@@ -31,6 +31,7 @@
         return `\\fontfamily{phv}\\fontsize{${fix(size, 2)}}{${fix(size * 1.18, 2)}}\\selectfont${bold ? '\\bfseries' : ''}`;
     };
     const TITLE_FONT = font(9), CODE_FONT = font(7.5), TAG_FONT = font(7, true), PAGE_FONT = font(6.5, true);
+    const SIDE_FONT = font(5.5, true);                // page number in the small side triangle (SFM-193)
 
     const ESCAPES = { '\\': '\\textbackslash{}', '&': '\\&', '%': '\\%', '$': '\\$', '#': '\\#', '_': '\\_',
                       '{': '\\{', '}': '\\}', '~': '\\textasciitilde{}', '^': '\\textasciicircum{}' };
@@ -83,6 +84,7 @@
             side.push(`\\draw ${pt(cx, sy)} -- ${pt(sx, sy)};`,
                 `\\path[draw, fill=${fill}] ${pt(sx, sy)} -- ${pt(sx + SIDE_TRI_HALF, sy + SIDE_TRI_H)}`
                 + ` -- ${pt(sx - SIDE_TRI_HALF, sy + SIDE_TRI_H)} -- cycle;`);
+            if (data.from_page) side.push(text(sx, sy + SIDE_TRI_H * 0.68, String(data.from_page), SIDE_FONT));   // SFM-193
         }
         lines = [
             `\\path[draw, fill=${fill}${dashed}] ${pt(left, top)} rectangle ${pt(left + BOX_W, top + BOX_H)};`,

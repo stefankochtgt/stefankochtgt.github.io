@@ -55,6 +55,48 @@
 .page-picker { display: flex; gap: 4px; align-items: center; }
 .page-picker[hidden] { display: none; }
 #page-select { max-width: 260px; min-width: 120px; flex: none; }
+/* explorer (SFM-194): analyses and their fault tree pages as a tree left of the diagram, like Reliability Workbench */
+#fta-explorer { position: absolute; left: 0; top: 0; bottom: 0; width: 240px; box-sizing: border-box; overflow: auto;
+    border: 1px solid var(--border, #e5e7eb); border-radius: 6px; background: #fff; padding: 6px 2px; font-size: 13px; }
+#fta-explorer[hidden] { display: none; }
+main.content.fill .fill-graph.with-explorer > .cy-graph { left: 248px; }
+.xp ul { list-style: none; margin: 0; padding-left: 15px; }
+.xp > ul { padding-left: 0; }
+.xp-row { display: flex; align-items: center; gap: 4px; padding: 1px 6px 1px 2px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
+.xp-row:hover { background: #eef2ff; }
+.xp-row.current { background: #dbeafe; outline: 1px dotted #2563eb; }
+.xp-row:focus-visible { outline: 2px solid #2563eb; }
+.xp-tog { width: 9px; height: 9px; border: 1px solid #9ca3af; background: #fff; flex: none; position: relative; }
+.xp-tog::before { content: ""; position: absolute; left: 1px; right: 1px; top: 4px; border-top: 1px solid #374151; }
+.xp-tog.closed::after { content: ""; position: absolute; top: 1px; bottom: 1px; left: 4px; border-left: 1px solid #374151; }
+.xp-tog.none { visibility: hidden; }
+.xp-ico { width: 17px; height: 15px; flex: none; }
+.icon-btn.active { background: #dbeafe; border-color: #93c5fd; }
+/* Diagram / Grid (SFM-195) */
+.view-tabs { display: flex; gap: 2px; margin-right: 6px; }
+.view-tab { display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 13px; background: #f8fafc; color: #111;
+    border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; }
+.view-tab svg { width: 16px; height: 16px; }
+.view-tab.active { background: #fff; border-color: #2563eb; box-shadow: inset 0 -2px 0 #2563eb; font-weight: 600; }
+#fta-grid { position: absolute; inset: 0; display: flex; flex-direction: column; box-sizing: border-box; background: #fff;
+    border: 1px solid var(--border, #e5e7eb); border-radius: 6px; }
+#fta-grid[hidden] { display: none; }
+main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
+.grid-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid #e5e7eb; }
+.grid-bar select, .grid-bar input { width: auto; margin: 0; padding: 3px 6px; font-size: 13px; }
+#grid-search { min-width: 200px; }
+#grid-count { color: var(--muted, #6b7280); font-size: 12px; margin-left: auto; }
+.grid-scroll { flex: 1; overflow: auto; }
+.grid-table { border-collapse: separate; border-spacing: 0; font-size: 12px; width: max-content; min-width: 100%; }
+.grid-table th, .grid-table td { border-right: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; padding: 3px 6px; text-align: left;
+    white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.grid-table thead th { position: sticky; top: 0; z-index: 2; background: #f1f5f9; font-weight: 600; cursor: pointer; user-select: none; }
+.grid-table thead tr.grid-filters th { top: 25px; background: #f8fafc; cursor: default; padding: 2px 3px; }
+.grid-table thead tr.grid-filters input { width: 100%; min-width: 60px; box-sizing: border-box; margin: 0; padding: 2px 4px; font-size: 12px; }
+.grid-table tbody tr { cursor: default; }
+.grid-table tbody tr:hover { background: #eef2ff; }
+.grid-table tbody tr.selected { background: #dbeafe; }
+.grid-table td.num { text-align: right; }
 /* the selected event (SFM-185): red with a dashed frame, like a selected file; renamed in place */
 .rename-box { position: absolute; z-index: 25; box-sizing: border-box; resize: none; overflow: hidden; margin: 0;
     padding: 2px; border: 1px solid #2563eb; outline: 2px solid #93c5fd; background: #fff; color: #000;
@@ -69,6 +111,10 @@
     .app-heading { font-size: 16px !important; flex-wrap: wrap; row-gap: 0; }
     .menubar .menu-title { padding: 3px 7px; }
     #analysis-select { min-width: 0 !important; width: 44vw; }
+    #fta-explorer { width: 70vw; z-index: 20; box-shadow: 0 6px 18px rgba(15, 23, 42, .16); }   /* over the diagram */
+    main.content.fill .fill-graph.with-explorer > .cy-graph { left: 0; }
+    main.content.fill .fill-graph.with-explorer > #fta-grid { left: 0; }
+    .view-tab { padding: 3px 7px; }
     .icon-sep { display: none; }
     #move-mode-badge { display: none; }
     .help-table td:first-child { white-space: normal; }
@@ -151,7 +197,7 @@
     </nav>
 
     <div class="filters fta-toolbar">
-        <div style="display:flex; gap:4px; align-items:center;" title="Separate Manual FTAs in this model: each analysis is its own set of trees">
+        <div id="analysis-picker" hidden style="display:none; gap:4px; align-items:center;" title="Separate Manual FTAs in this model: each analysis is its own set of trees">
             <label for="analysis-select" style="margin:0;">Analysis</label>
             <select id="analysis-select" style="min-width:180px;"></select>
         </div>
@@ -159,8 +205,22 @@
             <label for="page-select" style="margin:0;">Page</label>
             <select id="page-select"></select>
         </div>
-        <span class="icon-sep"></span>
+        <div class="view-tabs" role="tablist" aria-label="View">
+            <button type="button" class="view-tab active" id="view-diagram" role="tab" aria-selected="true" title="The fault tree diagram">
+                <svg viewBox="0 0 16 16"><path d="M2 14 L3 10.5 L11 2.5 L13.5 5 L5.5 13 Z" fill="#fde68a" stroke="#b45309"/><path d="M2 14 L3 10.5 L5.5 13 Z" fill="#374151"/></svg>Diagram</button>
+            <button type="button" class="view-tab" id="view-grid" role="tab" aria-selected="false" title="All gates or all basic events as a table, with filters">
+                <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" fill="#fff" stroke="#3a5ca8"/><path d="M1.5 6 H14.5 M1.5 9.5 H14.5 M6 2.5 V13.5 M10.5 2.5 V13.5" stroke="#3a5ca8"/><rect x="1.5" y="2.5" width="13" height="3.5" fill="#dbeafe" stroke="#3a5ca8"/></svg>Grid</button>
+        </div>
         <div class="icon-bar">
+            <!-- SFM-194: the explorer tree of analyses and fault tree pages, left of the diagram (like RWB's) -->
+            <button type="button" class="secondary icon-btn" id="toggle-explorer" title="Show / hide the fault tree pages (explorer)" aria-label="Fault tree pages" aria-pressed="false">
+                <svg viewBox="0 0 26 22"><use href="#ico-explorer"/></svg></button>
+            <!-- SFM-193: up to the page this one continues from / down to a page continued from here -->
+            <button type="button" class="secondary icon-btn" id="page-up" title="Page above -- the page this one continues from" aria-label="Page above">
+                <svg viewBox="0 0 26 22"><use href="#ico-page-up"/></svg></button>
+            <button type="button" class="secondary icon-btn" id="page-down" title="Page below -- the page of the selected transfer triangle, else the first page continued from here" aria-label="Page below">
+                <svg viewBox="0 0 26 22"><use href="#ico-page-down"/></svg></button>
+            <span class="icon-sep"></span>
             <!-- own icons in the style of a classic FTA tool's toolbar (SFM-174) -->
             <button type="button" class="secondary icon-btn" id="add-top" title="New top event" aria-label="New top event">
                 <svg viewBox="0 0 26 22"><use href="#ico-top"/></svg></button>
@@ -204,6 +264,8 @@
                 <tr><td>Click an event</td><td>selects it (red); a second click on the title (or <kbd>F2</kbd>) renames the title in place, a second click on the <strong>ID box</strong> renames the ID &mdash; <kbd>Enter</kbd> or a click elsewhere saves, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Double-click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with &ldquo;&hellip;&rdquo; stands for it &mdash; <strong>click the triangle</strong> to jump to that page; for big trees and PDFs (printed with its page number)</td></tr>
+                <tr><td>Explorer (left) / Diagram &middot; Grid</td><td>the tree on the left lists the analyses and their fault tree pages (a continued page below the page it continues from) &mdash; click a page to open it, the boxes open / close a branch, the toolbar icon shows / hides it; <b>Grid</b>: all gates or all basic events as a table with every field &mdash; search all columns, filter each column, click a header to sort, double-click a row to show it in the diagram</td></tr>
+                <tr><td>Small triangle on the side / &#9650; &#9660;</td><td>on its own page the continued gate has a small triangle with &ldquo;&hellip;&rdquo; &mdash; click it to go back to the page it continues from; &#9650; next to the Page list: the page above, &#9660;: the page of the selected transfer triangle, else the first page continued from here</td></tr>
                 <tr><td>Right-click an event</td><td>add below, edit, AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
                 <tr><th colspan="2">Moving and copying</th></tr>
                 <tr><td>Phone / tablet</td><td>tap = click, <strong>long-press</strong> = right-click; the event menu has <em>Select</em> and <em>Move / copy to…</em> (then tap the gate); pinch zooms</td></tr>
@@ -225,7 +287,18 @@
         </form>
     </dialog>
     <div class="fill-graph">
+        <nav id="fta-explorer" class="xp" aria-label="Analyses and fault tree pages" hidden></nav>
         <div id="manual-fta-graph" class="cy-graph"></div>
+        <div id="fta-grid" hidden>
+            <div class="grid-bar">
+                <select id="grid-kind" aria-label="Table"><option value="gates">Gates</option><option value="events">Basic events</option></select>
+                <select id="grid-scope" aria-label="Scope"><option value="this">This analysis</option><option value="all">All analyses</option></select>
+                <input id="grid-search" type="search" placeholder="Search all columns" aria-label="Search all columns">
+                <button type="button" class="secondary" id="grid-clear">Clear filters</button>
+                <span id="grid-count"></span>
+            </div>
+            <div class="grid-scroll"><table id="grid-table" class="grid-table"><thead></thead><tbody></tbody></table></div>
+        </div>
         <div id="manual-fta-menu" class="context-menu" role="menu" hidden></div>
     </div>
 </div>
@@ -277,6 +350,16 @@
             <use href="#ico-plus" transform="translate(0 3)"/>
             <path d="M18 2 V8" stroke="#3a5ca8" stroke-width="2.2"/>
             <circle cx="18" cy="14" r="6" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width="1.1"/>
+        </g>
+        <g id="ico-explorer" fill="none" stroke="#3a5ca8" stroke-width="1.2">
+            <rect x="3" y="2.5" width="6" height="4.5" fill="url(#ico-fill)"/><path d="M6 7 V18.5 M6 11.5 H11 M6 17 H11"/>
+            <rect x="11" y="9.3" width="11" height="4.5" fill="url(#ico-fill)"/><rect x="11" y="14.8" width="11" height="4.5" fill="url(#ico-fill)"/>
+        </g>
+        <g id="ico-page-up" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width="1.1" stroke-linejoin="round">
+            <rect x="6" y="3" width="14" height="2.6"/><path d="M13 8 L20.5 18 H5.5 Z"/>
+        </g>
+        <g id="ico-page-down" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width="1.1" stroke-linejoin="round">
+            <path d="M5.5 4 H20.5 L13 14 Z"/><rect x="6" y="16.4" width="14" height="2.6"/>
         </g>
         <g id="ico-fit" stroke="#111" fill="none">
             <path d="M4 2 V10 M4 6 H16" stroke-width="1.6"/><path d="M4.5 6 L9 3 V9 Z" fill="#111"/>
@@ -701,11 +784,15 @@ let drag = null, moveModeOn = false, held = false;
 // triangle with its page number, and its branch is a page of its own with that gate on top --------------
 let pageId = new URLSearchParams(location.search).get('page') || '';
 const pagePicker = document.getElementById('page-picker'), pageSelect = document.getElementById('page-select');
+let pageList = [];
 function showPages(pages) {
-    pagePicker.hidden = pages.length < 2;
+    pageList = pages;
+    pagePicker.hidden = true;                          // the explorer tree shows the pages (SFM-194)
     pageSelect.replaceChildren(...pages.map(p => new Option(
         p.id === '' ? '1: the trees' : `${p.number}: ${p.code}${p.title ? ' ' + p.title : ''}`, p.id, false, p.id === pageId)));
     rememberAnalysis();
+    renderExplorer();
+    if (view === 'grid') loadGrid();
 }
 // Is `pos` (model coordinates) on the "…" triangle of a transfer node -- below its ID label box?
 function onTransfer(node, pos) {
@@ -714,6 +801,235 @@ function onTransfer(node, pos) {
     return pos.y >= top + (LABEL_TOP + LABEL_H) * U - 2 && pos.y <= top + BLOCK_H * U + 2
         && pos.x >= left + SYM_X * U - 2 && pos.x <= left + (SYM_X + SYM_W) * U + 2;
 }
+// ---- explorer (SFM-194): the project, its analyses and their fault tree pages as a tree, like Reliability
+// Workbench's "Fault Tree Pages"; a continuation page sits below the page it continues from. A click on a page
+// opens it, on an analysis its first page; the boxes open / close a branch.
+const explorer = document.getElementById('fta-explorer');
+const XP_KEY = 'manualFtaExplorer';
+const xpOpen = new Set();                              // opened branches: "a:<analysis>", "f:<analysis>", "p:<analysis>:<page>"
+let explorerShown = false, xpProject = '', xpAuto = '', xpData = null;
+function setExplorer(show) {
+    explorerShown = show;
+    explorer.hidden = !show;
+    explorer.parentElement.classList.toggle('with-explorer', show);
+    const btn = document.getElementById('toggle-explorer');
+    btn.classList.toggle('active', show); btn.setAttribute('aria-pressed', String(show));
+    try { localStorage.setItem(XP_KEY, show ? '1' : '0'); } catch (e) { /* private window */ }
+    if (cy) cy.resize();
+    if (show) renderExplorer();
+}
+document.getElementById('toggle-explorer').addEventListener('click', () => setExplorer(!explorerShown));
+const XP_ICONS = {
+    project: '<rect x="1.5" y="2" width="14" height="11" fill="#fff" stroke="#3a5ca8"/><rect x="1.5" y="2" width="14" height="2.5" fill="#3a5ca8"/>',
+    analysis: '<rect x="1.5" y="1.5" width="14" height="12" rx="1" fill="url(#ico-fill)" stroke="#3a5ca8"/><path d="M4 5 H13 M4 8 H13 M4 11 H10" stroke="#3a5ca8"/>',
+    folder: '<path d="M1.5 3.5 H6 L7.5 5 H15.5 V13.5 H1.5 Z" fill="#fde68a" stroke="#b45309"/>',
+    page: '<rect x="2.5" y="1.5" width="12" height="12" fill="#fff" stroke="#3a5ca8"/><path d="M8.5 3.5 V6 M5 6 H12 M5 6 V8.5 M12 6 V8.5" stroke="#3a5ca8"/>'
+        + '<rect x="3.5" y="8.5" width="3" height="3" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width=".8"/><rect x="10.5" y="8.5" width="3" height="3" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width=".8"/>',
+};
+function xpItem(key, icon, label, kids, onActivate, current = false) {
+    const li = document.createElement('li');
+    const row = document.createElement('div');
+    row.className = 'xp-row' + (current ? ' current' : '');
+    row.dataset.key = key; row.setAttribute('role', 'treeitem'); row.tabIndex = 0;
+    const open = xpOpen.has(key);
+    if (kids.length) row.setAttribute('aria-expanded', String(open));
+    const tog = document.createElement('span');
+    tog.className = 'xp-tog' + (kids.length ? (open ? '' : ' closed') : ' none');
+    tog.addEventListener('click', e => { e.stopPropagation(); xpToggle(key); });
+    const text = document.createElement('span');
+    text.className = 'xp-label'; text.textContent = label; text.title = label;
+    row.append(tog);
+    row.insertAdjacentHTML('beforeend', `<svg class="xp-ico" viewBox="0 0 17 15">${XP_ICONS[icon]}</svg>`);
+    row.append(text);
+    row.addEventListener('click', onActivate || (() => xpToggle(key)));
+    row.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
+        if (e.key === 'ArrowRight' && kids.length && !open) xpToggle(key);
+        if (e.key === 'ArrowLeft' && open) xpToggle(key);
+    });
+    li.append(row);
+    if (kids.length && open) { const ul = document.createElement('ul'); ul.setAttribute('role', 'group'); ul.append(...kids); li.append(ul); }
+    return li;
+}
+function xpToggle(key) { if (xpOpen.has(key)) xpOpen.delete(key); else xpOpen.add(key); renderExplorer(false); }
+async function xpOpenPage(analysis, page) {
+    setView('diagram');
+    if (analysis !== analysisId) await switchAnalysis(analysis);
+    if (page !== pageId) await goToPage(page);
+}
+async function renderExplorer(refetch = true) {
+    if (!explorerShown) return;
+    try {
+        if (refetch || !xpData) xpData = await api('GET', '/api/manual-fta/explorer');
+        if (!xpProject) xpProject = (await api('GET', '/api/model-identity')).project || 'Project';
+    } catch (e) { return; }
+    // open the way to the current page once each time it changes
+    const auto = analysisId + '|' + pageId;
+    if (auto !== xpAuto) {
+        xpAuto = auto;
+        xpOpen.add('a:' + analysisId); xpOpen.add('f:' + analysisId); xpOpen.add(`p:${analysisId}:${pageId}`);
+        const mine = (xpData.analyses.find(a => a.id === analysisId) || { pages: [] }).pages;
+        let cur = mine.find(p => p.id === pageId);
+        while (cur && cur.parent != null) { xpOpen.add(`p:${analysisId}:${cur.parent}`); cur = mine.find(p => p.id === cur.parent); }
+    }
+    const analysesItems = xpData.analyses.map(a => {
+        const below = id => a.pages.filter(p => p.parent === id);
+        const pageItem = p => xpItem(`p:${a.id}:${p.id}`, 'page', p.id === '' ? 'Page 1: the trees' : `${p.code}: ${p.title || ''}`,
+            below(p.id).map(pageItem), () => xpOpenPage(a.id, p.id), a.id === analysisId && p.id === pageId);
+        const roots = a.pages.filter(p => p.parent == null).map(pageItem);
+        const folder = xpItem('f:' + a.id, 'folder', 'Fault Tree Pages', roots);
+        return xpItem('a:' + a.id, 'analysis', `${a.name} (${a.trees} tree${a.trees === 1 ? '' : 's'})`, [folder],
+            () => { xpOpen.add('a:' + a.id); xpOpen.add('f:' + a.id); if (a.id !== analysisId) switchAnalysis(a.id); else renderExplorer(false); });
+    });
+    xpOpen.add('root');
+    const ul = document.createElement('ul'); ul.setAttribute('role', 'tree');
+    ul.append(xpItem('root', 'project', xpProject, analysesItems));
+    const keep = explorer.scrollTop;
+    explorer.replaceChildren(ul);
+    explorer.scrollTop = keep;
+    const cur = explorer.querySelector('.xp-row.current');
+    if (cur && refetch) cur.scrollIntoView({ block: 'nearest' });
+}
+// ---- Diagram / Grid (SFM-195): every gate or every basic event as a table with all its information, a search
+// over all columns and a filter per column, sorted by a click on a column header; a double-click shows the event
+// in the diagram (its page, selected). Rows: GET /api/manual-fta/table (manual_fta.table()).
+let view = 'diagram', gridData = null, gridSort = { key: 'id', dir: 1 }, gridSelected = null;
+const gridFilters = { gates: {}, events: {} };
+const idList = v => (v || []).join(", ");
+const COLOR_NAMES = { yellow: 'yellow', green: 'green', red: 'red', orange: 'orange', grey: 'grey', purple: 'purple' };
+const GRID_COLUMNS = {
+    gates: [
+        ['id', 'ID', r => r.id], ['kind', 'Kind', r => r.kind === 'top' ? 'Top event' : 'Gate'], ['title', 'Title', r => r.title],
+        ['type', 'Type', r => r.type], ['n_inputs', 'Inputs', r => r.inputs.length, true], ['inputs', 'Input IDs', r => idList(r.inputs)],
+        ['parents', 'Below (parents)', r => idList(r.parents)], ['trees', 'Tree (top event)', r => idList(r.trees)],
+        ['page', 'Page', r => r.page_number ? String(r.page_number) + (r.new_page ? (r.kind === 'top' ? ' (own page)' : ' (continued here)') : '') : '', true],
+        ['criticality', 'H category / ASIL', r => r.criticality], ['label', 'Label', r => r.label],
+        ['color', 'Colour', r => COLOR_NAMES[r.color] || ''], ['occurrences', 'Occurrences', r => r.occurrences, true],
+        ['description', 'Description', r => r.description], ['analysis', 'Analysis', r => r.analysis_name]],
+    events: [
+        ['id', 'ID', r => r.id], ['title', 'Title', r => r.title], ['parents', 'Below (parents)', r => idList(r.parents)],
+        ['trees', 'Tree (top event)', r => idList(r.trees)], ['page', 'Page', r => r.page_number ? String(r.page_number) : '', true],
+        ['criticality', 'H category / ASIL', r => r.criticality], ['label', 'Label', r => r.label],
+        ['color', 'Colour', r => COLOR_NAMES[r.color] || ''], ['occurrences', 'Occurrences', r => r.occurrences, true],
+        ['description', 'Description', r => r.description], ['analysis', 'Analysis', r => r.analysis_name]],
+};
+function setView(v) {
+    if (v === view) return;
+    view = v;
+    const grid = v === 'grid';
+    document.getElementById('fta-grid').hidden = !grid;
+    document.getElementById('manual-fta-graph').style.visibility = grid ? 'hidden' : '';
+    for (const [id, on] of [['view-diagram', !grid], ['view-grid', grid]]) {
+        const b = document.getElementById(id);
+        b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on));
+    }
+    if (grid) loadGrid(); else if (cy) cy.resize();
+}
+document.getElementById('view-diagram').addEventListener('click', () => setView('diagram'));
+document.getElementById('view-grid').addEventListener('click', () => setView('grid'));
+async function loadGrid() {
+    const all = document.getElementById('grid-scope').value === 'all';
+    try { gridData = await api('GET', '/api/manual-fta/table?analysis=' + encodeURIComponent(all ? '' : analysisId)); }
+    catch (e) { gridData = { gates: [], events: [] }; }
+    renderGrid();
+}
+function renderGrid() {
+    if (!gridData) return;
+    const kind = document.getElementById('grid-kind').value, cols = GRID_COLUMNS[kind], filters = gridFilters[kind];
+    const search = document.getElementById('grid-search').value.trim().toLowerCase();
+    const text = (c, r) => { const v = c[2](r); return v === null || v === undefined ? '' : String(v); };
+    let rows = gridData[kind].filter(r =>
+        (!search || cols.some(c => text(c, r).toLowerCase().includes(search)))
+        && cols.every(c => !filters[c[0]] || text(c, r).toLowerCase().includes(filters[c[0]].toLowerCase())));
+    const sortCol = cols.find(c => c[0] === gridSort.key) || cols[0];
+    rows = rows.slice().sort((a, b) => {
+        const x = sortCol[2](a), y = sortCol[2](b);
+        const cmp = sortCol[3] ? (parseFloat(x) || 0) - (parseFloat(y) || 0)
+                               : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' });
+        return cmp * gridSort.dir;
+    });
+    const table = document.getElementById('grid-table');
+    const head = document.createElement('tr'), filterRow = document.createElement('tr');
+    filterRow.className = 'grid-filters';
+    for (const c of cols) {
+        const th = document.createElement('th');
+        th.textContent = c[1] + (gridSort.key === c[0] ? (gridSort.dir > 0 ? ' \u25B2' : ' \u25BC') : '');
+        th.dataset.key = c[0];
+        th.addEventListener('click', () => { gridSort = { key: c[0], dir: gridSort.key === c[0] ? -gridSort.dir : 1 }; renderGrid(); });
+        head.append(th);
+        const fth = document.createElement('th'), input = document.createElement('input');
+        input.type = 'search'; input.value = filters[c[0]] || ''; input.dataset.key = c[0];
+        input.placeholder = 'Filter'; input.setAttribute('aria-label', 'Filter ' + c[1]);
+        input.addEventListener('input', () => {
+            filters[c[0]] = input.value;
+            const pos = input.selectionStart;
+            renderGrid();
+            const again = table.querySelector(`thead input[data-key="${c[0]}"]`);
+            if (again) { again.focus(); again.setSelectionRange(pos, pos); }
+        });
+        fth.append(input); filterRow.append(fth);
+    }
+    table.tHead.replaceChildren(head, filterRow);
+    const body = document.createDocumentFragment();
+    for (const r of rows) {
+        const tr = document.createElement('tr');
+        tr.dataset.id = r.id;
+        if (r.id === gridSelected) tr.classList.add('selected');
+        for (const c of cols) {
+            const td = document.createElement('td'), v = text(c, r);
+            td.textContent = v; td.title = v;
+            if (c[3]) td.className = 'num';
+            tr.append(td);
+        }
+        tr.addEventListener('click', () => {
+            gridSelected = r.id;
+            table.querySelectorAll('tbody tr.selected').forEach(x => x.classList.remove('selected'));
+            tr.classList.add('selected');
+        });
+        tr.addEventListener('dblclick', () => showInDiagram(r));
+        tr.title = 'Double-click: show it in the diagram';
+        body.append(tr);
+    }
+    table.tBodies[0].replaceChildren(body);
+    const total = gridData[kind].length;
+    document.getElementById('grid-count').textContent =
+        `${rows.length} of ${total} ${kind === 'gates' ? 'gate' : 'basic event'}${total === 1 ? '' : 's'}`;
+}
+async function showInDiagram(r) {
+    setView('diagram');
+    if (r.analysis !== analysisId) await switchAnalysis(r.analysis);
+    if (r.page !== pageId) await goToPage(r.page);
+    const node = cy && cy.$id(r.at);
+    if (node && node.length) { choose(node); cy.animate({ center: { eles: node }, duration: 250 }); }
+}
+document.getElementById('grid-kind').addEventListener('change', () => { gridSort = { key: 'id', dir: 1 }; renderGrid(); });
+document.getElementById('grid-scope').addEventListener('change', loadGrid);
+document.getElementById('grid-search').addEventListener('input', renderGrid);
+document.getElementById('grid-clear').addEventListener('click', () => {
+    const kind = document.getElementById('grid-kind').value;
+    gridFilters[kind] = {}; document.getElementById('grid-search').value = ''; renderGrid();
+});
+// ---- SFM-193: the side triangle of a gate continued from an earlier page ("…": a click goes back there) and the
+// page above / page below buttons
+function onPageStart(node, pos) {
+    if (!node.data('page_start') || !pos) return false;
+    const c = node.position(), top = c.y - BLOCK_H * U / 2, left = c.x - BOX_W * U / 2, x = BOX_W / 2 + SIDE_DX;
+    return pos.y >= top + SIDE_Y * U - 2 && pos.y <= top + (SIDE_Y + SIDE_TRI_H) * U + 2
+        && pos.x >= left + (x - SIDE_TRI_HALF) * U - 2 && pos.x <= left + (x + SIDE_TRI_HALF) * U + 2;
+}
+const pageAbove = () => { const cur = pageList.find(p => p.id === pageId); return cur && cur.parent != null ? cur.parent : null; };
+function pageBelow() {
+    const node = chosen && cy && cy.$id(chosen);
+    if (node && node.length && node.data('symbol') === 'transfer') return node.data('code');      // the selected one
+    const child = pageList.find(p => p.parent === pageId);
+    return child ? child.id : null;
+}
+function updatePageButtons() {
+    document.getElementById('page-up').disabled = pageAbove() === null;
+    document.getElementById('page-down').disabled = pageBelow() === null;
+}
+document.getElementById('page-up').addEventListener('click', () => { const id = pageAbove(); if (id !== null) goToPage(id); });
+document.getElementById('page-down').addEventListener('click', () => { const id = pageBelow(); if (id !== null) goToPage(id); });
 async function goToPage(id) {
     pageId = id;
     setAddMode(null); clearPicks(); unchoose();
@@ -733,9 +1049,10 @@ function paintChosen() {
     if (!node || !node.length) { chosen = null; return; }
     node.addClass('chosen');
     node.data('svg', blockSvg({ ...node.data(), fill: CHOSEN_FILL, text_color: '#fff' }));
+    updatePageButtons();
 }
 function choose(node) { chosen = node.id(); paintChosen(); }
-function unchoose() { clearTimeout(renameTimer); if (chosen) { chosen = null; paintChosen(); } }
+function unchoose() { clearTimeout(renameTimer); if (chosen) { chosen = null; paintChosen(); } updatePageButtons(); }
 // Is `pos` (model coordinates) on the ID label box of `node`? A second click there renames the ID (SFM-188).
 function onIdLabel(node, pos) {
     if (!pos) return false;
@@ -996,6 +1313,7 @@ async function loadGraph(options = {}) {
         if (addMode) { placeOn(evt.target); return; }
         if (picked.size) { clearPicks(); return; }                             // a plain click first just unselects
         if (onTransfer(evt.target, evt.position)) { goToPage(evt.target.data('code')); return; }   // "…": its page
+        if (onPageStart(evt.target, evt.position)) { goToPage(evt.target.data('from_page_id')); return; }   // back (SFM-193)
         // SFM-185: the first click selects; a click on the selected event renames it -- unless it is the second
         // click of a double-click, which opens the edit dialog (dbltap below)
         if (chosen === evt.target.id()) {
@@ -1014,10 +1332,12 @@ async function loadGraph(options = {}) {
     cy.on('pan zoom', positionRename);
     // the "…" triangle of a branch continued on another page: a pointer hand and a tooltip over it
     cy.on('mousemove', evt => {
-        const over = evt.target !== cy && evt.target.isNode && evt.target.isNode() && onTransfer(evt.target, evt.position);
+        const node = evt.target !== cy && evt.target.isNode && evt.target.isNode() ? evt.target : null;
+        const over = node && onTransfer(node, evt.position), back = node && onPageStart(node, evt.position);
         const box = cy.container();
-        box.style.cursor = over ? 'pointer' : '';
-        box.title = over ? `Go to page ${evt.target.data('page_number')} (${evt.target.data('code')} continues there)` : '';
+        box.style.cursor = over || back ? 'pointer' : '';
+        box.title = over ? `Go to page ${node.data('page_number')} (${node.data('code')} continues there)`
+                  : back ? `Back to page ${node.data('from_page')} (${node.data('code')} continues from there)` : '';
     });
     cy.on('tap', evt => {                                                      // a plain click on the empty canvas
         const oe = evt.originalEvent || {};
@@ -1118,7 +1438,7 @@ const TOUR = [
         <b>title / description / label</b>, a <b>criticality</b> (<code>ASIL B</code>, <code>H3+</code> &ndash; exact) or a
         <b>colour</b> (<code>yellow</code>; <code>blue</code> = standard). Here: &ldquo;bulb&rdquo; finds the two bulbs.</p>
         <p>${K('Enter')} / ${K('Shift')}+${K('Enter')} next / previous match, ${K('Esc')} closes.</p>` },
-    { el: '#analysis-select', title: 'Analyses', text: `<p>An <b>analysis</b> is a separate set of fault trees (like pages);
+    { el: '#fta-explorer', title: 'Analyses', text: `<p>An <b>analysis</b> is a separate set of fault trees (like pages);
         choose it here. <b>File</b> creates, renames, duplicates (new IDs) and deletes analyses. IDs are unique across
         all of them.</p>` },
     { el: '#menubar .menu:nth-child(2)', title: 'Import / Export', text: `<p><b>Export JPG</b>: a sharp image of the diagram.
@@ -1432,6 +1752,12 @@ loadGraph = async function (options = {}) {
     }
 };
 
+// the explorer: shown on wide screens (not in a Structure View window), the choice remembered per browser (SFM-194)
+{
+    let show = window.innerWidth > 900 && window.parent === window;
+    try { const v = localStorage.getItem(XP_KEY); if (v !== null) show = v === '1'; } catch (e) { /* private window */ }
+    setExplorer(show);
+}
 loadAnalyses().then(() => loadGraph()).then(() => {
     let seen = true;
     try { seen = !!localStorage.getItem('faultTreeTourSeen'); } catch (e) { /* private window */ }
