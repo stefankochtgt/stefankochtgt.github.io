@@ -4,7 +4,8 @@
 // window.fetch is wrapped, so /api/manual-fta/... and /api/model-identity never leave the browser. The data
 // lives in localStorage. The logic is a port of app/services/manual_fta.py (analyses, events, repeated
 // events with scopes, move / copy / copy with new IDs, criticality, colour, layout) and of the manual part
-// of app/services/fta_export.py (XML export / import, same format as the app) -- keep them in step.
+// of app/services/fta_export.py (XML export / import, same format as the app; rwb_import.py for Reliability
+// Workbench XML) -- keep them in step.
 (function () {
     'use strict';
     const STORE = 'faultTreeProMax.v1';
@@ -106,7 +107,7 @@
     const signature = e => JSON.stringify([e.id, e.title, e.description, e.label, e.kind, e.gate, e.criticality, e.color, !!e.new_page,
                                           e.causes.map(signature)]);
     function cloneNewIds(e, tops, counters, asTop) {
-        const n = ev({ ...e, id: newId(tops, counters, asTop ? 'top' : e.kind), causes: [], analysis: '', new_page: e.new_page && !asTop });
+        const n = ev({ ...e, id: newId(tops, counters, asTop ? 'top' : e.kind), causes: [], analysis: '', new_page: !!e.new_page });
         const holder = [n];
         for (const c of e.causes) n.causes.push(cloneNewIds(c, tops.concat(holder), counters, false));
         return n;
@@ -181,8 +182,7 @@
             if (b.gate !== undefined && !GATES.includes(b.gate)) throw new FtaError(`Unknown gate '${b.gate}'.`);
             const crit = b.criticality !== undefined ? checkCrit(b.criticality) : null;
             const col = b.color !== undefined ? checkColor(b.color) : null;
-            if (b.new_page) {                                    // SFM-184
-                if (!tg[0][1]) throw new FtaError(`${id} is a top event -- it already starts a page.`);
+            if (b.new_page) {                                    // SFM-184; a top event: its tree on a page of its own (SFM-192)
                 if ((b.kind || first.kind) === 'basic') throw new FtaError(`${id} is a basic event -- only a gate's branch can continue on a new page.`);
             }
             const kindId = b.kind !== undefined && b.kind !== first.kind && tg[0][1] ? newId(data.tops, data.counters, b.kind) : null;
@@ -296,9 +296,11 @@
         return Math.max(LEAF_W, w.reduce((a, b) => a + b, 0) + H_GAP * (w.length - 1));
     }
     // manual_fta.pages(): page 1 = the trees, then one page per event marked new_page (once per ID, tree order)
+    // a top event marked new_page: its tree on a page of its own, page 1 only for the other trees (SFM-192)
     function pagesOf(tops) {
-        const result = [{ id: '', number: 1, code: '', title: '', at: '' }], seen = new Set();
-        (function visit(list, paths) {
+        const loose = tops.filter(t => !t.new_page);
+        const result = loose.length || !tops.length ? [{ id: '', number: 1, code: '', title: '', at: '' }] : [], seen = new Set();
+        function visit(list, paths) {
             list.forEach((e, k) => {
                 for (const c of e.causes) {
                     const here = `${paths[k]}/${c.id}`;
@@ -306,7 +308,14 @@
                     visit([c], [here]);
                 }
             });
-        })(tops, tops.map(t => t.id));
+        }
+        visit(loose, loose.map(t => t.id));
+        for (const t of tops) {
+            if (!t.new_page || seen.has(t.id)) continue;
+            seen.add(t.id);
+            result.push({ id: t.id, number: result.length + 1, code: t.id, title: t.title, at: t.id });
+            visit([t], [t.id]);
+        }
         return result;
     }
     function buildGraph(data, analysis, page = '') {
@@ -334,13 +343,15 @@
                 cursor += w[i] + H_GAP;
             });
         }
-        if (start) {                                       // a continuation page: the branch alone
+        if (start) {                                       // a continuation page: the branch alone; or a tree on its own page
             const [e, , path] = resolve(tops, start.code, start.at);
-            place(e, width(e) / 2, 0, path.split('/')[0], path.slice(0, path.lastIndexOf('/')));
+            const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+            place(e, width(e) / 2, 0, path.split('/')[0], parent);
+            if (parent) nodes[0].data.page_start = true;   // continued from an earlier page: the side triangle
             return { nodes, edges };
         }
         let cursor = 0;
-        for (const t of tops) { const w = width(t); place(t, cursor + w / 2, 0, t.id, ''); cursor += w + H_GAP * 3; }
+        for (const t of tops.filter(x => !x.new_page)) { const w = width(t); place(t, cursor + w / 2, 0, t.id, ''); cursor += w + H_GAP * 3; }
         return { nodes, edges };
     }
 
@@ -368,6 +379,62 @@
         for (const t of data.tops.filter(x => !analysis || x.analysis === analysis)) s += `  <tree top="${esc(t.id)}">\n${eventXml(t, 2)}  </tree>\n`;
         return s + '</faultTreeExport>\n';
     }
+    // the trees as Reliability Workbench XML -- rwb_import.py :: to_rwb_xml() (SFM-190), the same text
+    const RWB_COLUMNS = {
+        GateInputs: [['Gate', 'string'], ['ObjectIndex', 'int'], ['ObjectType', 'string'], ['SubIndex', 'int']],
+        Gates: [['Id', 'string'], ['Description', 'string'], ['LabelText', 'string'], ['Page', 'boolean'], ['Type', 'string']],
+        PrimaryEvents: [['Id', 'string'], ['AsilEnabled', 'boolean'], ['AsilRequirement', 'string'], ['Description', 'string'],
+                        ['EventType', 'string'], ['Notes1', 'string']],
+    };
+    const RWB_NOT_EXPORTED = "description texts, colours, the label of a basic event, and a gate's label when it also has a "
+                           + "criticality (RWB's LabelText holds one of the two)";
+    function exportRwbXml(data, analysis) {
+        const tops = data.tops.filter(t => !analysis || t.analysis === analysis);
+        const x = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const gates = [], events = [], index = new Map();
+        const collect = (e, isTop) => {
+            if (index.has(e.id)) return;
+            if (e.kind === 'basic' && !isTop) { index.set(e.id, ['event', events.length]); events.push(e); return; }
+            index.set(e.id, ['gate', gates.length]); gates.push(e);
+            e.causes.forEach(c => collect(c, false));
+        };
+        tops.forEach(t => collect(t, true));
+        const topIds = new Set(tops.map(t => t.id));
+        const row = (table, values) => [`  <${table}>`, ...RWB_COLUMNS[table].map(([name]) => {
+            const v = values[name] || '';
+            return v !== '' ? `    <${name}>${x(v)}</${name}>` : `    <${name} />`;
+        }), `  </${table}>`];
+        const schema = ['  <xs:schema id="XMLExport" xmlns="" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">',
+            '    <xs:element name="XMLExport" msdata:IsDataSet="true" msdata:UseCurrentLocale="true">',
+            '      <xs:complexType>', '        <xs:choice minOccurs="0" maxOccurs="unbounded">'];
+        for (const [table, cols] of Object.entries(RWB_COLUMNS)) {
+            schema.push(`          <xs:element name="${table}">`, '            <xs:complexType>', '              <xs:sequence>');
+            for (const [name, kind] of cols) schema.push(`                <xs:element name="${name}" type="xs:${kind}"${name === 'Id' ? '' : ' minOccurs="0"'} />`);
+            schema.push('              </xs:sequence>', '            </xs:complexType>', '          </xs:element>');
+        }
+        schema.push('        </xs:choice>', '      </xs:complexType>',
+            '      <xs:unique name="Constraint1" msdata:PrimaryKey="true">',
+            '        <xs:selector xpath=".//Gates" />', '        <xs:field xpath="Id" />', '      </xs:unique>',
+            '      <xs:unique name="PrimaryEvents_Constraint1" msdata:ConstraintName="Constraint1" msdata:PrimaryKey="true">',
+            '        <xs:selector xpath=".//PrimaryEvents" />', '        <xs:field xpath="Id" />', '      </xs:unique>',
+            '    </xs:element>', '  </xs:schema>');
+        const inputs = [], rows = [];
+        for (const g of gates) g.causes.forEach((c, order) => {
+            const [table, r] = index.get(c.id);
+            inputs.push(...row('GateInputs', { Gate: g.id, ObjectIndex: String(r), ObjectType: table === 'gate' ? 'Gate' : 'Primary event', SubIndex: String(order) }));
+        });
+        for (const g of gates) {
+            const n = g.causes.length, type = n > 1 ? g.gate.toUpperCase() : n === 1 ? 'NULL' : 'TRANSFER';
+            rows.push(...row('Gates', { Id: g.id, Description: g.title, LabelText: g.criticality || g.label,
+                                        Page: g.new_page && !topIds.has(g.id) ? 'true' : 'false', Type: type }));
+        }
+        for (const e of events) rows.push(...row('PrimaryEvents', { Id: e.id, AsilEnabled: 'false', AsilRequirement: 'QM',
+                                                                    Description: e.title, EventType: 'Basic', Notes1: e.criticality }));
+        const head = ['<?xml version="1.0" standalone="yes"?>',
+            `<!-- Fault trees exported by ${x(TOOL)} for Isograph Reliability Workbench (import with the template IntegrityWorkbench_FTA.rwb-impx). Not carried over: ${RWB_NOT_EXPORTED}. -->`,
+            '<XMLExport>'];
+        return head.concat(schema, inputs, rows, ['</XMLExport>']).join('\n') + '\n';
+    }
     function parseEvent(el) {
         return ev({ id: el.getAttribute('id') || '', title: (el.querySelector(':scope > title') || {}).textContent || '',
             description: (el.querySelector(':scope > description') || {}).textContent || '', label: el.getAttribute('label') || '',
@@ -388,16 +455,105 @@
         if (el.getAttribute('kind') === 'basic' && kids.length) errors.push(`${where}: a basic event cannot have events below it.`);
         kids.forEach(k => checkEvents(k, where, errors));
     }
+    // Isograph Reliability Workbench XML export -> the manual export format (rwb_import.py, SFM-189) -- keep in step
+    function rwbToManual(root) {
+        const rows = tag => [...root.children].filter(c => c.tagName === tag);
+        const text = (el, name) => { const c = [...el.children].find(x => x.tagName === name); return c ? c.textContent.trim() : ''; };
+        const oneLine = s => s.split(/\s+/).filter(Boolean).join(' ');
+        const crit = v => { v = v.trim(); return CRITICALITY_LEVELS.includes(v) ? v : CRITICALITY_LEVELS.includes('ASIL ' + v) ? 'ASIL ' + v : ''; };
+        const gates = rows('Gates'), events = rows('PrimaryEvents');
+        const notes = ['Isograph Reliability Workbench XML export -- read: Gates, PrimaryEvents, GateInputs (everything else in the file is not used).'];
+        const errors = [], used = new Set(), renamed = [];
+        const transfers = new Set(), inhibits = new Set(), otherEvents = new Map();   // insertion-ordered, once per ID
+        const listed = (ids, limit = 10) => ids.slice(0, limit).join(', ') + (ids.length > limit ? ` ... and ${ids.length - limit} more` : '');
+        const cleanId = (raw, row) => {
+            let neu = raw.replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^[_.-]+|[_.-]+$/g, '') || row;
+            const base = neu; let n = 2;
+            while (used.has(neu)) neu = `${base}_${n++}`;
+            used.add(neu);
+            if (neu !== raw) renamed.push(`'${raw}' -> ${neu}`);
+            return neu;
+        };
+        const gateIds = gates.map((g, i) => cleanId(text(g, 'Id'), `GATE${i}`));
+        const eventIds = events.map((e, i) => cleanId(text(e, 'Id'), `EVENT${i}`));
+        const gateRow = new Map(gates.map((g, i) => [text(g, 'Id'), i]));
+        const inputs = new Map();
+        for (const el of rows('GateInputs')) {
+            const gate = text(el, 'Gate'), kind = text(el, 'ObjectType');
+            const index = Number(text(el, 'ObjectIndex')), order = Number(text(el, 'SubIndex') || 0);
+            if (text(el, 'ObjectIndex') === '' || !Number.isInteger(index) || !Number.isInteger(order)) { errors.push(`GateInputs of ${gate}: ObjectIndex / SubIndex is not a number.`); continue; }
+            if (!gateRow.has(gate)) { errors.push(`GateInputs: there is no gate ${gate}.`); continue; }
+            const table = kind === 'Gate' ? 'gate' : kind === 'Primary event' ? 'event' : '';
+            if (!table) { errors.push(`GateInputs of ${gate}: unknown ObjectType '${kind}'.`); continue; }
+            if (!(index >= 0 && index < (table === 'gate' ? gates.length : events.length))) {
+                errors.push(`GateInputs of ${gate}: there is no ${table === 'gate' ? 'gate' : 'primary event'} in row ${index} (ObjectIndex is the row position, 0-based).`);
+                continue;
+            }
+            if (!inputs.has(gate)) inputs.set(gate, []);
+            inputs.get(gate).push([order, table, index]);
+        }
+        for (const ins of inputs.values()) ins.sort((a, b) => a[0] - b[0] || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0) || a[2] - b[2]);
+        const all = [...inputs.values()].flat();
+        const usedGates = new Set(all.filter(x => x[1] === 'gate').map(x => x[2]));
+        const usedEvents = new Set(all.filter(x => x[1] === 'event').map(x => x[2]));
+        const eventXmlOf = (i, pad) => {
+            const e = events[i], kind = text(e, 'EventType') || 'Basic';
+            if (kind === 'House' || kind === 'Conditional') errors.push(`${eventIds[i]}: a ${kind.toLowerCase()} event changes the logic -- the Manual FTA has no such event.`);
+            else if (kind !== 'Basic') { if (!otherEvents.has(kind)) otherEvents.set(kind, new Set()); otherEvents.get(kind).add(eventIds[i]); }
+            let c = crit(text(e, 'Notes1'));
+            if (!c && text(e, 'AsilEnabled') === 'true') c = crit(text(e, 'AsilRequirement'));
+            return `${pad}<event id="${esc(eventIds[i])}" kind="basic" gate="or"${c ? ` criticality="${esc(c)}"` : ''}><title>${esc(oneLine(text(e, 'Description')))}</title></event>\n`;
+        };
+        const gateXmlOf = (i, stack, isTop, pad) => {
+            const g = gates[i], gid = gateIds[i], kind = text(g, 'Type').toUpperCase(), ins = inputs.get(text(g, 'Id')) || [];
+            let gate = 'or', label = oneLine(text(g, 'LabelText'));
+            if (kind === 'AND') gate = 'and';
+            else if (kind === 'INHIBIT') {                       // RWB evaluates it as AND of its inputs
+                gate = 'and'; inhibits.add(gid);
+                if (!crit(label)) label = label ? `INHIBIT: ${label}` : 'INHIBIT';
+            }
+            else if (kind === 'NULL') { if (ins.length > 1) errors.push(`${gid}: a NULL gate with ${ins.length} inputs (it passes on exactly one).`); }
+            else if (kind === 'TRANSFER') {
+                if (!ins.length) transfers.add(gid);
+                else if (ins.length > 1) errors.push(`${gid}: a transfer gate with ${ins.length} inputs.`);
+            } else if (kind !== 'OR') errors.push(`${gid}: ${kind || 'no'} gate -- the Manual FTA has only AND / OR gates (INHIBIT is imported as AND, NULL and TRANSFER as a single-input OR).`);
+            let a = ` id="${esc(gid)}" kind="intermediate" gate="${gate}"`;
+            if (label) a += crit(label) ? ` criticality="${esc(crit(label))}"` : ` label="${esc(label)}"`;
+            if (isTop || text(g, 'Page') === 'true') a += ' newPage="true"';   // every top event a page of its own (SFM-192)
+            let s = `${pad}<event${a}><title>${esc(oneLine(text(g, 'Description')))}</title>\n`;
+            for (const [, table, index] of ins) {
+                if (table === 'event') s += eventXmlOf(index, pad + '  ');
+                else if (stack.includes(index)) errors.push(`${gid}: input ${gateIds[index]} loops back to a gate above it.`);
+                else s += gateXmlOf(index, stack.concat([index]), false, pad + '  ');
+            }
+            return s + `${pad}</event>\n`;
+        };
+        let s = `<faultTreeExport format="${FORMAT}" version="${VERSION}" source="manual">\n  <model source="Isograph Reliability Workbench XML export"/>\n`;
+        gates.forEach((g, i) => { if (!usedGates.has(i)) s += `  <tree top="${esc(gateIds[i])}">\n${gateXmlOf(i, [i], true, '    ')}  </tree>\n`; });
+        if (gates.length && gates.every((g, i) => usedGates.has(i))) errors.push('Every gate is another gate\'s input -- no top event (the gates loop).');
+        const nTops = gates.filter((g, i) => !usedGates.has(i)).length;
+        if (nTops) notes.push(`${nTops} top event(s), each a fault tree page of its own.`);
+        if (renamed.length) notes.push(`${renamed.length} ID(s) made valid (letters, digits, - _ . only, one ID per event): ${listed(renamed, 5)}.`);
+        if (inhibits.size) notes.push(`${inhibits.size} INHIBIT gate(s) imported as AND gates labelled INHIBIT (RWB evaluates an INHIBIT gate as AND of its inputs): ${listed([...inhibits])}.`);
+        if (transfers.size) notes.push(`${transfers.size} transfer gate(s) without inputs here, imported as gates with nothing below them (drawn as a triangle): ${listed([...transfers])}.`);
+        for (const [kind, ids] of otherEvents) notes.push(`${ids.size} ${kind} event(s) imported as basic events: ${listed([...ids])}.`);
+        const loose = eventIds.filter((id, i) => !usedEvents.has(i));
+        if (loose.length) notes.push(`${loose.length} event(s) below no gate, left out: ${listed(loose)}.`);
+        if (gates.concat(events).some(x => text(x, 'Description').includes('\n'))) notes.push('Line breaks in descriptions became spaces (the box wraps the title itself).');
+        if (!gates.length) errors.push('The Reliability Workbench file contains no gates.');
+        return { root: new DOMParser().parseFromString(s + '</faultTreeExport>\n', 'application/xml').documentElement, notes, errors: [...new Set(errors)] };
+    }
     function previewImport(data, text, analysis) {
         const doc = new DOMParser().parseFromString(text, 'application/xml');
         if (doc.querySelector('parsererror')) throw new FtaError('Not a readable XML file.');
-        const root = doc.documentElement;
+        let root = doc.documentElement, notes = [], conversionErrors = [];
+        if (root.tagName === 'XMLExport') ({ root, notes, errors: conversionErrors } = rwbToManual(root));
         if (root.tagName !== 'faultTreeExport' || root.getAttribute('format') !== FORMAT)
-            throw new FtaError('Not an Integrity Workbench fault tree export (<faultTreeExport format="safety-model-fta">).');
+            throw new FtaError('Not an Integrity Workbench fault tree export (<faultTreeExport format="safety-model-fta">) or a Reliability Workbench XML export (<XMLExport>).');
         if (root.getAttribute('version') !== VERSION) throw new FtaError(`Export format version ${root.getAttribute('version')} is not supported (this tool reads ${VERSION}).`);
         const modelEl = root.querySelector(':scope > model');
         const model = modelEl ? Object.fromEntries([...modelEl.attributes].map(a => [a.name, a.value])) : {};
-        const preview = { model, trees: [], errors: [], tops: [] };
+        const preview = { model, trees: [], errors: [...conversionErrors], notes, tops: [] };
         if (root.getAttribute('source') !== 'manual') {
             preview.errors.push(`This file holds ${(root.getAttribute('source') || '?').replace('_', '-')} fault trees -- only Manual FTA trees can be imported.`);
             return preview;
@@ -472,7 +628,7 @@
             const analysis = q.get('analysis') || '', tops = analysis ? data.tops.filter(t => t.analysis === analysis) : data.tops;
             const pageList = pagesOf(tops);
             let page = q.get('page') || '';
-            if (!pageList.some(x => x.id === page)) page = '';
+            if (!pageList.some(x => x.id === page)) page = pageList.length ? pageList[0].id : '';   // SFM-192
             return { ...buildGraph(data, analysis, page), pages: pageList, page };
         }
         if (p === '/api/manual-fta/example-graph') return buildGraph({ tops: exampleTops() }, '');
@@ -483,7 +639,7 @@
             const preview = previewImport(data, body, q.get('analysis') || '');
             const apply = q.get('apply') === 'true';
             if (apply && !preview.errors.length) applyImport(data, preview);
-            const out = { model: preview.model, trees: preview.trees, errors: preview.errors,
+            const out = { model: preview.model, trees: preview.trees, errors: preview.errors, notes: preview.notes,
                           applied: apply && !preview.errors.length, current_revision: revisionId(load()) };
             if (preview.errors.length) throw Object.assign(new FtaError(preview.errors[0]), { body: out });
             return out;
@@ -540,15 +696,16 @@
             exported: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), tool: TOOL });
     }
     document.addEventListener('click', e => {
-        const link = e.target.closest && e.target.closest('a#export-xml, a#export-tex');
+        const link = e.target.closest && e.target.closest('a#export-xml, a#export-tex, a#export-rwb');
         if (!link) return;
         e.preventDefault();
         const analysis = new URL(link.href, location.href).searchParams.get('analysis') || '';
         const data = load(), base = `fault_trees_${analysis || 'all'}_${revisionId(data)}`;
         if (link.id === 'export-xml') download(exportXml(data, analysis), 'application/xml', base + '.xml');
+        else if (link.id === 'export-rwb') download(exportRwbXml(data, analysis), 'application/xml', base + '_rwb.xml');
         else download(exportTex(data, analysis), 'application/x-tex', base + '.tex');
     }, true);
 
-    window.FaultTreeProMax = { load, STORE, exportXml: a => exportXml(load(), a), exportTex: a => exportTex(load(), a),
+    window.FaultTreeProMax = { load, STORE, exportXml: a => exportXml(load(), a), exportRwbXml: a => exportRwbXml(load(), a), exportTex: a => exportTex(load(), a),
                                graph: a => buildGraph(load(), a) };   // for tests and the curious
 })();

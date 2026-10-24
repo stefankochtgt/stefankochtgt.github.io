@@ -36,6 +36,11 @@ const GATE_PATHS = {
     transfer: `M${SYM_W / 2} ${TRI_TIP - SYM_TOP} L${SYM_W} ${SYM_H} H0 Z`,
 };
 const TRANSFER_TEXT_Y = (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 0.5;
+// A gate continued from an earlier page (Manual FTA, on top of its continuation page: data.page_start) gets a small
+// transfer-in triangle on the side, joined to the stub by a short line -- as Reliability Workbench draws it
+// (user, 2026-10-23, screenshot). fta_tikz.py / standalone/fta_tikz.js draw the same.
+const SIDE_Y = SYM_TOP - 2, SIDE_DX = 28, SIDE_TRI_H = 12, SIDE_TRI_HALF = 7;
+const pageStart = d => !!d.page_start;      // not a tree on a page of its own (SFM-192): nothing continues there
 
 // ---- the title always fits its description box (SFM-186) -------------------------------------------
 // app/services/text_fit.py :: fit_title(), line for line (a browser test compares them): measured with the
@@ -137,6 +142,10 @@ function blockSvg(d) {
         const stubEnd = d.symbol === 'none' ? LABEL_TOP : d.symbol === 'triangle' || d.symbol === 'transfer' ? TRI_TIP : SYM_TOP;
         body = `<rect x="0" y="0" width="${BOX_W}" height="${BOX_H}"${d.shared ? ' stroke-dasharray="3 2"' : ''}/>`
              + `<line x1="${BOX_W / 2}" y1="${BOX_H}" x2="${BOX_W / 2}" y2="${stubEnd}"/>`
+             + (pageStart(d)
+                ? `<line x1="${BOX_W / 2}" y1="${SIDE_Y}" x2="${BOX_W / 2 + SIDE_DX}" y2="${SIDE_Y}"/>`
+                  + `<path class="page-start" d="M${BOX_W / 2 + SIDE_DX} ${SIDE_Y} L${BOX_W / 2 + SIDE_DX + SIDE_TRI_HALF} ${SIDE_Y + SIDE_TRI_H}`
+                  + ` H${BOX_W / 2 + SIDE_DX - SIDE_TRI_HALF} Z"/>` : '')
              + body
              + `<rect x="${LABEL_X}" y="${LABEL_TOP}" width="${LABEL_W}" height="${LABEL_H}"/>`
              + `<text x="${BOX_W / 2}" y="${LABEL_TOP + LABEL_H / 2}" dominant-baseline="central" text-anchor="middle"`

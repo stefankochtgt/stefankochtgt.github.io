@@ -135,8 +135,9 @@
                 <a role="menuitem" id="export-tex" href="/fta-export/manual.tex" title="The trees of this analysis as a LaTeX document: each tree a TikZ picture you can copy into your own document">Export LaTeX</a>
                 <a role="menuitem" id="export-pdf" hidden href="/fta-export/manual.pdf" target="_blank" title="The trees of this analysis as PDF, one per page, with the model identification (needs pdflatex)">Export PDF</a>
                 <a role="menuitem" id="export-xml" href="/fta-export/manual.xml" title="The trees of this analysis as XML (with the model identification) -- can be imported again">Export XML</a>
+                <a role="menuitem" id="export-rwb" href="/fta-export/rwb/manual.xml" title="The trees of this analysis as Isograph Reliability Workbench XML -- import it in RWB with the import template IntegrityWorkbench_FTA.rwb-impx (descriptions and colours are not carried over)">Export Reliability Workbench XML</a>
                 <hr>
-                <button type="button" role="menuitem" id="import-xml" title="Import Manual FTA trees from an XML export: checked and shown first; a tree replaces the one with the same top event ID">Import XML…</button>
+                <button type="button" role="menuitem" id="import-xml" title="Import Manual FTA trees from an XML export, or a fault tree from an Isograph Reliability Workbench XML export: checked and shown first; a tree replaces the one with the same top event ID">Import XML…</button>
             </div>
         </div>
         <div class="menu">
@@ -217,7 +218,8 @@
                 <tr><td>Mouse wheel / drag the background</td><td>zoom / move the view; fit-to-window icon shows everything</td></tr>
                 <tr><th colspan="2">Import / Export</th></tr>
                 <tr><td>Export JPG / LaTeX / PDF / XML</td><td>the chosen analysis, with the model revision (light grey above each top event); LaTeX: each tree a TikZ picture to copy into your own document</td></tr>
-                <tr><td>Import XML…</td><td>checked and shown first; a tree replaces the one with the same top event ID</td></tr>
+                <tr><td>Export Reliability Workbench XML</td><td>the chosen analysis for Isograph Reliability Workbench: import it there with the import template IntegrityWorkbench_FTA.rwb-impx; titles, gates, pages and criticality are carried over, descriptions and colours are not</td></tr>
+                <tr><td>Import XML…</td><td>this tool's XML export, or a Reliability Workbench XML export (File &gt; Export &gt; XML); checked and shown first; a tree replaces the one with the same top event ID</td></tr>
             </table>
             <p style="margin-bottom:0; text-align:right;"><button type="button" class="secondary" id="help-tour-start">Guided tour</button> <button value="close">Close</button></p>
         </form>
@@ -447,7 +449,9 @@ async function newTree() {
         if (choice.where === 'new') target = (await api('POST', '/api/manual-fta/analyses', { name: choice.name })).id;
         const top = await api('POST', '/api/manual-fta/trees', { analysis: target });
         if (target !== analysisId) await switchAnalysis(target);
-        await loadGraph({ keepViewport: target === analysisId, reveal: top.id });
+        const toPage1 = pageId !== '';                 // a new tree is on page 1 (SFM-192: maybe not shown yet)
+        if (toPage1) pageId = '';
+        await loadGraph({ keepViewport: target === analysisId && !toPage1, reveal: top.id });
     } catch (e) { alert(e.message); }
 }
 
@@ -573,8 +577,10 @@ function eventMenuItems(node) {
     if (d.id !== d.top || cy.nodes('[type = "manual_event"]').length > 1)
         items.push({ label: 'Move / copy to…', run: () => startMoveTo(node) });
     // pages (SFM-184): the branch below a gate continues on a page of its own, the gate on top there
-    if (d.kind !== 'basic' && d.id !== d.top)
-        items.push({ label: 'Continue on a new page', check: !!d.new_page, run: () => put({ new_page: !d.new_page }) });
+    // a top event: its whole tree on a page of its own (SFM-192, every tree of a Reliability Workbench import)
+    if (d.kind !== 'basic')
+        items.push({ label: d.id === d.top ? 'Tree on a page of its own' : 'Continue on a new page', check: !!d.new_page,
+                     run: () => put({ new_page: !d.new_page }) });
     if (d.symbol === 'transfer' && d.page_number)
         items.push({ label: `Open page ${d.page_number}`, run: () => goToPage(d.code) });
     if (d.causes >= 2) {
@@ -698,7 +704,7 @@ const pagePicker = document.getElementById('page-picker'), pageSelect = document
 function showPages(pages) {
     pagePicker.hidden = pages.length < 2;
     pageSelect.replaceChildren(...pages.map(p => new Option(
-        p.number === 1 ? '1: the trees' : `${p.number}: ${p.code}${p.title ? ' ' + p.title : ''}`, p.id, false, p.id === pageId)));
+        p.id === '' ? '1: the trees' : `${p.number}: ${p.code}${p.title ? ' ' + p.title : ''}`, p.id, false, p.id === pageId)));
     rememberAnalysis();
 }
 // Is `pos` (model coordinates) on the "…" triangle of a transfer node -- below its ID label box?
@@ -1266,9 +1272,11 @@ document.getElementById('import-xml-file').addEventListener('change', async evt 
         return;
     }
     const list = check.trees.map(t => `• ${t.top}${t.title ? ' "' + t.title + '"' : ''}: ${t.events} event(s), ${t.action}`).join('\n');
-    if (!confirm(`${from}Import from ${file.name} into the analysis "${analysisName()}":\n${list}\n\nImport these trees?`)) return;
+    const notes = (check.notes || []).length ? '\n\nNotes:\n' + check.notes.map(n => '• ' + n).join('\n') : '';
+    if (!confirm(`${from}Import from ${file.name} into the analysis "${analysisName()}":\n${list}${notes}\n\nImport these trees?`)) return;
     const done = await call(true);
     if (done.errors && done.errors.length) { alert('Import failed:\n\n' + done.errors.join('\n')); return; }
+    pageId = done.trees && done.trees.length ? done.trees[0].top : pageId;   // show the first imported tree (SFM-192: maybe on a page of its own; not a page -> the first page)
     await loadGraph({ keepViewport: false });
 });
 
@@ -1303,6 +1311,7 @@ function rememberAnalysis() {
     if (window.parent !== window) window.parent.postMessage({ type: 'tile-url', url: url.pathname + url.search }, location.origin);
     for (const kind of ['xml', 'tex', 'pdf'])
         document.getElementById('export-' + kind).href = `/fta-export/manual.${kind}?analysis=` + encodeURIComponent(analysisId);
+    document.getElementById('export-rwb').href = '/fta-export/rwb/manual.xml?analysis=' + encodeURIComponent(analysisId);
 }
 
 async function switchAnalysis(id, fit = true) {

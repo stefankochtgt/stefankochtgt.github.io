@@ -14,6 +14,7 @@
     const OR_BOTTOM_R = 37.658, OR_BOTTOM_RISE = 5.75;
     const TAG_SIZE = 14.0, TAG_W = 22.0, TAG_GAP = 2.0;
     const TRI_TIP = LABEL_TOP - 7;
+    const SIDE_Y = SYM_TOP - 2, SIDE_DX = 28.0, SIDE_TRI_H = 12.0, SIDE_TRI_HALF = 7.0;   // transfer-in triangle
     const SCALE = 0.0322, PT_PER_CM = 28.4528, VIEW_U = 1.5;
     const ADDED_FILL = 'yellow!35', FILL = 'blue!15', TITLE_CHARS = 64;
     const RAD_TO_DEG = 180 / Math.PI;
@@ -76,10 +77,17 @@
         if (isGate) return lines;
         const dashed = data.shared ? ', dashed' : '';
         const stubEnd = top + (data.symbol === 'none' ? LABEL_TOP : data.symbol === 'triangle' || data.symbol === 'transfer' ? TRI_TIP : SYM_TOP);
+        const side = [];
+        if (data.page_start) {                                       // continued from an earlier page
+            const sx = cx + SIDE_DX, sy = top + SIDE_Y;
+            side.push(`\\draw ${pt(cx, sy)} -- ${pt(sx, sy)};`,
+                `\\path[draw, fill=${fill}] ${pt(sx, sy)} -- ${pt(sx + SIDE_TRI_HALF, sy + SIDE_TRI_H)}`
+                + ` -- ${pt(sx - SIDE_TRI_HALF, sy + SIDE_TRI_H)} -- cycle;`);
+        }
         lines = [
             `\\path[draw, fill=${fill}${dashed}] ${pt(left, top)} rectangle ${pt(left + BOX_W, top + BOX_H)};`,
             `\\draw ${pt(cx, top + BOX_H)} -- ${pt(cx, stubEnd)};`,
-        ].concat(lines, [
+        ].concat(side, lines, [
             `\\path[draw, fill=${fill}] ${pt(left + LABEL_X, top + LABEL_TOP)}`
             + ` rectangle ${pt(left + LABEL_X + LABEL_W, top + LABEL_TOP + LABEL_H)};`,
             title(cx, top + BOX_H / 2, data.label || ''),
