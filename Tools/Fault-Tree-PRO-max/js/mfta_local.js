@@ -573,7 +573,14 @@
             return;
         }
         let dir;
-        try { dir = await window.showDirectoryPicker({ id: 'fault-tree-pro-max', mode: 'readwrite' }); } catch (e) { return; }
+        try { dir = await window.showDirectoryPicker({ id: 'fault-tree-pro-max', mode: 'readwrite' }); }
+        catch (e) {      // SFM-213: only a cancelled dialog stays silent -- a blocked one (e.g. by a company policy) says so
+            if (e && e.name === 'AbortError') return;
+            alert(`This browser did not open the folder dialog (${(e && e.name) || 'Error'}: ${(e && e.message) || e}).\n\n`
+                  + 'On company computers the IT policy often switches off folder access for web pages. '
+                  + 'Keep a copy with Import / Export > Export XML instead (open it again with Import XML).');
+            return;
+        }
         const there = await readText(dir, 'fault-trees.json');
         if (there) {
             let stored = null;
@@ -608,7 +615,6 @@
         const state = document.getElementById('folder-status');
         if (!link) return;
         link.textContent = folderHandle ? `Folder on this computer: ${folderHandle.name}…` : 'Keep on this computer (folder)…';
-        link.disabled = !HAS_FOLDER_API;
         link.title = HAS_FOLDER_API ? 'Keep the fault trees and their revisions in a folder on this computer (written on Save)'
                                     : 'Needs Chrome or Edge -- use Import / Export > Export XML';
         stop.hidden = !folderHandle;
