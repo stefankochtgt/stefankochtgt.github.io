@@ -219,110 +219,6 @@
     }
 
     /* ─── RESPONSIVE ─── */
-    /* ─── LOGIN OVERLAY ─── */
-    .login-overlay {
-      position: fixed; inset: 0; z-index: 1000;
-      background: #f5f7fa;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .login-box {
-      background: #fff; border: 1px solid #e8e8e8;
-      border-radius: 4px; padding: 48px 40px;
-      width: 100%; max-width: 380px;
-      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
-    }
-    .login-box h2 {
-      font-size: 22px; font-weight: 700;
-      text-transform: uppercase; letter-spacing: 0.04em;
-      color: #1a1a1a; margin-bottom: 28px; text-align: center;
-    }
-    .login-field { margin-bottom: 18px; }
-    .login-field label {
-      font-size: 12px; font-weight: 600; color: #555;
-      letter-spacing: 0.05em; display: block;
-      margin-bottom: 6px; text-transform: uppercase;
-    }
-    .login-field input {
-      width: 100%; border: 1px solid #ccc; border-radius: 2px;
-      padding: 10px 14px; font-family: inherit; font-size: 14px;
-      color: #2d2d2d; outline: none; transition: border-color 0.2s;
-    }
-    .login-field input:focus { border-color: #007bff; }
-    .login-btn {
-      width: 100%; background: #2d2d2d; color: #fff;
-      border: none; border-radius: 2px;
-      font-family: inherit; font-size: 14px; font-weight: 600;
-      padding: 12px; cursor: pointer;
-      transition: background 0.2s; margin-top: 8px;
-    }
-    .login-btn:hover { background: #007bff; }
-    .login-error {
-      color: #c62828; font-size: 13px;
-      text-align: center; margin-top: 12px; display: none;
-    }
-
-    /* ─── LOGOUT BUTTON ─── */
-    .logout-btn {
-      margin-left: auto;
-      background: none; border: 1px solid #ccc; border-radius: 2px;
-      padding: 5px 14px; font-family: inherit;
-      font-size: 12px; font-weight: 600;
-      color: #555; cursor: pointer; transition: all 0.2s; white-space: nowrap;
-    }
-    .logout-btn:hover { border-color: #007bff; color: #007bff; }
-
-
-    .ft-toolbar {
-      display: flex; flex-wrap: wrap; gap: 8px;
-      align-items: center; background: #f0f4f8;
-      border: 1px solid #c8d4dc; border-radius: 8px;
-      padding: 12px 14px; margin-bottom: 18px;
-    }
-    .ft-toolbar button {
-      background: #dce8f0; color: #1a2b3c; border: 1px solid #b8ccd8;
-      border-radius: 6px; padding: 10px 14px;
-      font-family: inherit; font-size: 13px; font-weight: 600;
-      cursor: pointer; transition: background 0.2s, border-color 0.2s;
-    }
-    .ft-toolbar button.active,
-    .ft-toolbar button:hover {
-      background: #8dc4de; border-color: #5aaec8;
-    }
-    .ft-canvas-wrap {
-      background: #eaf1f7; border: 1px solid #c8d4dc;
-      border-radius: 8px; padding: 12px;
-    }
-    .ft-canvas {
-      width: 100%; height: 620px; display: block;
-      border-radius: 6px; background: #ffffff;
-      box-shadow: inset 0 0 0 1px #edf1f4;
-      cursor: crosshair;
-    }
-    .ft-status {
-      margin-top: 12px; padding: 12px 14px;
-      background: #f5f9fc; border: 1px solid #dce8f0;
-      border-radius: 6px; color: #334155;
-      font-size: 14px;
-    }
-
-    /* ─── MEMBERS PAGE ─── */
-    .hello-banner {
-      background: #1a1a1a; color: #fff;
-      padding: 60px 40px; text-align: center;
-    }
-    .hello-banner h1 {
-      font-size: clamp(36px, 7vw, 64px);
-      font-weight: 700; letter-spacing: 0.06em;
-    }
-    .pdf-toolbar {
-      display: flex; align-items: center;
-      gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
-    }
-    .pdf-container {
-      border: 1px solid #e8e8e8; border-radius: 4px; overflow: hidden;
-    }
-    .pdf-container iframe { width: 100%; height: 540px; border: none; display: block; }
-
     @media (max-width: 800px) {
       header { padding: 0 20px; }
       nav { display: none; }
@@ -353,12 +249,11 @@
     <a href="#" onclick="showPage('aerospace'); return false;" id="nav-aerospace">Aerospace (ARP4754/4761)</a>
     <a href="#" onclick="showPage('ai'); return false;" id="nav-ai">AI Safety</a>
     <a href="#" onclick="showPage('automotive'); return false;" id="nav-automotive">Automotive (ISO26262)</a>
+    <a href="#" onclick="showPage('tools'); return false;" id="nav-tools">Tools</a>
     <a href="#" onclick="showPage('impressum'); return false;" id="nav-impressum">Impressum</a>
     <a href="#" onclick="showPage('dataprivacy'); return false;" id="nav-dataprivacy">Data Privacy</a>
-    <a href="#" onclick="showPage('members'); return false;" id="nav-members">Members</a>
   </nav>
 
-  <button class="logout-btn" id="logoutBtn" onclick="doLogout()" style="display:none;"></button>
   <button class="hamburger" onclick="toggleMobileMenu()" aria-label="Menu">
     <span></span><span></span><span></span>
   </button>
@@ -371,9 +266,9 @@
   <a href="#" onclick="showPage('aerospace'); return false;">Aerospace (ARP4754/4761)</a>
   <a href="#" onclick="showPage('ai'); return false;">AI Safety</a>
   <a href="#" onclick="showPage('automotive'); return false;">Automotive (ISO 26262)</a>
+  <a href="#" onclick="showPage('tools'); return false;">Tools</a>
   <a href="#" onclick="showPage('impressum'); return false;">Impressum</a>
   <a href="#" onclick="showPage('dataprivacy'); return false;">Data Privacy</a>
-  <a href="#" onclick="showPage('members'); return false;">Members</a>
 </div>
 
 <!-- ═══════════════ HOME ═══════════════ -->
@@ -598,43 +493,12 @@
   </div>
 </div>
 
-<!-- ═══════════════ MEMBERS ═══════════════ -->
-<div class="page" id="page-members">
-  <div class="page-banner"><h1>Members Area</h1></div>
+<!-- ═══════════════ TOOLS ═══════════════ -->
+<div class="page" id="page-tools">
+  <div class="page-banner"><h1>Tools</h1></div>
   <div class="section">
-    <h2>Welcome to the TEGRITY Members Area</h2>
-    <p>This area provides internal tools and resources for TEGRITY Safety Engineering GmbH. All data entered in any tool remains exclusively in your browser and is never transmitted or stored externally.</p>
-
-    <hr>
-
-    <h2>Useful Tools</h2>
-    <h3><a href="#" onclick="showPage('faulttree'); return false;" style="color:#007bff;">Fault Tree Creator</a></h3>
-    <p>Build the fault tree visually in the browser with the same toolbar style as the local application.</p>
-
     <h3><a href="Tools/Fault-Tree-PRO-max/" target="_blank" style="color:#007bff;">Integrity Workbench &ndash; Fault Tree PRO max</a></h3>
     <p>Draw fault trees: top events, AND / OR gates, basic events, H categories / ASIL, repeated events, search, guided tour. Export as JPG, LaTeX (TikZ) and XML. Installable as an app (Edge / Chrome: &ldquo;Install&rdquo;) and works offline; your trees stay on your computer.</p>
-
-    <h3><a href="Tools/FMEA Reworder/fmea-reworder.html" target="_blank" style="color:#007bff;">FMEA / FHA Failure Mode Reworder</a></h3>
-    <p>AI-powered tool to reword FMEA/FHA failure mode descriptions into professional technical language per ARP4761/ISO26262. Supports screen capture with OCR to extract text directly from APIS IQ FMEA, then uses Claude to generate alternative wordings.</p>
-
-    <h3><a href="Tools/Claude Chat/claude-chat.html" target="_blank" style="color:#007bff;">Claude Chat</a></h3>
-    <p>Direct chat interface with Claude AI. Enter your Anthropic API key once, then have a full multi-turn conversation. All data stays in your browser — nothing is stored externally.</p>
-
-    <h3><a href="Tools/Clipboard Helper/index.html" target="_blank" style="color:#007bff;">Clipboard Helper</a></h3>
-    <p>Send text from any browser or device directly to the clipboard on your PC. Requires <code>clipboard_helper.py</code> to be running locally. Supports ngrok for remote access from phones or other devices.</p>
-  </div>
-</div>
-
-<!-- ═══════════════ FAULT TREE CREATOR ═══════════════ -->
-<div class="page" id="page-faulttree">
-  <div class="page-banner"><h1>Fault Tree Creator</h1></div>
-  <div class="section">
-    <p>Use the toolbar and canvas below to add nodes, connect gates, and build a fault tree visually.</p>
-    <div class="ft-toolbar" id="ftToolbar"></div>
-    <div class="ft-canvas-wrap">
-      <canvas id="faulttreeCanvas" class="ft-canvas" width="1200" height="620"></canvas>
-    </div>
-    <div class="ft-status" id="ftStatus">SELECT — choose a tool and click the canvas to place or interact with nodes.</div>
   </div>
 </div>
 
@@ -647,77 +511,9 @@
   </div>
 </footer>
 
-<!-- LOGIN OVERLAY -->
-<div class="login-overlay" id="loginOverlay" style="display:none;">
-  <div class="login-box">
-    <h2>TEGRITY Members</h2>
-    <div class="login-field">
-      <label>Username</label>
-      <input type="text" id="login-user" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('login-pw').focus()" />
-    </div>
-    <div class="login-field">
-      <label>Password</label>
-      <input type="password" id="login-pw" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" />
-    </div>
-    <button class="login-btn" onclick="doLogin()">Sign In</button>
-    <div class="login-error" id="loginError">Invalid username or password.</div>
-  </div>
-</div>
-
 <script>
-  /* ── Auth ── */
-  // SHA-256 of each user's password -- no plaintext password in the page source
-  const USERS = { CEO: '57f0df0e3d01f3f2b0aaf23f34e9555027766525ce779fbe5f0b044021d6fd15' };
-
-  async function sha256Hex(text) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  function checkAuth() {
-    const user = sessionStorage.getItem('tgt_user');
-    const logoutBtn = document.getElementById('logoutBtn');
-    if (user) {
-      logoutBtn.style.display = '';
-      logoutBtn.textContent = user + ' — Sign out';
-    } else {
-      logoutBtn.style.display = 'none';
-    }
-  }
-
-  async function doLogin() {
-    const u = document.getElementById('login-user').value.trim();
-    const p = document.getElementById('login-pw').value;
-    const err = document.getElementById('loginError');
-    if (USERS[u] !== undefined && USERS[u] === await sha256Hex(p)) {
-      sessionStorage.setItem('tgt_user', u);
-      err.style.display = 'none';
-      document.getElementById('loginOverlay').style.display = 'none';
-      document.body.style.overflow = '';
-      checkAuth();
-      showPage('members');
-    } else {
-      err.style.display = 'block';
-    }
-  }
-
-  function doLogout() {
-    sessionStorage.removeItem('tgt_user');
-    document.getElementById('loginOverlay').style.display = 'none';
-    document.body.style.overflow = '';
-    checkAuth();
-    showPage('home');
-  }
-
-
   /* ── Navigation ── */
   function showPage(id) {
-    if ((id === 'members' || id === 'faulttree') && !sessionStorage.getItem('tgt_user')) {
-      document.getElementById('loginOverlay').style.display = 'flex';
-      document.body.style.overflow = 'hidden';
-      closeMobileMenu();
-      return;
-    }
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('#mainNav a').forEach(a => a.classList.remove('active'));
     const page = document.getElementById('page-' + id);
@@ -733,229 +529,8 @@
   function closeMobileMenu() {
     document.getElementById('mobileNav').classList.remove('open');
   }
-  /* ── Fault Tree Browser Tool ── */
-  const FT_TOOLS = [
-    { key: 'SELECT', label: '▶ Select' },
-    { key: 'TOP',    label: '⬜ Top Event' },
-    { key: 'AND',    label: '∧ AND Gate' },
-    { key: 'OR',     label: '∨ OR Gate' },
-    { key: 'INTERM', label: '▭ Intermediate' },
-    { key: 'EVENT',  label: '● Basic Event' },
-    { key: 'HOUSE',  label: '⌂ House' },
-    { key: 'CONNECT',label: '⟶ Connect' },
-    { key: 'DELETE', label: '✕ Delete' },
-  ];
-
-  let ftCanvas, ftContext;
-  let ftTool = 'SELECT';
-  let ftNodes = [];
-  let ftEdges = [];
-  let ftSelectedId = 'root';
-  let ftConnectSource = null;
-
-  function initFaultTree() {
-    ftCanvas = document.getElementById('faulttreeCanvas');
-    if (!ftCanvas) return;
-    ftContext = ftCanvas.getContext('2d');
-    ftNodes = [{ id: 'root', kind: 'TOP', x: 600, y: 120, label: 'Top Event' }];
-    ftEdges = [];
-    ftSelectedId = 'root';
-    ftConnectSource = null;
-    renderFaultTreeToolbar();
-    renderFaultTree();
-  }
-
-  function renderFaultTreeToolbar() {
-    const toolbar = document.getElementById('ftToolbar');
-    toolbar.innerHTML = '';
-    FT_TOOLS.forEach(tool => {
-      const button = document.createElement('button');
-      button.textContent = tool.label;
-      button.dataset.tool = tool.key;
-      button.className = ftTool === tool.key ? 'active' : '';
-      button.onclick = () => { ftTool = tool.key; renderFaultTreeToolbar(); updateFtStatus(); };
-      toolbar.appendChild(button);
-    });
-    const exportBtn = document.createElement('button');
-    exportBtn.textContent = 'Export JSON';
-    exportBtn.onclick = downloadFaultTree;
-    toolbar.appendChild(exportBtn);
-
-    const resetBtn = document.createElement('button');
-    resetBtn.textContent = 'Reset';
-    resetBtn.onclick = () => { initFaultTree(); updateFtStatus(); };
-    toolbar.appendChild(resetBtn);
-
-    if (ftCanvas) {
-      ftCanvas.removeEventListener('click', onFaultTreeCanvasClick);
-      ftCanvas.addEventListener('click', onFaultTreeCanvasClick);
-    }
-  }
-
-  function updateFtStatus(message) {
-    const status = document.getElementById('ftStatus');
-    if (!status) return;
-    status.textContent = message || `${ftTool} — click canvas to place, select or connect nodes.`;
-  }
-
-  function findFtNodeAt(x, y) {
-    return ftNodes.find(node => {
-      const dx = Math.abs(node.x - x);
-      const dy = Math.abs(node.y - y);
-      return dx <= 70 && dy <= 35;
-    });
-  }
-
-  function onFaultTreeCanvasClick(event) {
-    const rect = ftCanvas.getBoundingClientRect();
-    const x = Math.round((event.clientX - rect.left) * (ftCanvas.width / rect.width));
-    const y = Math.round((event.clientY - rect.top) * (ftCanvas.height / rect.height));
-    const clicked = findFtNodeAt(x, y);
-
-    if (ftTool === 'SELECT') {
-      if (clicked) {
-        ftSelectedId = clicked.id;
-        updateFtStatus(`SELECT — selected ${clicked.label}`);
-      }
-    } else if (ftTool === 'DELETE') {
-      if (clicked && clicked.id !== 'root') {
-        ftNodes = ftNodes.filter(node => node.id !== clicked.id);
-        ftEdges = ftEdges.filter(edge => edge.from !== clicked.id && edge.to !== clicked.id);
-        ftSelectedId = 'root';
-        updateFtStatus(`DELETE — removed ${clicked.label}`);
-      }
-    } else if (ftTool === 'CONNECT') {
-      if (clicked) {
-        if (!ftConnectSource) {
-          ftConnectSource = clicked.id;
-          updateFtStatus(`CONNECT — source set to ${clicked.label}, click target node`);
-        } else if (ftConnectSource === clicked.id) {
-          ftConnectSource = null;
-          updateFtStatus('CONNECT — source cleared');
-        } else {
-          ftEdges.push({ from: ftConnectSource, to: clicked.id });
-          updateFtStatus(`CONNECT — connected ${ftConnectSource} → ${clicked.label}`);
-          ftConnectSource = null;
-        }
-      }
-    } else {
-      const kind = ftTool;
-      const id = `node-${Date.now()}`;
-      const label = kind === 'TOP' ? 'Top Event' : kind === 'AND' ? 'AND Gate' : kind === 'OR' ? 'OR Gate' : kind === 'INTERM' ? 'Intermediate Event' : kind === 'EVENT' ? 'Basic Event' : 'House Event';
-      ftNodes.push({ id, kind, x, y, label });
-      ftSelectedId = id;
-      updateFtStatus(`${kind} — placed node at ${x},${y}`);
-    }
-    renderFaultTree();
-  }
-
-  function renderFaultTree() {
-    if (!ftContext) return;
-    ftContext.clearRect(0, 0, ftCanvas.width, ftCanvas.height);
-    drawFtGrid();
-    ftEdges.forEach(edge => drawFtEdge(edge));
-    ftNodes.forEach(node => drawFtNode(node));
-  }
-
-  function drawFtGrid() {
-    const step = 40;
-    ftContext.strokeStyle = '#edf1f4';
-    ftContext.lineWidth = 1;
-    for (let x = 0; x <= ftCanvas.width; x += step) {
-      ftContext.beginPath(); ftContext.moveTo(x, 0); ftContext.lineTo(x, ftCanvas.height); ftContext.stroke();
-    }
-    for (let y = 0; y <= ftCanvas.height; y += step) {
-      ftContext.beginPath(); ftContext.moveTo(0, y); ftContext.lineTo(ftCanvas.width, y); ftContext.stroke();
-    }
-  }
-
-  function drawFtEdge(edge) {
-    const from = ftNodes.find(n => n.id === edge.from);
-    const to = ftNodes.find(n => n.id === edge.to);
-    if (!from || !to) return;
-    ftContext.strokeStyle = '#2c3e50';
-    ftContext.lineWidth = 2;
-    ftContext.beginPath();
-    ftContext.moveTo(from.x, from.y + 35);
-    ftContext.lineTo(to.x, to.y - 35);
-    ftContext.stroke();
-  }
-
-  function drawFtNode(node) {
-    const selected = node.id === ftSelectedId;
-    const fill = '#8dc4de';
-    const stroke = selected ? '#e07820' : '#5aaec8';
-    const text = node.label;
-    ftContext.fillStyle = fill;
-    ftContext.strokeStyle = stroke;
-    ftContext.lineWidth = 2;
-    const w = 140, h = 70;
-    const x = node.x - w/2, y = node.y - h/2;
-
-    if (node.kind === 'EVENT') {
-      ftContext.beginPath(); ftContext.arc(node.x, node.y, h/2, 0, Math.PI * 2);
-      ftContext.fill(); ftContext.stroke();
-    } else if (node.kind === 'HOUSE') {
-      ftContext.beginPath();
-      ftContext.moveTo(node.x, y);
-      ftContext.lineTo(x + w, y + h*0.35);
-      ftContext.lineTo(x + w, y + h);
-      ftContext.lineTo(x, y + h);
-      ftContext.closePath();
-      ftContext.fill(); ftContext.stroke();
-    } else {
-      ftContext.beginPath();
-      ftContext.roundRect(x, y, w, h, 12);
-      ftContext.fill(); ftContext.stroke();
-      if (node.kind === 'AND' || node.kind === 'OR') {
-        ftContext.beginPath();
-        ftContext.strokeStyle = '#2c3e50';
-        ftContext.lineWidth = 3;
-        ftContext.moveTo(x + 20, y + 20);
-        ftContext.lineTo(x + w - 20, y + 20);
-        ftContext.stroke();
-      }
-    }
-    ftContext.fillStyle = '#1a2b3c';
-    ftContext.font = 'bold 12px Arial';
-    ftContext.textAlign = 'center';
-    ftContext.textBaseline = 'middle';
-    wrapText(ftContext, text, node.x, node.y, w - 20, 16);
-  }
-
-  function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-    const words = text.split(' ');
-    let line = '';
-    let lineCount = 0;
-    for (let n = 0; n < words.length; n++) {
-      const testLine = line + words[n] + ' ';
-      const metrics = ctx.measureText(testLine);
-      if (metrics.width > maxWidth && n > 0) {
-        ctx.fillText(line.trim(), x, y + lineCount * lineHeight);
-        line = words[n] + ' ';
-        lineCount++;
-      } else {
-        line = testLine;
-      }
-    }
-    ctx.fillText(line.trim(), x, y + lineCount * lineHeight);
-  }
-
-  function downloadFaultTree() {
-    const data = { nodes: ftNodes, edges: ftEdges };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'fault-tree.json';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
-
   /* ── Init ── */
-  initFaultTree();
   document.getElementById('nav-home').classList.add('active');
-  checkAuth();
 </script>
 </body>
 </html>
