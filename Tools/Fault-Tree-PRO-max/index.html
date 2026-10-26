@@ -51,7 +51,22 @@
 .menubar .menu-list .danger { color: #b91c1c; }
 .menubar .menu-list hr { margin: 4px 0; border: 0; border-top: 1px solid #e5e7eb; }
 .fta-toolbar { align-items: center; }
+/* the tabs and the icons sit together on the left; only the hint / badge / empty-note blocks take the rest (user, 2026-10-26) */
+.fta-toolbar > .view-tabs, .fta-toolbar > .icon-bar { flex: none; }
 .help-dialog { max-width: 760px; }
+.menubar .menu-list .check { display: inline-block; width: 1.2em; }
+/* guided hints (SFM-211): a bubble below the icons to click next; only its buttons take clicks */
+#guide-pop { position: fixed; z-index: 60; width: 310px; max-width: calc(100vw - 16px); box-sizing: border-box; background: #1e3a8a;
+    color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.45;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, .3); pointer-events: none; }
+#guide-pop[hidden] { display: none; }
+#guide-pop::before { content: ""; position: absolute; top: -7px; left: calc(var(--arrow, 50%) - 7px);
+    border-style: solid; border-width: 0 7px 7px; border-color: transparent transparent #1e3a8a; }
+#guide-pop .guide-nav { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+#guide-pop button { pointer-events: auto; font-size: 12px; padding: 2px 10px; }
+#guide-pop button.secondary { background: transparent; color: #dbeafe; border-color: #93c5fd; }
+.guide-target { animation: guide-pulse 1.4s ease-in-out infinite; }
+@keyframes guide-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } 50% { box-shadow: 0 0 0 4px rgba(245, 158, 11, .8); } }
 .page-picker { display: flex; gap: 4px; align-items: center; }
 .page-picker[hidden] { display: none; }
 #page-select { max-width: 260px; min-width: 120px; flex: none; }
@@ -210,6 +225,9 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
             <div class="menu-list" role="menu" hidden>
                 <button type="button" role="menuitem" id="help-tour" title="A step-by-step tour of every function and shortcut">Guided tour</button>
                 <button type="button" role="menuitem" id="help-tricks">Keyboard and mouse…</button>
+                <hr>
+                <button type="button" role="menuitemcheckbox" id="help-guide" aria-checked="true" title="Hints for the first steps: with an empty page it points at the new top event icon, with only a top event at the gate / basic event icons">
+                    <span class="check"></span>Guided hints</button>
             </div>
         </div>
         <input type="file" id="import-xml-file" accept=".xml,application/xml,text/xml" hidden>
@@ -1733,6 +1751,95 @@ addEventListener('resize', () => { if (tourAt >= 0) showTourStep(tourAt); });
 document.getElementById('help-tour').addEventListener('click', startTour);
 document.getElementById('help-tour-start').addEventListener('click', startTour);
 
+// ---- guided hints (SFM-211, user 2026-10-26): after a few seconds without input, an empty page points at the new
+// top event icon, a page with only top events at the gate / basic event icons. Not while the tour, a dialog, a menu,
+// an add mode or another view is open. "OK" hides that hint until the page's state changes; Help > Guided hints
+// (or "Turn hints off") switches them off for this browser.
+const GUIDE_KEY = 'faultTreeGuide';
+const GUIDE_IDLE_MS = window.FTA_GUIDE_IDLE_MS || 4000;     // tests set a shorter wait
+const GUIDE_STEPS = {
+    top: { els: ['#add-top'], text: `<b>Start here:</b> click this icon to create a <b>top event</b> &ndash; the
+        undesired event your fault tree explains.` },
+    below: { els: ['#add-gate', '#add-basic'], text: `<b>Next:</b> add a <b>gate</b> or a <b>basic event</b> &ndash; select
+        one of these icons, then click the top event; it is added below it.` },
+};
+let guideOn = true, guideTimer = 0, guideShown = '', guideDismissed = '', guideLast = '';
+try { guideOn = localStorage.getItem(GUIDE_KEY) !== '0'; } catch (e) { /* private window */ }
+const guidePop = Object.assign(document.createElement('div'), { id: 'guide-pop', hidden: true });
+guidePop.setAttribute('role', 'status');
+document.body.append(guidePop);
+const guideItem = document.getElementById('help-guide');
+
+function guideState() {                             // which hint the page calls for: 'top', 'below' or ''
+    if (!cy || tourDemo) return '';
+    const events = cy.nodes('[type = "manual_event"]');
+    if (!events.length) return 'top';
+    return events.every(n => n.id() === n.data('top')) ? 'below' : '';
+}
+function guideBusy() {                              // the user is in the middle of something
+    return tourAt >= 0 || view !== 'diagram' || addMode || renaming || !menu.hidden
+        || document.querySelector('dialog[open]') || menuBar.querySelector('.menu-list:not([hidden])');
+}
+function hideGuide() {
+    guidePop.hidden = true; guideShown = '';
+    document.querySelectorAll('.guide-target').forEach(el => el.classList.remove('guide-target'));
+}
+function showGuide(key) {
+    const targets = GUIDE_STEPS[key].els.map(s => document.querySelector(s)).filter(el => el && el.offsetParent);
+    if (!targets.length) return;
+    hideGuide();
+    guideShown = key;
+    targets.forEach(el => el.classList.add('guide-target'));
+    guidePop.innerHTML = `<div>${GUIDE_STEPS[key].text}</div><div class="guide-nav">
+        <button type="button" class="secondary" data-guide="off">Turn hints off</button>
+        <button type="button" data-guide="ok">OK</button></div>`;
+    guidePop.hidden = false;
+    // below the icons, the arrow at their middle
+    const r = targets.map(el => el.getBoundingClientRect());
+    const mid = (Math.min(...r.map(b => b.left)) + Math.max(...r.map(b => b.right))) / 2;
+    const vw = document.documentElement.clientWidth || innerWidth, pw = guidePop.offsetWidth;
+    const x = Math.max(8, Math.min(mid - pw / 2, vw - pw - 8));
+    Object.assign(guidePop.style, { left: `${x}px`, top: `${Math.max(...r.map(b => b.bottom)) + 10}px` });
+    guidePop.style.setProperty('--arrow', `${Math.max(14, Math.min(mid - x, pw - 14))}px`);
+}
+function scheduleGuide() {
+    clearTimeout(guideTimer);
+    const state = guideState();
+    if (state !== guideLast) { guideLast = state; guideDismissed = ''; }     // a new state: its hint may show again
+    if (guideShown && guideShown !== state) hideGuide();
+    if (!guideOn || !state || state === guideDismissed || guideShown) return;
+    guideTimer = setTimeout(() => {
+        const now = guideState();
+        if (!guideOn || !now || now === guideDismissed) return;
+        if (guideBusy()) { scheduleGuide(); return; }
+        showGuide(now);
+    }, GUIDE_IDLE_MS);
+}
+function setGuide(on) {
+    guideOn = on;
+    try { localStorage.setItem(GUIDE_KEY, on ? '1' : '0'); } catch (e) { /* private window */ }
+    guideItem.setAttribute('aria-checked', String(on));
+    guideItem.querySelector('.check').textContent = on ? '✓' : '';
+    if (!on) { clearTimeout(guideTimer); hideGuide(); } else { guideDismissed = ''; scheduleGuide(); }
+}
+guideItem.addEventListener('click', () => setGuide(!guideOn));
+guideItem.querySelector('.check').textContent = guideOn ? '✓' : '';
+guideItem.setAttribute('aria-checked', String(guideOn));
+guidePop.addEventListener('click', e => {
+    const b = e.target.closest('[data-guide]');
+    if (!b) return;
+    if (b.dataset.guide === 'off') setGuide(false);
+    else { guideDismissed = guideShown; hideGuide(); }
+});
+// any input: the hint goes away, and the wait starts again ("when nothing happens")
+for (const type of ['pointerdown', 'keydown', 'wheel'])
+    document.addEventListener(type, e => {
+        if (guidePop.contains(e.target)) return;
+        hideGuide();
+        scheduleGuide();
+    }, true);
+addEventListener('resize', () => { if (guideShown) showGuide(guideShown); });
+
 // ---- menu bar (SFM-176): click a title to open its list; while one is open, pointing at another opens that;
 // a click on an item, outside the menus or Esc closes it
 const menuBar = document.getElementById('menubar');
@@ -1966,6 +2073,7 @@ loadGraph = async function (options = {}) {
         const option = [...analysisSelect.options].find(o => o.value === analysisId);
         if (option) option.textContent = `${current.name} (${count} tree${count === 1 ? '' : 's'})`;
     }
+    scheduleGuide();                                // SFM-211: an empty page / only top events -> a hint after a while
 };
 
 // the explorer: shown on wide screens (not in a Structure View window), the choice remembered per browser (SFM-194)
