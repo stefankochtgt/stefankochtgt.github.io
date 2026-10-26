@@ -265,7 +265,9 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
             <button type="button" class="secondary icon-btn" id="page-down" title="Page below -- the page of the selected transfer triangle, else the first page continued from here" aria-label="Page below">
                 <svg viewBox="0 0 26 22"><use href="#ico-page-down"/></svg></button>
             <span class="icon-sep"></span>
-            <!-- own icons in the style of a classic FTA tool's toolbar (SFM-174) -->
+            <!-- own icons in the style of a classic FTA tool's toolbar (SFM-174); the arrow = select: ends adding, like Esc (SFM-211) -->
+            <button type="button" class="secondary icon-btn active" id="select-mode" title="Select (Esc) -- stop adding gates / basic events and select events again" aria-label="Select" aria-pressed="true">
+                <svg viewBox="0 0 26 22"><use href="#ico-select"/></svg></button>
             <button type="button" class="secondary icon-btn" id="add-top" title="New top event" aria-label="New top event">
                 <svg viewBox="0 0 26 22"><use href="#ico-top"/></svg></button>
             <button type="button" class="secondary icon-btn" id="add-gate" title="New gate -- then click a gate to add it below (Esc ends)" aria-label="New gate">
@@ -304,7 +306,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
             <table class="help-table">
                 <tr><th colspan="2">Building</th></tr>
                 <tr><td>New top event icon</td><td>a new tree &mdash; asks: this analysis or a new analysis page</td></tr>
-                <tr><td>New gate / basic event icon, then click gates</td><td>adds one below each gate you click; <kbd>Esc</kbd> or the icon again ends</td></tr>
+                <tr><td>New gate / basic event icon, then click gates</td><td>adds one below each gate you click; <kbd>Esc</kbd>, the <b>arrow</b> icon or the icon again ends &mdash; then clicks select events again</td></tr>
                 <tr><td>Click an event</td><td>selects it (red); a second click on the title (or <kbd>F2</kbd>) renames the title in place, a second click on the <strong>ID box</strong> renames the ID &mdash; <kbd>Enter</kbd> or a click elsewhere saves, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Double-click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with &ldquo;&hellip;&rdquo; stands for it &mdash; <strong>click the triangle</strong> to jump to that page; for big trees and PDFs (printed with its page number)</td></tr>
@@ -390,6 +392,8 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
         </linearGradient>
         <g id="ico-gate-shape"><path d="M0 9 Q0 2 4.5 0 Q9 2 9 9 Z" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width="1.1" stroke-linejoin="round"/></g>
         <g id="ico-plus"><path d="M1 6 H9 M5 2 V10" stroke="#3a5ca8" stroke-width="1.8" stroke-linecap="square"/></g>
+        <g id="ico-select"><path d="M9 2 V18 L12.8 14.4 L15.4 20 L17.8 18.9 L15.2 13.4 L20.2 13.2 Z" fill="#2563eb"
+            stroke="#1e3a8a" stroke-width="1" stroke-linejoin="round"/></g>
         <g id="ico-top">
             <g transform="translate(1 1)"><rect width="9" height="9" fill="#f6d77a" stroke="#d9a520" stroke-width="0.8"/>
                 <path d="M4.5 1 V8 M1 4.5 H8 M2 2 L7 7 M7 2 L2 7" stroke="#fff6c8" stroke-width="1"/></g>
@@ -625,15 +629,19 @@ let addMode = null;
 const hint = document.getElementById('manual-fta-hint');
 const modeButtons = { intermediate: document.getElementById('add-gate'), basic: document.getElementById('add-basic') };
 
+const selectButton = document.getElementById('select-mode');
 function setAddMode(kind, message) {
     addMode = kind;
     for (const [k, button] of Object.entries(modeButtons)) button.classList.toggle('secondary', k !== kind);
+    selectButton.classList.toggle('active', !kind);              // the arrow is on while nothing is being added
+    selectButton.setAttribute('aria-pressed', String(!kind));
     hint.hidden = !kind && !message;
     hint.style.color = message ? 'var(--error, #c00)' : '';
     hint.textContent = message || (kind ? `Click a gate to add a ${KIND_NAMES[kind]} below it -- as often as you like (Esc or the button again ends).` : '');
 }
 
 document.getElementById('add-top').addEventListener('click', () => { setAddMode(null); newTree(); });
+selectButton.addEventListener('click', () => { setAddMode(null); endMoveTo(); });   // the same as Esc
 for (const [kind, button] of Object.entries(modeButtons)) {
     button.addEventListener('click', () => {
         if (addMode === kind) { setAddMode(null); return; }
@@ -894,11 +902,11 @@ document.getElementById('toggle-compact').addEventListener('click', async () => 
 });
 
 // ---- explorer (SFM-194): the project, its analyses and their fault tree pages as a tree, like Reliability
-// Workbench's "Fault Tree Pages"; a continuation page sits below the page it continues from. A click on a page
+// Workbench's (without its "Fault Tree Pages" folder level, user 2026-10-26); a continuation page sits below the page it continues from. A click on a page
 // opens it, on an analysis its first page; the boxes open / close a branch.
 const explorer = document.getElementById('fta-explorer');
 const XP_KEY = 'manualFtaExplorer';
-const xpOpen = new Set();                              // opened branches: "a:<analysis>", "f:<analysis>", "p:<analysis>:<page>"
+const xpOpen = new Set();                              // opened branches: "a:<analysis>", "p:<analysis>:<page>"
 let explorerShown = false, xpProject = '', xpAuto = '', xpData = null;
 function setExplorer(show) {
     explorerShown = show;
@@ -914,7 +922,6 @@ document.getElementById('toggle-explorer').addEventListener('click', () => setEx
 const XP_ICONS = {
     project: '<rect x="1.5" y="2" width="14" height="11" fill="#fff" stroke="#3a5ca8"/><rect x="1.5" y="2" width="14" height="2.5" fill="#3a5ca8"/>',
     analysis: '<rect x="1.5" y="1.5" width="14" height="12" rx="1" fill="url(#ico-fill)" stroke="#3a5ca8"/><path d="M4 5 H13 M4 8 H13 M4 11 H10" stroke="#3a5ca8"/>',
-    folder: '<path d="M1.5 3.5 H6 L7.5 5 H15.5 V13.5 H1.5 Z" fill="#fde68a" stroke="#b45309"/>',
     page: '<rect x="2.5" y="1.5" width="12" height="12" fill="#fff" stroke="#3a5ca8"/><path d="M8.5 3.5 V6 M5 6 H12 M5 6 V8.5 M12 6 V8.5" stroke="#3a5ca8"/>'
         + '<rect x="3.5" y="8.5" width="3" height="3" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width=".8"/><rect x="10.5" y="8.5" width="3" height="3" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width=".8"/>',
 };
@@ -966,7 +973,7 @@ async function renderExplorer(refetch = true) {
     const auto = analysisId + '|' + pageId;
     if (auto !== xpAuto) {
         xpAuto = auto;
-        xpOpen.add('a:' + analysisId); xpOpen.add('f:' + analysisId); xpOpen.add(`p:${analysisId}:${pageId}`);
+        xpOpen.add('a:' + analysisId); xpOpen.add(`p:${analysisId}:${pageId}`);
         const mine = (xpData.analyses.find(a => a.id === analysisId) || { pages: [] }).pages;
         let cur = mine.find(p => p.id === pageId);
         while (cur && cur.parent != null) { xpOpen.add(`p:${analysisId}:${cur.parent}`); cur = mine.find(p => p.id === cur.parent); }
@@ -976,13 +983,14 @@ async function renderExplorer(refetch = true) {
         const pageItem = p => xpItem(`p:${a.id}:${p.id}`, 'page', p.id === '' ? pageOneName(p) : `${p.code}: ${p.title || ''}`,
             below(p.id).map(pageItem), () => xpOpenPage(a.id, p.id), a.id === analysisId && p.id === pageId);
         const roots = a.pages.filter(p => p.parent == null).map(pageItem);
-        const folder = xpItem('f:' + a.id, 'folder', 'Fault Tree Pages', roots);
-        return xpItem('a:' + a.id, 'analysis', `${a.name} (${a.trees} tree${a.trees === 1 ? '' : 's'})`, [folder],
-            () => { xpOpen.add('a:' + a.id); xpOpen.add('f:' + a.id); if (a.id !== analysisId) switchAnalysis(a.id); else renderExplorer(false); });
+        return xpItem('a:' + a.id, 'analysis', `${a.name} (${a.trees} tree${a.trees === 1 ? '' : 's'})`, roots,
+            () => { xpOpen.add('a:' + a.id); if (a.id !== analysisId) switchAnalysis(a.id); else renderExplorer(false); });
     });
     xpOpen.add('root');
     const ul = document.createElement('ul'); ul.setAttribute('role', 'tree');
-    ul.append(xpItem('root', 'project', xpProject, analysesItems));
+    // the standalone has no projects: no "standalone" row, the analyses are the top level (user, 2026-10-26)
+    if (window.FTA_STANDALONE) ul.append(...analysesItems);
+    else ul.append(xpItem('root', 'project', xpProject, analysesItems));
     const keep = explorer.scrollTop;
     explorer.replaceChildren(ul);
     explorer.scrollTop = keep;
@@ -1621,7 +1629,7 @@ const TOUR = [
     { el: '#add-top', title: 'New top event', text: `<p>Starts a new tree. You are asked whether it goes into this analysis
         or onto a new analysis page.</p>` },
     { el: '#add-gate', title: 'New gate', text: `<p>Click the icon, then click gates or top events: a new gate is added below
-        each one you click. ${K('Esc')} or the icon again ends it.</p>` },
+        each one you click. ${K('Esc')}, the <b>arrow</b> icon left of it or the icon again ends it.</p>` },
     { el: '#add-basic', title: 'New basic event', text: `<p>The same for basic events.</p>` },
     { el: '#fit-window', title: 'Fit to window', text: `<p>Shows the whole analysis. ${K('Mouse wheel')} zooms, dragging the
         background moves the view.</p>` },
@@ -1751,12 +1759,11 @@ addEventListener('resize', () => { if (tourAt >= 0) showTourStep(tourAt); });
 document.getElementById('help-tour').addEventListener('click', startTour);
 document.getElementById('help-tour-start').addEventListener('click', startTour);
 
-// ---- guided hints (SFM-211, user 2026-10-26): after a few seconds without input, an empty page points at the new
-// top event icon, a page with only top events at the gate / basic event icons. Not while the tour, a dialog, a menu,
-// an add mode or another view is open. "OK" hides that hint until the page's state changes; Help > Guided hints
-// (or "Turn hints off") switches them off for this browser.
+// ---- guided hints (SFM-211, user 2026-10-26): at once (no delay, user), an empty page points at the new top event
+// icon, a page with only top events at the gate / basic event icons. Hidden while the tour, a dialog, a menu, an add
+// mode or another view is open, back afterwards. "OK" hides that hint until the page's state changes; Help > Guided
+// hints (or "Turn hints off") switches them off for this browser.
 const GUIDE_KEY = 'faultTreeGuide';
-const GUIDE_IDLE_MS = window.FTA_GUIDE_IDLE_MS || 4000;     // tests set a shorter wait
 const GUIDE_STEPS = {
     top: { els: ['#add-top'], text: `<b>Start here:</b> click this icon to create a <b>top event</b> &ndash; the
         undesired event your fault tree explains.` },
@@ -1802,18 +1809,15 @@ function showGuide(key) {
     Object.assign(guidePop.style, { left: `${x}px`, top: `${Math.max(...r.map(b => b.bottom)) + 10}px` });
     guidePop.style.setProperty('--arrow', `${Math.max(14, Math.min(mid - x, pw - 14))}px`);
 }
+// checked after every graph load and every input (a tick later, when the input's own handlers have run)
 function scheduleGuide() {
     clearTimeout(guideTimer);
-    const state = guideState();
-    if (state !== guideLast) { guideLast = state; guideDismissed = ''; }     // a new state: its hint may show again
-    if (guideShown && guideShown !== state) hideGuide();
-    if (!guideOn || !state || state === guideDismissed || guideShown) return;
     guideTimer = setTimeout(() => {
-        const now = guideState();
-        if (!guideOn || !now || now === guideDismissed) return;
-        if (guideBusy()) { scheduleGuide(); return; }
-        showGuide(now);
-    }, GUIDE_IDLE_MS);
+        const state = guideState();
+        if (state !== guideLast) { guideLast = state; guideDismissed = ''; }     // a new state: its hint may show again
+        if (!guideOn || !state || state === guideDismissed || guideBusy()) { hideGuide(); return; }
+        if (guideShown !== state) showGuide(state);
+    }, 0);
 }
 function setGuide(on) {
     guideOn = on;
@@ -1831,13 +1835,9 @@ guidePop.addEventListener('click', e => {
     if (b.dataset.guide === 'off') setGuide(false);
     else { guideDismissed = guideShown; hideGuide(); }
 });
-// any input: the hint goes away, and the wait starts again ("when nothing happens")
-for (const type of ['pointerdown', 'keydown', 'wheel'])
-    document.addEventListener(type, e => {
-        if (guidePop.contains(e.target)) return;
-        hideGuide();
-        scheduleGuide();
-    }, true);
+// any input may open a dialog, a menu or an add mode (hint away) or close it (hint back)
+for (const type of ['click', 'keyup', 'contextmenu'])
+    document.addEventListener(type, e => { if (!guidePop.contains(e.target)) scheduleGuide(); }, true);
 addEventListener('resize', () => { if (guideShown) showGuide(guideShown); });
 
 // ---- menu bar (SFM-176): click a title to open its list; while one is open, pointing at another opens that;
