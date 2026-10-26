@@ -331,10 +331,20 @@
         return [pos, [[-half, half]].concat(rowsU.map(([a, b]) => [a - mid, b - mid])),
                 [band0].concat(bandsU.map(([a, b]) => [a - mid, b - mid]))];
     }
-    function width(e, root = true, gap = H_GAP) {
-        if (!e.causes.length || (e.new_page && !root)) return LEAF_W;
-        const w = e.causes.map(c => width(c, false, gap));
-        return Math.max(LEAF_W, w.reduce((a, b) => a + b, 0) + gap * (w.length - 1));
+    // a label (SFM-212): the block reaches right to the label's frame -- manual_fta._reach() / _extent(), the same arithmetic
+    const NOTE_MAX_W = LEAF_W, NOTE_TAG_ROOM = (2 + 22) * UNIT, NOTE_MARGIN = 10 * UNIT;
+    function reach(e, gap, compact) {
+        const half = LEAF_W / 2;
+        if (compact || !e.label) return half;
+        const end = half + (e.criticality ? NOTE_TAG_ROOM : 0) + 3 * UNIT + 6 + NOTE_MAX_W;
+        return Math.max(half, end - gap + NOTE_MARGIN);
+    }
+    const span = (ext, gap) => ext.reduce((a, [l, r]) => a + l + r, 0) + gap * (ext.length - 1);
+    function extent(e, root = true, gap = H_GAP, compact = false) {     // [left, right] of the branch around the event's middle
+        const half = LEAF_W / 2, own = reach(e, gap, compact);
+        if (!e.causes.length || (e.new_page && !root)) return [half, own];
+        const s = span(e.causes.map(c => extent(c, false, gap, compact)), gap);
+        return [Math.max(half, s / 2), Math.max(own, s / 2)];
     }
     // manual_fta.pages(): page 1 = the trees, then one page per event marked new_page (once per ID, tree order)
     // a top event marked new_page: its tree on a page of its own, page 1 only for the other trees (SFM-192)
@@ -642,13 +652,13 @@
                 new_page: !!e.new_page, page_number: e.new_page ? (pageNo[e.id] || 0) : 0 }, position: { x, y: row * pitch } });
             if (stage) { nodes[nodes.length - 1].data.compact = true; if (stage === 2) nodes[nodes.length - 1].data.stacked = true; }
             if (transfer) { nodes[nodes.length - 1].data.symbol = 'transfer'; return; }
-            const w = e.causes.map(c => width(c, false, gap));
-            let cursor = x - (w.reduce((a, b) => a + b, 0) + gap * (w.length - 1)) / 2;
+            const ext = e.causes.map(c => extent(c, false, gap, !!stage));
+            let cursor = x - span(ext, gap) / 2;
             e.causes.forEach((c, i) => {
                 const child = `${nodeId}/${c.id}`;
                 edges.push({ data: { id: `mfta-${child}`, source: nodeId, target: child, input_index: i, input_count: e.causes.length } });
-                place(c, stage === 2 ? tight[child] : cursor + w[i] / 2, row + 1, topId, nodeId);
-                cursor += w[i] + gap;
+                place(c, stage === 2 ? tight[child] : cursor + ext[i][0], row + 1, topId, nodeId);
+                cursor += ext[i][0] + ext[i][1] + gap;
             });
         }
         if (start) {                                       // a continuation page: the branch alone; or a tree on its own page
@@ -659,7 +669,7 @@
                 const base = -Math.min(...rows.map(r => r[0]));
                 for (const [key, x] of Object.entries(pos)) tight[key] = base + x;
                 place(e, base, 0, path.split('/')[0], parent);
-            } else place(e, width(e, true, gap) / 2, 0, path.split('/')[0], parent);
+            } else place(e, extent(e, true, gap, !!stage)[0], 0, path.split('/')[0], parent);
             if (parent) {                                  // continued from an earlier page: the side triangle, "…" (SFM-193)
                 const back = start.parent || '';
                 Object.assign(nodes[0].data, { page_start: true, from_page_id: back, from_page: pageNo[back] || 0 });
@@ -684,7 +694,7 @@
                 });
                 continue;
             }
-            const w = width(t, true, gap); place(t, cursor + w / 2, 0, t.id, ''); cursor += w + gap * 3;
+            const [l, r] = extent(t, true, gap, !!stage); place(t, cursor + l, 0, t.id, ''); cursor += l + r + gap * 3;
         }
         return { nodes, edges };
     }

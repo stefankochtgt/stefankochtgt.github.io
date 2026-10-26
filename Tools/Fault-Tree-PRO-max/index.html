@@ -314,7 +314,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <tr><td>Compact icon</td><td>first click: compact display &mdash; the same gates and events, closer together; the ASIL / H square and the label are drawn inside the description box; second click: <b>compact 2</b> (&ldquo;2&rdquo; on the icon) &mdash; branches may also go below each other where the rows allow (lines stay separate); third click: normal display; also for the JPG, LaTeX and PDF export</td></tr>
                 <tr><td>Save (Ctrl+S) / Version control</td><td>every change is kept at once; <b>Save</b> also creates a numbered revision with what changed and when (the button is marked while there are unsaved changes); the <b>Version control</b> tab lists the revisions with their changes &mdash; <b>Restore</b> makes one current again (unsaved changes are saved first)</td></tr>
                 <tr><td>Small triangle on the side / &#9650; &#9660;</td><td>on its own page the continued gate has a small triangle with &ldquo;&hellip;&rdquo; &mdash; click it to go back to the page it continues from; &#9650; next to the Page list: the page above, &#9660;: the page of the selected transfer triangle, else the first page continued from here</td></tr>
-                <tr><td>Right-click an event</td><td>add below, edit, AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
+                <tr><td>Right-click an event</td><td>add below, edit, add / edit / remove the label (the boxed text right of it), AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
                 <tr><th colspan="2">Moving and copying</th></tr>
                 <tr><td>Phone / tablet</td><td>tap = click, <strong>long-press</strong> = right-click; the event menu has <em>Select</em> and <em>Move / copy to…</em> (then tap the gate); pinch zooms</td></tr>
                 <tr><td><kbd>Ctrl</kbd> + drag onto a gate</td><td>menu: move here, copy (same IDs = the same event, dashed box), copy with new IDs</td></tr>
@@ -729,6 +729,12 @@ function eventMenuItems(node) {
         { label: '+ Add basic event below', run: () => addBelow(node, 'basic') },
     ];
     items.push({ label: 'Edit…', run: () => editEvent(node) });
+    // the label: the boxed text right of the event (user, 2026-10-26)
+    items.push({ label: d.note ? 'Edit label…' : '+ Add label…', run: () => {
+        const text = prompt(`Label of ${d.code}:`, d.note || '');
+        if (text !== null && text.trim() !== (d.note || '')) put({ label: text.trim() });
+    } });
+    if (d.note) items.push({ label: 'Remove label', run: () => put({ label: '' }) });
     // without a Ctrl key (phone, tablet) these are the way to select several and to move / copy (SFM-183)
     items.push({ label: picked.has(node.id()) ? 'Unselect' : 'Select (for several)', run: () => togglePick(node) });
     if (d.id !== d.top || cy.nodes('[type = "manual_event"]').length > 1)
@@ -1474,8 +1480,13 @@ async function loadGraph(options = {}) {
             { selector: 'node.note', style: {
                 'width': 0.1, 'height': 0.1, 'background-image': 'none', 'events': 'no',
                 'label': 'data(note)', 'font-size': 9, 'font-weight': 'bold', 'color': '#000',
-                'text-halign': 'right', 'text-valign': 'center', 'text-margin-y': 0,
-                'text-wrap': 'wrap', 'text-max-width': 110,
+                'text-halign': 'right', 'text-valign': 'center', 'text-margin-y': 0, 'text-margin-x': 3,
+                // at most as wide as the description box -- the layout keeps that much room right of it (SFM-212)
+                'text-wrap': 'wrap', 'text-max-width': BOX_W * U,
+                // a box around the label (user, 2026-10-26)
+                'text-background-color': '#fff', 'text-background-opacity': 1, 'text-background-padding': 2,
+                'text-background-shape': 'rectangle', 'text-border-width': 1, 'text-border-color': '#000',
+                'text-border-opacity': 1,
             }},
             { selector: 'edge', style: {
                 'curve-style': 'straight', 'width': 1, 'line-color': STROKE,
@@ -1555,7 +1566,8 @@ async function loadGraph(options = {}) {
     });
     cy.on('cxttap', contextMenuFor);
     function contextMenuFor(evt) {
-        if (evt.target === cy) showMenu(evt.renderedPosition, 'Manual FTA', [{ label: '+ Add top event', run: newTree }]);
+        if (evt.target === cy) showMenu(evt.renderedPosition, 'Manual FTA', [{ label: '+ Add top event', run: newTree },
+                                                                             { label: 'Fit to window', run: () => cy.fit(undefined, 30) }]);
         else if (evt.target.isNode() && evt.target.data('type') === 'manual_event') {
             if (picked.has(evt.target.id()) && picked.size > 1) {
                 showMenu(evt.renderedPosition, `${picked.size} events selected`, bulkMenuItems());
@@ -1612,7 +1624,7 @@ const TOUR = [
     { el: '#manual-fta-menu', enter: () => tourMenu('GT-1'), leave: hideMenu, title: 'Right-click menu',
         text: `<p><b>Right-click</b> an event for this menu &ndash; on a phone or tablet: <b>long-press</b>. Add a gate / basic
         event below, edit, select, move / copy, AND / OR, make it a gate or a basic event, move it left / right, safety
-        criticality, colour, delete. Right-click the empty background to add a top event.</p>` },
+        criticality, colour, label, delete. Right-click the empty background to add a top event or fit the view to the window.</p>` },
     { nodes: tourNodes('EV-1', 'EV-2'), enter: () => tourNodes('EV-1', 'EV-2')().addClass('picked'),
         leave: () => cy.nodes('.picked').removeClass('picked'), title: 'Select several',
         text: `<p>${K('Ctrl')} + <b>click</b> selects events (blue, here the two bulbs) &ndash; or <b>Select</b> in the menu.
