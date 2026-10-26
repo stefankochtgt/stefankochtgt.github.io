@@ -106,17 +106,11 @@ function fitTitle(text, maxH = TITLE_H) {      // maxH: compact display, a lower
     }
     return { lines, size };
 }
-// ---- compact display (SFM-200): the same blocks, closer together; the ASIL / H square (top right) and the label (top
-// left) inside the description box, the title below them. fta_tikz.py / standalone/fta_tikz.js draw the same.
+// ---- compact display (SFM-200): the same blocks, closer together; the ASIL / H square (top right) inside the
+// description box, the title below it (the label stays outside, framed, SFM-212). fta_tikz.py / .js draw the same.
 const C_TAG_H = 9, C_TAG_FONT = 5.6, C_INSET = 1.5, C_TITLE_DROP = 11;
-const compactCorner = d => !!d.compact && !!(d.tag || d.note);
+const compactCorner = d => !!d.compact && !!d.tag;
 const cTagWidth = tag => Math.max(C_TAG_H, textWidth(tag) * C_TAG_FONT / 1000 + 3);
-function cNoteText(note, room) {                       // the label, shortened with "…" to the room left of the square
-    let t = Array.from(note);
-    if (textWidth(note) * C_TAG_FONT / 1000 <= room) return note;
-    while (t.length && textWidth(t.join('') + '…') * C_TAG_FONT / 1000 > room) t = t.slice(0, -1);
-    return t.join('').trimEnd() + '…';
-}
 function compactCornerSvg(d) {
     let s = '', tagW = 0;
     if (d.tag) {
@@ -124,11 +118,6 @@ function compactCornerSvg(d) {
         s += `<rect x="${BOX_W - C_INSET - tagW}" y="${C_INSET}" width="${tagW}" height="${C_TAG_H}" fill="#fff" stroke-width="0.45"/>`
            + `<text x="${BOX_W - C_INSET - tagW / 2}" y="${C_INSET + C_TAG_H / 2}" dominant-baseline="central" text-anchor="middle"`
            + ` font-family="Arial, Helvetica, sans-serif" font-size="${C_TAG_FONT}" font-weight="bold" fill="#000" stroke="none">${escapeXml(d.tag)}</text>`;
-    }
-    if (d.note) {
-        const room = BOX_W - 2 * C_INSET - 1 - (tagW ? tagW + 2 : 0);
-        s += `<text x="${C_INSET + 1}" y="${C_INSET + C_TAG_H / 2}" dominant-baseline="central" font-family="Arial, Helvetica, sans-serif"`
-           + ` font-size="${C_TAG_FONT}" font-weight="bold" fill="${d.text_color || '#000'}" stroke="none">${escapeXml(cNoteText(d.note, room))}</text>`;
     }
     return s;
 }
@@ -189,7 +178,7 @@ function blockSvg(d) {
                 ? `<text x="${BOX_W / 2}" y="${TRANSFER_TEXT_Y}" dominant-baseline="central" text-anchor="middle"`
                   + ` font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="bold" fill="${d.text_color || '#000'}"`
                   + ` stroke="none">…</text>` : '')         // on screen "…": a click on it opens the page (user, 2026-10-23)
-             + (d.compact ? compactCornerSvg(d)                          // compact: square and label in the box (SFM-200)
+             + (d.compact ? compactCornerSvg(d)                          // compact: the square in the box (SFM-200)
                 : d.type === 'manual_event' && !d.tag_box ? '' : tagSvg(TAG_X, EVENT_TAG_Y, d.tag));   // hand-added Semi-manual events: none
     }
     const left = (NODE_W - BOX_W) / 2;

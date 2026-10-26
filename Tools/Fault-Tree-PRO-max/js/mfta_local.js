@@ -308,8 +308,8 @@
     // compact stage 2 (SFM-201): branches packed row by row -- manual_fta._contour(), the same arithmetic
     const BAND_GAP = 6 * UNIT, EXIT_HALF = 17 * UNIT;
     function contour(e, path, root, gap) {
-        const half = LEAF_W / 2;
-        if (!e.causes.length || (e.new_page && !root)) return [{ [path]: 0 }, [[-half, half]], []];
+        const half = LEAF_W / 2, right = reach(e, gap, true);            // its label included (SFM-212)
+        if (!e.causes.length || (e.new_page && !root)) return [{ [path]: 0 }, [[-half, right]], []];
         const kids = e.causes.map(c => contour(c, `${path}/${c.id}`, false, gap));
         const offsets = [], rowsU = [], bandsU = [];
         for (const [, rows, bands] of kids) {
@@ -328,15 +328,15 @@
         kids.forEach(([childPos], i) => { for (const [key, x] of Object.entries(childPos)) pos[key] = x + offsets[i] - mid; });
         const exitHalf = kids.length > 1 ? EXIT_HALF : 0;
         const band0 = [Math.min(offsets[0] - mid, -exitHalf), Math.max(offsets[offsets.length - 1] - mid, exitHalf)];
-        return [pos, [[-half, half]].concat(rowsU.map(([a, b]) => [a - mid, b - mid])),
+        return [pos, [[-half, right]].concat(rowsU.map(([a, b]) => [a - mid, b - mid])),
                 [band0].concat(bandsU.map(([a, b]) => [a - mid, b - mid]))];
     }
     // a label (SFM-212): the block reaches right to the label's frame -- manual_fta._reach() / _extent(), the same arithmetic
     const NOTE_MAX_W = LEAF_W, NOTE_TAG_ROOM = (2 + 22) * UNIT, NOTE_MARGIN = 10 * UNIT;
     function reach(e, gap, compact) {
         const half = LEAF_W / 2;
-        if (compact || !e.label) return half;
-        const end = half + (e.criticality ? NOTE_TAG_ROOM : 0) + 3 * UNIT + 6 + NOTE_MAX_W;
+        if (!e.label) return half;
+        const end = half + (e.criticality && !compact ? NOTE_TAG_ROOM : 0) + 3 * UNIT + 6 + NOTE_MAX_W;
         return Math.max(half, end - gap + NOTE_MARGIN);
     }
     const span = (ext, gap) => ext.reduce((a, [l, r]) => a + l + r, 0) + gap * (ext.length - 1);

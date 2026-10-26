@@ -275,8 +275,8 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
             <button type="button" class="secondary icon-btn" id="add-basic" title="New basic event -- then click a gate to add it below (Esc ends)" aria-label="New basic event">
                 <svg viewBox="0 0 26 22"><use href="#ico-basic"/></svg></button>
             <span class="icon-sep"></span>
-            <!-- SFM-200: compact display -- the same blocks closer together, ASIL / H square and label in the box -->
-            <button type="button" class="secondary icon-btn" id="toggle-compact" title="Compact display: the gates and events closer together, the ASIL / H square and the label inside the box" aria-label="Compact display" aria-pressed="false">
+            <!-- SFM-200: compact display -- the same blocks closer together, ASIL / H square in the box (the label stays outside, SFM-212) -->
+            <button type="button" class="secondary icon-btn" id="toggle-compact" title="Compact display: the gates and events closer together, the ASIL / H square inside the box" aria-label="Compact display" aria-pressed="false">
                 <svg viewBox="0 0 26 22"><use href="#ico-compact"/></svg><span id="compact-stage" class="stage-badge" hidden>2</span></button>
             <button type="button" class="secondary icon-btn" id="fit-window" title="Fit to window" aria-label="Fit to window" onclick="cy && cy.fit(undefined, 30)">
                 <svg viewBox="0 0 26 22"><use href="#ico-fit"/></svg></button>
@@ -311,7 +311,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <tr><td>Double-click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
                 <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with &ldquo;&hellip;&rdquo; stands for it &mdash; <strong>click the triangle</strong> to jump to that page; for big trees and PDFs (printed with its page number)</td></tr>
                 <tr><td>Explorer (left) / Diagram &middot; Grid</td><td>the tree on the left lists the analyses and their fault tree pages (a continued page below the page it continues from) &mdash; click a page to open it, the boxes open / close a branch, the toolbar icon shows / hides it; <b>Grid</b>: all gates or all basic events as a table with every field &mdash; search all columns, filter each column, click a header to sort, double-click a row to show it in the diagram</td></tr>
-                <tr><td>Compact icon</td><td>first click: compact display &mdash; the same gates and events, closer together; the ASIL / H square and the label are drawn inside the description box; second click: <b>compact 2</b> (&ldquo;2&rdquo; on the icon) &mdash; branches may also go below each other where the rows allow (lines stay separate); third click: normal display; also for the JPG, LaTeX and PDF export</td></tr>
+                <tr><td>Compact icon</td><td>first click: compact display &mdash; the same gates and events, closer together; the ASIL / H square is drawn inside the description box (the label stays beside it); second click: <b>compact 2</b> (&ldquo;2&rdquo; on the icon) &mdash; branches may also go below each other where the rows allow (lines stay separate); third click: normal display; also for the JPG, LaTeX and PDF export</td></tr>
                 <tr><td>Save (Ctrl+S) / Version control</td><td>every change is kept at once; <b>Save</b> also creates a numbered revision with what changed and when (the button is marked while there are unsaved changes); the <b>Version control</b> tab lists the revisions with their changes &mdash; <b>Restore</b> makes one current again (unsaved changes are saved first)</td></tr>
                 <tr><td>Small triangle on the side / &#9650; &#9660;</td><td>on its own page the continued gate has a small triangle with &ldquo;&hellip;&rdquo; &mdash; click it to go back to the page it continues from; &#9650; next to the Page list: the page above, &#9660;: the page of the selected transfer triangle, else the first page continued from here</td></tr>
                 <tr><td>Right-click an event</td><td>add below, edit, add / edit / remove the label (the boxed text right of it), AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
@@ -1454,10 +1454,11 @@ async function loadGraph(options = {}) {
     // the tree edges are kept (hidden) next to the drawn connector segments, for "what is below"
     const treeEdges = data.edges.map(e => ({ data: { ...e.data, tree: true }, classes: 'tree-edge' }));
     // an event's label: text right of its description box (own invisible node, so it is not clipped)
-    const notes = data.nodes.filter(n => n.data.note && !n.data.compact).map(n => ({
+    // compact too (SFM-212: compacting does not affect the label) -- there the square is in the box
+    const notes = data.nodes.filter(n => n.data.note).map(n => ({
         data: { id: `${n.data.id}#note`, note: n.data.note }, classes: 'note',
         // right of the box -- or of its criticality square, when it has one (it was drawn over it)
-        position: { x: n.position.x + (BOX_W / 2 + (n.data.tag ? TAG_GAP + TAG_W : 0) + 3) * U, y: n.position.y + (BOX_H / 2 - BLOCK_H / 2) * U },
+        position: { x: n.position.x + (BOX_W / 2 + (n.data.tag && !n.data.compact ? TAG_GAP + TAG_W : 0) + 3) * U, y: n.position.y + (BOX_H / 2 - BLOCK_H / 2) * U },
     }));
     cy = cytoscape({
         container: document.getElementById('manual-fta-graph'),

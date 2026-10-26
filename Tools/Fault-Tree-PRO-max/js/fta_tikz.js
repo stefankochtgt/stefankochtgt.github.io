@@ -14,7 +14,7 @@
     const OR_BOTTOM_R = 37.658, OR_BOTTOM_RISE = 5.75;
     const TAG_SIZE = 14.0, TAG_W = 22.0, TAG_GAP = 2.0;
     const TRI_TIP = LABEL_TOP - 7;
-    // compact display (SFM-200), as fta_tikz.py; cTagWidth / cNoteText / TITLE_H / C_* come from fta_draw.js
+    // compact display (SFM-200), as fta_tikz.py; cTagWidth / textWidth / TITLE_H / C_* come from fta_draw.js
     const COMPACT_BUS_SPAN = 8.0;
     const SIDE_Y = SYM_TOP - 2, SIDE_DX = 28.0, SIDE_TRI_H = 12.0, SIDE_TRI_HALF = 7.0;   // transfer-in triangle
     const SCALE = 0.0322, PT_PER_CM = 28.4528, VIEW_U = 1.5;
@@ -34,7 +34,9 @@
     };
     const TITLE_FONT = font(9), CODE_FONT = font(7.5), TAG_FONT = font(7, true), PAGE_FONT = font(6.5, true);
     const SIDE_FONT = font(5.5, true);                // page number in the small side triangle (SFM-193)
-    const C_FONT = font(5.6 * VIEW_U, true);         // the square / label in the box, compact (SFM-200)
+    const C_FONT = font(5.6 * VIEW_U, true);         // the square in the box, compact (SFM-200)
+    // the label (SFM-212), as fta_tikz.py :: _note()
+    const NOTE_FONT_U = 9 / VIEW_U, NOTE_PAD = 2 / VIEW_U, NOTE_FONT = font(9, true);
 
     const ESCAPES = { '\\': '\\textbackslash{}', '&': '\\&', '%': '\\%', '$': '\\$', '#': '\\#', '_': '\\_',
                       '{': '\\{', '}': '\\}', '~': '\\textasciitilde{}', '^': '\\textasciicircum{}' };
@@ -80,7 +82,7 @@
         let lines = symbol(data.symbol || '', left + SYM_X, top + SYM_TOP, fill);
         if (isGate) return lines;
         const dashed = data.shared ? ', dashed' : '';
-        const corner = !!data.compact && !!(data.tag || data.note);
+        const corner = !!data.compact && !!data.tag;
         const stubEnd = top + (data.symbol === 'none' ? LABEL_TOP : data.symbol === 'triangle' || data.symbol === 'transfer' ? TRI_TIP : SYM_TOP);
         const side = [];
         if (data.page_start) {                                       // continued from an earlier page
@@ -102,24 +104,24 @@
         if (data.symbol === 'transfer' && data.page_number)
             lines.push(text(cx, top + (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 1, `p.~${data.page_number}`, PAGE_FONT));
         const tag = data.tag || '';
-        if (data.compact) {                  // SFM-200: the square (top right) and the label (top left) in the box
-            let tagW = 0;
+        if (data.compact) {                  // SFM-200: the square (top right) in the box
             if (tag) {
-                tagW = cTagWidth(tag);
+                const tagW = cTagWidth(tag);
                 const tx = left + BOX_W - C_INSET - tagW, ty = top + C_INSET;
                 lines.push(`\\path[draw, fill=white, line width=0.2pt] ${pt(tx, ty)} rectangle ${pt(tx + tagW, ty + C_TAG_H)};`,
                            text(tx + tagW / 2, ty + C_TAG_H / 2, esc(tag), C_FONT));
-            }
-            if (data.note) {
-                const room = BOX_W - 2 * C_INSET - 1 - (tagW ? tagW + 2 : 0);
-                lines.push(`\\node[anchor=west, inner sep=0pt, font={${C_FONT}}] at ${pt(left + C_INSET + 1, top + C_INSET + C_TAG_H / 2)}`
-                           + ` {${esc(cNoteText(data.note, room))}};`);
             }
         } else if (tag) {
             const tagX = left + BOX_W + TAG_GAP, tagY = top + BOX_H / 2 - TAG_SIZE / 2;
             lines.push(`\\path[draw, fill=white] ${pt(tagX, tagY)} rectangle ${pt(tagX + TAG_W, tagY + TAG_SIZE)};`,
                 text(tagX + TAG_W / 2, tagY + TAG_SIZE / 2,
                      Array.from(tag).length <= 3 ? esc(tag) : `\\resizebox{${cm(TAG_W - 3)}}{!}{${esc(tag)}}`, TAG_FONT));
+        }
+        if (data.note && data.tag_box) {     // SFM-212: the Manual FTA's label, framed, right of the box / square
+            const sideX = left + BOX_W + (tag && !data.compact ? TAG_GAP + TAG_W : 0);
+            const width = Math.min(textWidth(data.note) * NOTE_FONT_U / 1000 * 1.1 + 0.5, BOX_W);
+            lines.push(`\\node[draw, fill=white, line width=0.4pt, anchor=west, inner sep=${cm(NOTE_PAD)}, text width=${cm(width)},`
+                       + ` align=left, font={${NOTE_FONT}}] at ${pt(sideX + 3 + 2 - NOTE_PAD, top + BOX_H / 2)} {${esc(data.note)}};`);
         }
         return lines;
     }
