@@ -176,47 +176,6 @@
     .badge-part  { background: #e8f0fe; color: #1a56c4; }
     .badge-rev   { background: #fff3e0; color: #e65100; }
 
-    /* ─── CONTACT PAGE ─── */
-    .contact-wrap {
-      display: grid; grid-template-columns: 1fr 1fr;
-      gap: 60px; align-items: start;
-      max-width: 900px;
-    }
-    .contact-form { display: flex; flex-direction: column; gap: 16px; }
-    .contact-form label {
-      font-size: 13px; font-weight: 600; color: #555;
-      display: block; margin-bottom: 5px; letter-spacing: 0.05em;
-    }
-    .contact-form input,
-    .contact-form textarea {
-      width: 100%;
-      border: 1px solid #ccc; border-radius: 2px;
-      padding: 10px 14px; font-family: inherit; font-size: 14px;
-      color: #2d2d2d; outline: none;
-      transition: border-color 0.2s;
-    }
-    .contact-form input:focus,
-    .contact-form textarea:focus { border-color: #007bff; }
-    .contact-form textarea { min-height: 130px; resize: vertical; }
-    .contact-form button {
-      align-self: flex-start;
-      background: #2d2d2d; color: #fff;
-      border: none; border-radius: 2px;
-      font-family: inherit; font-size: 14px; font-weight: 600;
-      padding: 11px 28px; cursor: pointer;
-      transition: background 0.2s;
-    }
-    .contact-form button:hover { background: #007bff; }
-    .form-success {
-      display: none;
-      background: #e6f4ea; border: 1px solid #a5d6a7;
-      padding: 12px 16px; font-size: 14px; color: #2e7d32; border-radius: 2px;
-    }
-    .contact-img {
-      width: 100%; height: 220px;
-      object-fit: cover; margin-bottom: 20px;
-    }
-
     /* ─── LEGAL / IMPRESSUM ─── */
     .legal h2 { font-size: 24px; font-weight: 700; margin-bottom: 20px; }
     .legal h3 { font-size: 17px; font-weight: 700; margin: 28px 0 8px; color: #1a1a1a; }
@@ -369,7 +328,6 @@
       nav { display: none; }
       .hamburger { display: flex; }
       .section { padding: 40px 20px; }
-      .contact-wrap { grid-template-columns: 1fr; gap: 30px; }
       footer { padding: 20px; }
       .page-banner { padding: 36px 20px 28px; }
       .hero { padding: 40px 20px; min-height: 300px; }
@@ -395,7 +353,6 @@
     <a href="#" onclick="showPage('aerospace'); return false;" id="nav-aerospace">Aerospace (ARP4754/4761)</a>
     <a href="#" onclick="showPage('ai'); return false;" id="nav-ai">AI Safety</a>
     <a href="#" onclick="showPage('automotive'); return false;" id="nav-automotive">Automotive (ISO26262)</a>
-    <a href="#" onclick="showPage('contact'); return false;" id="nav-contact">Contact</a>
     <a href="#" onclick="showPage('impressum'); return false;" id="nav-impressum">Impressum</a>
     <a href="#" onclick="showPage('dataprivacy'); return false;" id="nav-dataprivacy">Data Privacy</a>
     <a href="#" onclick="showPage('members'); return false;" id="nav-members">Members</a>
@@ -414,7 +371,6 @@
   <a href="#" onclick="showPage('aerospace'); return false;">Aerospace (ARP4754/4761)</a>
   <a href="#" onclick="showPage('ai'); return false;">AI Safety</a>
   <a href="#" onclick="showPage('automotive'); return false;">Automotive (ISO 26262)</a>
-  <a href="#" onclick="showPage('contact'); return false;">Contact</a>
   <a href="#" onclick="showPage('impressum'); return false;">Impressum</a>
   <a href="#" onclick="showPage('dataprivacy'); return false;">Data Privacy</a>
   <a href="#" onclick="showPage('members'); return false;">Members</a>
@@ -572,32 +528,6 @@
   </div>
 </div>
 
-<!-- ═══════════════ CONTACT ═══════════════ -->
-<div class="page" id="page-contact">
-  <div class="page-banner"><h1>Contact Me</h1></div>
-  <div class="section">
-    <div class="contact-wrap">
-      <div>
-        <div class="contact-form">
-          <div><label>Name</label><input type="text" id="cf-name" /></div>
-          <div><label>Email</label><input type="email" id="cf-email" /></div>
-          <div><label>Subject</label><input type="text" id="cf-subject" /></div>
-          <div><label>Message</label><textarea id="cf-message"></textarea></div>
-          <button onclick="submitForm()">Submit</button>
-          <div class="form-success" id="formSuccess">Thanks for submitting!</div>
-        </div>
-      </div>
-      <div>
-        <img
-          src="https://static.wixstatic.com/media/11062b_d7e37b8ce9c54eab810721be8973bb59~mv2.jpg/v1/fill/w_490,h_326,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/11062b_d7e37b8ce9c54eab810721be8973bb59~mv2.jpg"
-          alt="Contact" class="contact-img"
-          onerror="this.style.display='none'"
-        />
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- ═══════════════ IMPRESSUM ═══════════════ -->
 <div class="page" id="page-impressum">
   <div class="page-banner"><h1>Impressum</h1></div>
@@ -714,7 +644,6 @@
   <div class="footer-links">
     <a href="#" onclick="showPage('impressum'); return false;">Impressum</a>
     <a href="#" onclick="showPage('dataprivacy'); return false;">Data Privacy</a>
-    <a href="#" onclick="showPage('contact'); return false;">Contact</a>
   </div>
 </footer>
 
@@ -803,15 +732,6 @@
   }
   function closeMobileMenu() {
     document.getElementById('mobileNav').classList.remove('open');
-  }
-  function submitForm() {
-    const name = document.getElementById('cf-name').value.trim();
-    const email = document.getElementById('cf-email').value.trim();
-    if (!name || !email) { alert('Please enter your name and email.'); return; }
-    document.getElementById('formSuccess').style.display = 'block';
-    ['cf-name','cf-email','cf-subject','cf-message'].forEach(id => {
-      document.getElementById(id).value = '';
-    });
   }
   /* ── Fault Tree Browser Tool ── */
   const FT_TOOLS = [
