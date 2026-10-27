@@ -11,6 +11,7 @@
     <meta name="theme-color" content="#3c5486">
     <link rel="stylesheet" href="css/style.css">
     <script>window.FTA_STANDALONE = true;</script>
+    <script src="js/version.js"></script>
     <script src="js/fta_tikz.js"></script>
     <script src="js/mfta_local.js"></script>
     <style>
@@ -18,6 +19,12 @@
     .standalone-note a { color: inherit; }
     #install-app { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
     #install-app[hidden] { display: none; }
+    #new-version { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+    #new-version[hidden] { display: none; }
+    #about-dialog table { border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+    #about-dialog td { padding: 3px 12px 3px 0; vertical-align: top; }
+    #about-dialog td:first-child { color: var(--muted, #6b7280); white-space: nowrap; }
+    #about-dialog .ok { color: #166534; } #about-dialog .warn { color: #9a3412; }
     </style>
     
 <script src="vendor/cytoscape.min.js"></script>
@@ -2106,6 +2113,8 @@ loadAnalyses().then(() => loadGraph()).then(() => {
         File &gt; Keep on this computer saves them and their revisions in a folder of yours (Chrome, Edge);
         Import / Export &gt; Export XML keeps a copy or moves them to another computer.
         &copy; TEGRITY &middot; <a href="https://tegrity.eu" target="_blank" rel="noopener">tegrity.eu</a>
+        &middot; <span id="app-version"></span>
+        <button type="button" id="new-version" hidden title="A newer version is published -- load it">New version: reload</button>
         <button type="button" class="secondary" id="install-app" hidden title="Install as an app: own window, Start menu / taskbar icon, works offline">Install as app</button></div>
     </main>
     <script>
@@ -2123,6 +2132,85 @@ loadAnalyses().then(() => loadGraph()).then(() => {
             await offer.userChoice;
             offer = null; button.hidden = true;
         });
+    })();
+    // Version and About (SFM-214, user 2026-10-27: "how i know i use the right software version?"): js/version.js
+    // is the running build (cached with the app), version.json the published one (never cached, fetched fresh).
+    (function () {
+        const mine = window.FTA_VERSION || { version: '?', build: '?' };
+        const label = v => `${v.version} (build ${v.build})`;
+        document.getElementById('app-version').textContent = `Version ${mine.version}`;
+        document.getElementById('app-version').title = `Build ${mine.build}`;
+        let published = null, checked = false;
+        async function check() {
+            try {
+                const r = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+                published = r.ok ? await r.json() : null;
+            } catch (e) { published = null; }
+            checked = true;
+            document.getElementById('new-version').hidden = !(published && published.build && published.build !== mine.build);
+            return published;
+        }
+        async function reloadNew() {          // drop the offline copy, so the reload loads the published files
+            try {
+                for (const k of await caches.keys()) if (k.startsWith('fault-tree-pro-max-')) await caches.delete(k);
+                const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+                if (reg) await reg.update();
+            } catch (e) { /* no cache / service worker: a plain reload */ }
+            location.reload();
+        }
+        document.getElementById('new-version').addEventListener('click', reloadNew);
+        if (location.protocol !== 'file:') check();
+        function browserName() {
+            const ua = navigator.userAgent;
+            for (const [name, re] of [['Microsoft Edge', 'Edg/([0-9.]+)'], ['Firefox', 'Firefox/([0-9.]+)'],
+                                      ['Chrome', 'Chrome/([0-9.]+)'], ['Safari', 'Version/([0-9.]+).*Safari']]) {
+                const m = ua.match(new RegExp(re));
+                if (m) return `${name} ${m[1]}`;
+            }
+            return ua;
+        }
+        const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+        const dialog = document.createElement('dialog');
+        dialog.id = 'about-dialog'; dialog.className = 'help-dialog';
+        document.body.appendChild(dialog);
+        async function showAbout() {
+            const folder = typeof window.showDirectoryPicker === 'function';
+            const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
+            const render = () => {
+                let update;
+                if (location.protocol === 'file:') update = 'not checked (opened from a file on this computer)';
+                else if (!checked) update = 'checking&hellip;';
+                else if (!published) update = '<span class="warn">could not check (offline?)</span>';
+                else if (published.build === mine.build) update = '<span class="ok">this is the latest published version</span>';
+                else update = `<span class="warn">a newer version is published: ${esc(label(published))}</span> `
+                    + '<button type="button" id="about-reload">Reload to use it</button>';
+                dialog.innerHTML = '<form method="dialog"><h3 style="margin-top:0;">About Fault Tree PRO max</h3><table>'
+                    + row('Version', `<b id="about-version">${esc(label(mine))}</b>`)
+                    + row('Update', `<span id="about-update">${update}</span>`)
+                    + row('Opened from', esc(location.href.split('?')[0]))
+                    + row('Browser', esc(browserName()))
+                    + row('Folder on this computer', folder
+                        ? '<span class="ok">offered by this browser</span> &mdash; if File &gt; Keep on this computer still '
+                          + 'opens nothing, a company policy blocks it (the message there names the reason)'
+                        : '<span class="warn">not offered by this browser</span> &mdash; needs Chrome or Edge; use '
+                          + 'Import / Export &gt; Export XML')
+                    + '</table><p style="margin-bottom:0; text-align:right;"><button value="close">Close</button></p></form>';
+                const b = dialog.querySelector('#about-reload');
+                if (b) b.addEventListener('click', reloadNew);
+            };
+            render();
+            if (!dialog.open) dialog.showModal();
+            if (location.protocol !== 'file:') { await check(); render(); }
+        }
+        const tricks = document.getElementById('help-tricks');
+        if (tricks) {
+            const item = document.createElement('button');
+            item.type = 'button'; item.setAttribute('role', 'menuitem'); item.id = 'help-about';
+            item.textContent = 'About Fault Tree PRO max…';
+            item.addEventListener('click', showAbout);
+            tricks.parentElement.append(document.createElement('hr'), item);
+        }
+        window.FaultTreeAbout = { show: showAbout, check };
     })();
     </script>
 </body>
