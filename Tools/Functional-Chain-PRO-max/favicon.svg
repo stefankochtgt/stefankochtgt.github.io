@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Integrity Workbench: a stylised "I", a swung stem between two serifs (own design, SFM-175) -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#cfd8e6"/>
+      <stop offset="0.55" stop-color="#7f93b5"/>
+      <stop offset="1" stop-color="#3c5486"/>
+    </linearGradient>
+    <linearGradient id="h" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- serifs -->
+  <path d="M8 3.5 H24 Q25.5 3.5 25.5 5 V6.2 Q25.5 7.4 24 7.4 H8 Q6.5 7.4 6.5 6.2 V5 Q6.5 3.5 8 3.5 Z" fill="url(#g)"/>
+  <path d="M8 24.6 H24 Q25.5 24.6 25.5 25.8 V27 Q25.5 28.5 24 28.5 H8 Q6.5 28.5 6.5 27 V25.8 Q6.5 24.6 8 24.6 Z" fill="url(#g)"/>
+  <!-- swung stem -->
+  <path d="M13.2 7 C12.6 12 14.4 15 13.6 19.5 C13.3 21.4 12.9 23.2 13.2 25 H18.8 C18.5 23 19.2 21 19.3 19 C19.6 14.6 17.6 11.6 18.8 7 Z" fill="url(#g)"/>
+  <path d="M14.3 8 C13.9 11.5 15.2 14 14.8 17 C16 14 15.3 11 16.4 8 Z" fill="url(#h)"/>
+  <path d="M13.2 7 C12.6 12 14.4 15 13.6 19.5 C13.3 21.4 12.9 23.2 13.2 25 H18.8 C18.5 23 19.2 21 19.3 19 C19.6 14.6 17.6 11.6 18.8 7 Z"
+        fill="none" stroke="#2c3f68" stroke-width="0.6"/>
+</svg>

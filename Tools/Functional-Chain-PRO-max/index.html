@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Functional Chain PRO max — Integrity Workbench</title>
+    <meta name="description" content="Draw functional chains in the browser: functions, sub-functions, flows and system borders, IDEF0-style; JPG, PNG and XML export. Free, no login, your data stays in your browser.">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="theme-color" content="#3c5486">
+    <link rel="stylesheet" href="css/style.css">
+    <script>window.FTA_STANDALONE = true;</script>
+    <script src="js/version.js"></script>
+    <script src="js/chain_local.js"></script>
+    <style>
+    .standalone-note { flex: none; font-size: 11px; color: var(--muted, #6b7280); margin-top: 4px; }
+    .standalone-note a { color: inherit; }
+    #install-app { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+    #install-app[hidden] { display: none; }
+    #new-version { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+    #new-version[hidden] { display: none; }
+    #about-dialog table { border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+    #about-dialog td { padding: 3px 12px 3px 0; vertical-align: top; }
+    #about-dialog td:first-child { color: var(--muted, #6b7280); white-space: nowrap; }
+    #about-dialog .ok { color: #166534; } #about-dialog .warn { color: #9a3412; }
+    </style>
+    
+<script src="vendor/cytoscape.min.js"></script>
+<script src="vendor/lodash.min.js"></script>
+<script src="vendor/cytoscape-edgehandles.js"></script>
+<script src="js/graph_export.js"></script>
+<script src="js/manual_chain.js"></script>
+<style>
+/* Manual Functional Chain (SFM-217) -- the same page is the standalone Functional Chain PRO max */
+.app-heading { display: flex; align-items: center; gap: 8px; }
+.app-heading img { width: 1.15em; height: 1.15em; }
+.app-heading .pro { font-size: .62em; font-weight: 700; letter-spacing: .02em; color: #3c5486; align-self: flex-end; margin-bottom: .2em; }
+.menubar { display: flex; gap: 2px; align-items: center; padding: 2px 4px; margin: -4px -4px 6px; border-bottom: 1px solid var(--border, #e5e7eb); }
+.menubar .menu { position: relative; }
+.menubar .menu-title { background: none; border: 1px solid transparent; color: var(--text, #111); padding: 3px 10px; font-size: 13px; border-radius: 4px; cursor: default; }
+.menubar .menu-title:hover, .menubar.open .menu-title:focus { background: #eef2ff; border-color: #c7d2fe; }
+.menubar .menu-list { position: absolute; top: 100%; left: 0; z-index: 40; min-width: 230px; padding: 4px 0; background: #fff;
+    border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 6px 18px rgba(15, 23, 42, .16); display: flex; flex-direction: column; }
+.menubar .menu-list[hidden] { display: none; }
+.menubar .menu-list button, .menubar .menu-list a { text-align: left; background: none; border: 0; border-radius: 0; color: var(--text, #111);
+    padding: 6px 14px; font-size: 13px; text-decoration: none; cursor: pointer; }
+.menubar .menu-list button:hover, .menubar .menu-list a:hover { background: #eef2ff; }
+.menubar .menu-list button:disabled { color: #9ca3af; background: none; cursor: default; }
+.menubar .menu-list .danger { color: #b91c1c; }
+.menubar .menu-list hr { margin: 4px 0; border: 0; border-top: 1px solid #e5e7eb; }
+.menubar .menu-list .key { float: right; color: #9ca3af; margin-left: 18px; }
+.chain-toolbar { align-items: center; flex-wrap: wrap; row-gap: 6px; }
+.chain-toolbar > div { flex: none; }
+.chain-toolbar button { font-size: 12px; padding: 3px 10px; }
+#diagram-select { min-width: 180px; width: auto; }
+#chain-status { font-size: 12px; color: #166534; white-space: nowrap; }
+#chain-status.error { color: var(--error, #b91c1c); white-space: normal; }
+#chain-empty { color: var(--muted); font-size: 13px; }
+.help-dialog { max-width: 760px; }
+.help-dialog .help-intro { font-size: 13px; color: var(--muted); }
+.help-table { border-collapse: collapse; font-size: 13px; }
+.help-table td, .help-table th { padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+.help-table th { background: #f8fafc; }
+#fn-dialog form { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; min-width: 420px; }
+#fn-dialog h3, #fn-dialog .row, #fn-error { grid-column: 1 / -1; }
+#fn-dialog label { margin: 0; font-size: 13px; }
+#fn-error { color: var(--error, #b91c1c); font-size: 13px; min-height: 1em; }
+#fn-dialog .row, #text-dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+@media (max-width: 760px) {
+    html, body { overflow-x: hidden; }
+    main.content.fill { padding-left: 6px; padding-right: 6px; }
+    .app-heading { font-size: 16px !important; flex-wrap: wrap; row-gap: 0; }
+    #fn-dialog form { min-width: 0; grid-template-columns: 1fr; }
+}
+</style>
+
+</head>
+<body>
+    <main class="content fill">
+        
+<h1 class="app-heading"><img src="favicon.svg" alt="">Integrity Workbench <span class="pro">&ndash; Functional Chain PRO max</span></h1>
+
+<div class="panel fill-panel">
+    <nav class="menubar" id="chain-menubar" aria-label="Functional chain menu">
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">File</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="diagram-new">New diagram…</button>
+                <button type="button" role="menuitem" id="diagram-rename">Rename diagram…</button>
+                <button type="button" role="menuitem" id="diagram-copy">Duplicate diagram</button>
+                <hr>
+                <button type="button" role="menuitem" id="diagram-delete" class="danger">Delete diagram…</button>
+            </div>
+        </div>
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">Edit</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="edit-undo">Undo<span class="key">Ctrl+Z</span></button>
+                <button type="button" role="menuitem" id="edit-redo">Redo<span class="key">Ctrl+Y</span></button>
+                <hr>
+                <button type="button" role="menuitem" id="edit-new">New function<span class="key">N</span></button>
+                <button type="button" role="menuitem" id="edit-delete" class="danger">Delete selected<span class="key">Del</span></button>
+                <hr>
+                <button type="button" role="menuitem" id="edit-layout" title="Place every function again, left to right in flow order -- like the Functional Chain view">Automatic layout</button>
+            </div>
+        </div>
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">Import / Export</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="export-jpg" title="This diagram as a high-resolution JPG image">Export JPG</button>
+                <button type="button" role="menuitem" id="export-png" title="This diagram as a high-resolution PNG image">Export PNG</button>
+                <button type="button" role="menuitem" id="export-xml" title="All diagrams as XML -- can be imported again here or in the other version of this tool">Export XML</button>
+                <hr>
+                <button type="button" role="menuitem" id="import-xml" title="Adds the diagrams of an XML export (renamed when the name is taken)">Import XML…</button>
+            </div>
+        </div>
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">Help</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="help-tricks">Keyboard and mouse…</button>
+            </div>
+        </div>
+        <input type="file" id="import-xml-file" accept=".xml,application/xml,text/xml" hidden>
+    </nav>
+
+    <div class="filters chain-toolbar">
+        <div style="display:flex; gap:4px; align-items:center;">
+            <label for="diagram-select" style="margin:0;">Diagram</label>
+            <select id="diagram-select"></select>
+        </div>
+        <div><button type="button" id="add-function" title="A new function in the middle of the view (N)">+ Function</button></div>
+        <div><button type="button" class="secondary" id="undo-btn" title="Undo (Ctrl+Z)">Undo</button>
+             <button type="button" class="secondary" id="redo-btn" title="Redo (Ctrl+Y)">Redo</button></div>
+        <div><button type="button" class="secondary" id="auto-layout" title="Place every function again, left to right in flow order">Automatic layout</button>
+             <button type="button" class="secondary" id="fit-window" title="Show everything">Fit</button></div>
+        <div><span id="link-mode-badge" class="badge">Link mode: hold Ctrl</span></div>
+        <div><span id="chain-status" aria-live="polite"></span></div>
+        <div id="chain-empty" hidden>No function yet &mdash; <strong>+ Function</strong>, or right-click the empty area.</div>
+    </div>
+
+    <dialog id="help-dialog" class="help-dialog">
+        <form method="dialog">
+            <h3 style="margin-top:0;">Functional Chain PRO max &mdash; keyboard and mouse</h3>
+            <p class="help-intro">Functional chains drawn by hand: a function with sub-functions is a box around them, ordered left to right by their flows; functions of one system are framed by a red dashed border. <strong>File</strong> holds several diagrams. Everything is stored in this browser only.</p>
+            <table class="help-table">
+                <tr><th colspan="2">Building</th></tr>
+                <tr><td><b>+ Function</b> / <kbd>N</kbd> / right-click the empty area</td><td>a new function (ID, title, the function it is inside, its system)</td></tr>
+                <tr><td>Right-click a function</td><td>edit, add a sub-function (inside it), add the next function with a flow to it, move out of its box, delete</td></tr>
+                <tr><td>Double-click a function, <kbd>F2</kbd></td><td>edit: ID, title, <b>Inside</b> (the function it belongs to &mdash; makes it a sub-function), <b>System</b> (functions of one system next to each other share one red border) &mdash; <kbd>Enter</kbd> saves, <kbd>Esc</kbd> cancels</td></tr>
+                <tr><td>Hold <kbd>Ctrl</kbd> + drag from one function onto another</td><td>a flow &ldquo;this feeds into that&rdquo; &mdash; the drag direction is the flow direction</td></tr>
+                <tr><td>Drag a function or a box</td><td>moves it (a box with everything in it); the place is kept</td></tr>
+                <tr><td><b>Automatic layout</b></td><td>places all functions again like the Functional Chain view: left to right in flow order, sub-functions one row lower</td></tr>
+                <tr><td>Click, <kbd>Ctrl</kbd> + click</td><td>select one / more functions or flows; <kbd>Del</kbd> deletes them (a function with what is inside it), <kbd>Esc</kbd> clears</td></tr>
+                <tr><td>Right-click a flow / a red border</td><td>delete the flow / remove the system from those functions</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>undo / redo</td></tr>
+                <tr><th colspan="2">Viewing</th></tr>
+                <tr><td>Hold <kbd>Shift</kbd> + hover a function</td><td>fades everything except that function and its own arrows</td></tr>
+                <tr><td>Mouse wheel / drag the background</td><td>zoom / move the view; <b>Fit</b> shows everything</td></tr>
+                <tr><th colspan="2">Files</th></tr>
+                <tr><td>File</td><td>several diagrams: new, rename, duplicate, delete; the list in the toolbar switches</td></tr>
+                <tr><td>Export JPG / PNG</td><td>the diagram as an image, everything at high resolution on white</td></tr>
+                <tr><td>Export XML / Import XML…</td><td>all diagrams as one file; an import adds its diagrams. The workbench's Manual Functional Chain and the standalone Functional Chain PRO max read each other's files</td></tr>
+            </table>
+            <p style="margin-bottom:0; text-align:right;"><button value="close">Close</button></p>
+        </form>
+    </dialog>
+
+    <div class="fill-graph">
+        <div id="chain-graph" class="cy-graph"></div>
+        <div id="chain-menu" class="context-menu" role="menu" hidden></div>
+    </div>
+</div>
+
+<dialog id="fn-dialog">
+    <form id="fn-form" method="dialog">
+        <h3 id="fn-dialog-title" style="margin:0;"></h3>
+        <label for="fn-id">ID</label><input id="fn-id" autocomplete="off" spellcheck="false">
+        <label for="fn-title">Title</label><input id="fn-title" autocomplete="off">
+        <label for="fn-parent">Inside</label><select id="fn-parent"></select>
+        <label for="fn-system">System</label><input id="fn-system" list="fn-systems" autocomplete="off" placeholder="empty = no system border">
+        <datalist id="fn-systems"></datalist>
+        <div id="fn-error"></div>
+        <div class="row"><button type="submit" value="cancel" class="secondary" formnovalidate>Cancel</button><button type="submit" value="save" id="fn-save">Save</button></div>
+    </form>
+</dialog>
+
+<dialog id="text-dialog">
+    <form method="dialog">
+        <h3 id="text-dialog-title" style="margin-top:0;"></h3>
+        <input id="text-dialog-input" autocomplete="off" style="min-width:320px;">
+        <div class="row" style="margin-top:10px;"><button value="cancel" class="secondary">Cancel</button><button value="ok">OK</button></div>
+    </form>
+</dialog>
+
+<script>ManualChain.init(window.CHAIN_STORE);</script>
+
+        <div class="standalone-note">Your functional chains are stored in this browser (nothing is uploaded) &mdash;
+        Import / Export &gt; Export XML keeps a copy or moves them to another computer.
+        &copy; TEGRITY &middot; <a href="https://tegrity.eu" target="_blank" rel="noopener">tegrity.eu</a>
+        &middot; <span id="app-version"></span>
+        <button type="button" id="new-version" hidden title="A newer version is published -- load it">New version: reload</button>
+        <button type="button" class="secondary" id="install-app" hidden title="Install as an app: own window, Start menu / taskbar icon, works offline">Install as app</button></div>
+    </main>
+    <script>
+    // Progressive Web App (SFM-181): the service worker keeps every file for offline use; where the browser
+    // can install the page as an app (Edge / Chrome over HTTPS), the "Install as app" button offers it.
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+    (function () {
+        const button = document.getElementById('install-app');
+        let offer = null;
+        addEventListener('beforeinstallprompt', e => { e.preventDefault(); offer = e; button.hidden = false; });
+        addEventListener('appinstalled', () => { offer = null; button.hidden = true; });
+        button.addEventListener('click', async () => {
+            if (!offer) return;
+            offer.prompt();
+            await offer.userChoice;
+            offer = null; button.hidden = true;
+        });
+    })();
+    // Version and About (SFM-214, user 2026-10-27: "how i know i use the right software version?"): js/version.js
+    // is the running build (cached with the app), version.json the published one (never cached, fetched fresh).
+    (function () {
+        const mine = window.FTA_VERSION || { version: '?', build: '?' };
+        const label = v => `${v.version} (build ${v.build})`;
+        document.getElementById('app-version').textContent = `Version ${mine.version}`;
+        document.getElementById('app-version').title = `Build ${mine.build}`;
+        let published = null, checked = false;
+        async function check() {
+            try {
+                const r = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+                published = r.ok ? await r.json() : null;
+            } catch (e) { published = null; }
+            checked = true;
+            document.getElementById('new-version').hidden = !(published && published.build && published.build !== mine.build);
+            return published;
+        }
+        async function reloadNew() {          // drop the offline copy, so the reload loads the published files
+            try {
+                for (const k of await caches.keys()) if (k.startsWith('functional-chain-pro-max-')) await caches.delete(k);
+                const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+                if (reg) await reg.update();
+            } catch (e) { /* no cache / service worker: a plain reload */ }
+            location.reload();
+        }
+        document.getElementById('new-version').addEventListener('click', reloadNew);
+        if (location.protocol !== 'file:') check();
+        function browserName() {
+            const ua = navigator.userAgent;
+            for (const [name, re] of [['Microsoft Edge', 'Edg/([0-9.]+)'], ['Firefox', 'Firefox/([0-9.]+)'],
+                                      ['Chrome', 'Chrome/([0-9.]+)'], ['Safari', 'Version/([0-9.]+).*Safari']]) {
+                const m = ua.match(new RegExp(re));
+                if (m) return `${name} ${m[1]}`;
+            }
+            return ua;
+        }
+        const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+        const dialog = document.createElement('dialog');
+        dialog.id = 'about-dialog'; dialog.className = 'help-dialog';
+        document.body.appendChild(dialog);
+        async function showAbout() {
+            const folder = typeof window.showDirectoryPicker === 'function';
+            const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
+            const render = () => {
+                let update;
+                if (location.protocol === 'file:') update = 'not checked (opened from a file on this computer)';
+                else if (!checked) update = 'checking&hellip;';
+                else if (!published) update = '<span class="warn">could not check (offline?)</span>';
+                else if (published.build === mine.build) update = '<span class="ok">this is the latest published version</span>';
+                else update = `<span class="warn">a newer version is published: ${esc(label(published))}</span> `
+                    + '<button type="button" id="about-reload">Reload to use it</button>';
+                dialog.innerHTML = '<form method="dialog"><h3 style="margin-top:0;">About Functional Chain PRO max</h3><table>'
+                    + row('Version', `<b id="about-version">${esc(label(mine))}</b>`)
+                    + row('Update', `<span id="about-update">${update}</span>`)
+                    + row('Opened from', esc(location.href.split('?')[0]))
+                    + row('Browser', esc(browserName()))
+                    + '</table><p style="margin-bottom:0; text-align:right;"><button value="close">Close</button></p></form>';
+                const b = dialog.querySelector('#about-reload');
+                if (b) b.addEventListener('click', reloadNew);
+            };
+            render();
+            if (!dialog.open) dialog.showModal();
+            if (location.protocol !== 'file:') { await check(); render(); }
+        }
+        const tricks = document.getElementById('help-tricks');
+        if (tricks) {
+            const item = document.createElement('button');
+            item.type = 'button'; item.setAttribute('role', 'menuitem'); item.id = 'help-about';
+            item.textContent = 'About Functional Chain PRO max…';
+            item.addEventListener('click', showAbout);
+            tricks.parentElement.append(document.createElement('hr'), item);
+        }
+        window.FaultTreeAbout = { show: showAbout, check };
+    })();
+    </script>
+</body>
+</html>
