@@ -18,6 +18,11 @@ const GRID = 10;
 const UNDO_LIMIT = 150;
 const KEY_PAGE = 'drawingPage';
 const ONE_D = new Set(['line', 'connector']);
+// A connector end glued onto a shape's outline sits on a raster: twelfths of the side (halves, thirds, quarters,
+// sixths -- equal distances for 1, 2, 3, 4 or 6 connectors). Stored as fromAt / toAt = "<side t|r|b|l>:<fraction>".
+const RASTER = 12;
+const AT_RE = /^[trbl]:(0|1|0?\.\d+|1\.0+)$/;
+const SIDE_DIR = { t: [0, -1], r: [1, 0], b: [0, 1], l: [-1, 0] };
 const PAGE_SIZES = { 'A4 landscape': [1123, 794], 'A4 portrait': [794, 1123], 'A3 landscape': [1587, 1123], 'A3 portrait': [1123, 1587] };
 const FONTS = ['Calibri', 'Cambria', 'Arial', 'Segoe UI', 'Times New Roman', 'Verdana', 'Tahoma', 'Georgia', 'Courier New', 'Consolas'];
 const SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 60, 72];
@@ -63,7 +68,7 @@ function parseXml(text) {
             if (el.tagName !== 'shape') continue;
             const s = { id: el.getAttribute('id') || '', type: el.getAttribute('type') || '', style: {}, cps: [] };
             for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt']) if (el.hasAttribute(a)) s[a] = num(el, a);
-            for (const a of ['from', 'to', 'route', 'link']) if (el.getAttribute(a)) s[a] = el.getAttribute(a);
+            for (const a of ['from', 'to', 'fromAt', 'toAt', 'route', 'link']) if (el.getAttribute(a)) s[a] = el.getAttribute(a);
             for (const c of el.children) {
                 if (c.tagName === 'text') s.text = c.textContent;
                 else if (c.tagName === 'cp') s.cps.push([num(c, 'x'), num(c, 'y')]);
@@ -95,7 +100,7 @@ function toXml(doc) {
         for (const s of p.shapes) {
             let attrs = `id="${xmlEsc(s.id)}" type="${s.type}"`;
             for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2']) if (s[a] !== undefined) attrs += ` ${a}="${r1(s[a])}"`;
-            for (const a of ['from', 'fromPt', 'to', 'toPt', 'route', 'link']) if (s[a] !== undefined && s[a] !== '' && s[a] !== null) attrs += ` ${a}="${xmlEsc(s[a])}"`;
+            for (const a of ['from', 'fromPt', 'fromAt', 'to', 'toPt', 'toAt', 'route', 'link']) if (s[a] !== undefined && s[a] !== '' && s[a] !== null) attrs += ` ${a}="${xmlEsc(s[a])}"`;
             const parts = [];
             if (s.text) parts.push(`<text>${xmlEsc(s.text)}</text>`);
             const st = Object.entries(s.style || {}).filter(([k]) => STYLE_KEYS.includes(k))
@@ -131,6 +136,7 @@ function checkDoc(doc) {
             byId.set(s.id, s);
         }
         for (const s of p.shapes) for (const end of ['from', 'to']) {
+            if (s[end + 'At'] !== undefined && !AT_RE.test(s[end + 'At'])) throw new Error(`Page "${p.name}": ${s.id} ${end}At "${s[end + 'At']}" is not a place on a shape's side.`);
             const g = s[end];
             if (g && (!byId.has(g) || g === s.id || ONE_D.has(byId.get(g).type)))
                 throw new Error(`Page "${p.name}": ${s.id} is glued to ${g}, which is not a shape on this page.`);
@@ -151,6 +157,47 @@ function connectionPoints(s) {
     return pts.map(([fx, fy, dx, dy]) => ({ x: s.x + fx * s.w, y: s.y + fy * s.h, dx, dy }));
 }
 
+// The point at `at` ("r:0.25") on the shape's outline: on the rectangle's side; for an ellipse the point of the
+// ellipse in the direction of that side point (seen from the centre), so the raster follows the outline.
+function outlinePoint(s, at) {
+    const [side, frac] = at.split(':');
+    let f = Number(frac);
+    const k = Math.round(f * RASTER);
+    if (Math.abs(f * RASTER - k) < 0.01) f = k / RASTER;      // "0.3333" is exactly 4/12: equal distances stay exact
+    let x = side === 'l' ? s.x : side === 'r' ? s.x + s.w : s.x + f * s.w;
+    let y = side === 't' ? s.y : side === 'b' ? s.y + s.h : s.y + f * s.h;
+    if (s.type === 'ellipse') {
+        const cx = s.x + s.w / 2, cy = s.y + s.h / 2, a = s.w / 2 || 1, b = s.h / 2 || 1;
+        const nx = (x - cx) / a, ny = (y - cy) / b, r = Math.hypot(nx, ny) || 1;
+        x = cx + a * nx / r; y = cy + b * ny / r;
+    }
+    const [dx, dy] = SIDE_DIR[side] || [0, 0];
+    return { x, y, dx, dy };
+}
+
+// The raster place on the shape's outline nearest to `pt`, if `pt` is within `band` of the outline.
+function outlineHit(s, pt, band) {
+    let side, f;
+    if (s.type === 'ellipse') {
+        const cx = s.x + s.w / 2, cy = s.y + s.h / 2, a = s.w / 2 || 1, b = s.h / 2 || 1;
+        const nx = (pt.x - cx) / a, ny = (pt.y - cy) / b, r = Math.hypot(nx, ny);
+        if (!r || Math.hypot(pt.x - (cx + a * nx / r), pt.y - (cy + b * ny / r)) > band) return null;
+        if (Math.abs(nx) >= Math.abs(ny)) { side = nx > 0 ? 'r' : 'l'; f = (1 + ny / Math.abs(nx)) / 2; }
+        else { side = ny > 0 ? 'b' : 't'; f = (1 + nx / Math.abs(ny)) / 2; }
+    } else {
+        const inX = pt.x >= s.x - band && pt.x <= s.x + s.w + band, inY = pt.y >= s.y - band && pt.y <= s.y + s.h + band;
+        const cands = [];
+        if (inX) cands.push(['t', Math.abs(pt.y - s.y), (pt.x - s.x) / s.w], ['b', Math.abs(pt.y - s.y - s.h), (pt.x - s.x) / s.w]);
+        if (inY) cands.push(['l', Math.abs(pt.x - s.x), (pt.y - s.y) / s.h], ['r', Math.abs(pt.x - s.x - s.w), (pt.y - s.y) / s.h]);
+        const best = cands.filter(c => c[1] <= band).sort((p, q) => p[1] - q[1])[0];
+        if (!best) return null;
+        [side, , f] = best;
+    }
+    const k = Math.max(1, Math.min(RASTER - 1, Math.round(f * RASTER)));
+    const at = `${side}:${(k / RASTER).toFixed(4)}`;
+    return { at, ...outlinePoint(s, at) };
+}
+
 // Where a connector end glued to shape `s` sits: a chosen point, or (pt -1, "dynamic glue") the side middle
 // that is nearest to the other end, like Visio's dynamic connector.
 function gluePoint(s, pt, toward) {
@@ -169,10 +216,11 @@ function resolveEnds(page, c) {
     const byId = id => page.shapes.find(x => x.id === id);
     const a = c.from && byId(c.from), b = c.to && byId(c.to);
     const centre = s => ({ x: s.x + s.w / 2, y: s.y + s.h / 2 });
+    const end = (s, at, pt, toward) => (at && AT_RE.test(at) ? outlinePoint(s, at) : gluePoint(s, pt ?? -1, toward));
     let p1 = { x: c.x1, y: c.y1, dx: 0, dy: 0 }, p2 = { x: c.x2, y: c.y2, dx: 0, dy: 0 };
-    if (a) p1 = gluePoint(a, c.fromPt ?? -1, b ? centre(b) : p2);
-    if (b) p2 = gluePoint(b, c.toPt ?? -1, a ? centre(a) : p1);
-    if (a && (c.fromPt ?? -1) < 0) p1 = gluePoint(a, -1, p2);
+    if (a) p1 = end(a, c.fromAt, c.fromPt, b ? centre(b) : p2);
+    if (b) p2 = end(b, c.toAt, c.toPt, a ? centre(a) : p1);
+    if (a && !c.fromAt && (c.fromPt ?? -1) < 0) p1 = gluePoint(a, -1, p2);
     c.x1 = p1.x; c.y1 = p1.y; c.x2 = p2.x; c.y2 = p2.y;
     return [p1, p2];
 }
@@ -190,13 +238,28 @@ function connectorPoints(page, c) {
     const [d2x, d2y] = p2.dx || p2.dy ? [p2.dx, p2.dy] : freeDir(p2, p1);
     const stub = 15;
     const a = { x: p1.x + d1x * stub, y: p1.y + d1y * stub }, b = { x: p2.x + d2x * stub, y: p2.y + d2y * stub };
-    const pts = [p1, a];
-    const h1 = d1x !== 0, h2 = d2x !== 0;
-    if (h1 && h2) { const mx = (a.x + b.x) / 2; pts.push({ x: mx, y: a.y }, { x: mx, y: b.y }); }
-    else if (!h1 && !h2) { const my = (a.y + b.y) / 2; pts.push({ x: a.x, y: my }, { x: b.x, y: my }); }
-    else if (h1) pts.push({ x: b.x, y: a.y });
-    else pts.push({ x: a.x, y: b.y });
-    pts.push(b, p2);
+    // the L and Z shapes between the two stubs; the one that doesn't cut through the connected shapes, doesn't
+    // turn back against an end's direction, and is the shortest with the fewest bends wins
+    const boxes = [c.from, c.to].map(id => id && page.shapes.find(x => x.id === id)).filter(Boolean)
+        .map(x => ({ x1: x.x + 1, y1: x.y + 1, x2: x.x + x.w - 1, y2: x.y + x.h - 1 }));
+    const cuts = (u, v) => boxes.some(bx => (Math.abs(u.y - v.y) < 0.01
+        ? u.y > bx.y1 && u.y < bx.y2 && Math.max(u.x, v.x) > bx.x1 && Math.min(u.x, v.x) < bx.x2
+        : u.x > bx.x1 && u.x < bx.x2 && Math.max(u.y, v.y) > bx.y1 && Math.min(u.y, v.y) < bx.y2));
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    let best = null, bestScore = Infinity;
+    for (const mid of [[{ x: b.x, y: a.y }], [{ x: a.x, y: b.y }], [{ x: mx, y: a.y }, { x: mx, y: b.y }], [{ x: a.x, y: my }, { x: b.x, y: my }]]) {
+        const path = [a, ...mid, b];
+        let score = mid.length * 20;
+        for (let i = 1; i < path.length; i++) {
+            score += Math.abs(path[i].x - path[i - 1].x) + Math.abs(path[i].y - path[i - 1].y);
+            if (cuts(path[i - 1], path[i])) score += 10000;
+        }
+        if ((path[1].x - a.x) * d1x + (path[1].y - a.y) * d1y < -0.01) score += 5000;           // back into its shape
+        const last = path[path.length - 2];
+        if ((b.x - last.x) * d2x + (b.y - last.y) * d2y > 0.01) score += 5000;                  // arrives from inside
+        if (score < bestScore) { bestScore = score; best = path; }
+    }
+    const pts = [p1, ...best, p2];
     // drop zero-length and straight-through points
     const clean = [pts[0]];
     for (let i = 1; i < pts.length; i++) {
@@ -375,8 +438,18 @@ function overlaySvg(p) {
     const z = S.zoom, out = [];
     for (const s of p.shapes) out.push(linkBadge(s));
     const showPoints = S.tool === 'connector' || S.tool === 'cpoint' || (S.drag && S.drag.mode === 'end');
+    // the raster on the outline of the shape under the mouse, the place the end would glue to highlighted
+    const hover = S.drag && S.drag.mode === 'end' ? S.drag.hover : (S.tool === 'connector' ? S.hover : null);
+    const hs = hover && shape(hover.id);
+    if (hs && !ONE_D.has(hs.type)) {
+        for (const side of 'trbl') for (let k = 1; k < RASTER; k++) {
+            const q = outlinePoint(hs, `${side}:${(k / RASTER).toFixed(4)}`);
+            out.push(`<circle class="dw-raster" cx="${q.x}" cy="${q.y}" r="${(k % 6 === 0 ? 3.6 : k % 3 === 0 ? 3 : 2.3) / z}" fill="#2563eb" stroke="#fff" stroke-width="${0.8 / z}" opacity="0.9" pointer-events="none"/>`);
+        }
+        if (hover.x !== undefined) out.push(`<circle class="dw-raster-hit" cx="${hover.x}" cy="${hover.y}" r="${5 / z}" fill="none" stroke="#16a34a" stroke-width="${2 / z}" pointer-events="none"/>`);
+    }
     if (showPoints) for (const s of p.shapes) if (!ONE_D.has(s.type))
-        for (const [i, c] of connectionPoints(s).entries())
+        for (const [i, c] of connectionPoints(s).entries()) if (i >= 4 || S.tool === 'cpoint')
             out.push(`<g class="dw-cp${i >= 4 ? ' own' : ''}" data-id="${esc(s.id)}" data-pt="${i}"><path d="M${c.x - 4 / z},${c.y - 4 / z} L${c.x + 4 / z},${c.y + 4 / z} M${c.x - 4 / z},${c.y + 4 / z} L${c.x + 4 / z},${c.y - 4 / z}" stroke="#2563eb" stroke-width="${1.5 / z}"/><circle cx="${c.x}" cy="${c.y}" r="${6 / z}" fill="transparent"/></g>`);
     for (const s of selected()) {
         if (ONE_D.has(s.type)) {
@@ -484,19 +557,31 @@ function hitShape(target) {
     return g ? g.dataset.id : null;
 }
 
-// The connection point / shape under a model point (for gluing a connector end).
+// What a connector end at model point `pt` glues to: an own connection point (×), else the raster place on a
+// shape's outline (within a band around it), else -- inside a shape -- the shape itself (dynamic glue).
 function glueTarget(pt, exclude) {
-    const p = page(), tol = 10 / S.zoom;
-    for (const s of [...p.shapes].reverse()) {
-        if (ONE_D.has(s.type) || s.id === exclude) continue;
+    const p = page(), tol = 10 / S.zoom, band = 12 / S.zoom;
+    const shapes = [...p.shapes].reverse().filter(s => !ONE_D.has(s.type) && s.id !== exclude);
+    for (const s of shapes) {
         const pts = connectionPoints(s);
-        for (let i = 0; i < pts.length; i++) if (Math.hypot(pts[i].x - pt.x, pts[i].y - pt.y) <= tol) return { id: s.id, pt: i, x: pts[i].x, y: pts[i].y };
+        for (let i = 4; i < pts.length; i++) if (Math.hypot(pts[i].x - pt.x, pts[i].y - pt.y) <= tol) return { id: s.id, pt: i, x: pts[i].x, y: pts[i].y };
     }
-    for (const s of [...p.shapes].reverse()) {
-        if (ONE_D.has(s.type) || s.id === exclude) continue;
+    for (const s of shapes) {
+        const hit = outlineHit(s, pt, band);
+        if (hit) return { id: s.id, at: hit.at, x: hit.x, y: hit.y };
+    }
+    for (const s of shapes)
         if (pt.x >= s.x && pt.x <= s.x + s.w && pt.y >= s.y && pt.y <= s.y + s.h) return { id: s.id, pt: -1 };
-    }
     return null;
+}
+
+// Glues end `end` (0 start, 1 end) of connector `s` as `glue` says, or unglues it.
+function setGlue(s, end, glue) {
+    const key = end === 0 ? 'from' : 'to';
+    delete s[key + 'Pt']; delete s[key + 'At'];
+    if (!glue) { delete s[key]; return; }
+    s[key] = glue.id;
+    if (glue.at) s[key + 'At'] = glue.at; else s[key + 'Pt'] = glue.pt;
 }
 
 function select(ids) {
@@ -543,9 +628,9 @@ function onPointerDown(evt) {
     }
     if (S.tool === 'connector' || S.tool === 'line') {
         const glue = S.tool === 'connector' ? glueTarget(m) : null;
-        const start = glue && glue.pt >= 0 ? { x: glue.x, y: glue.y } : { x: snap(m.x), y: snap(m.y) };
+        const start = glue && glue.x !== undefined ? { x: glue.x, y: glue.y } : { x: snap(m.x), y: snap(m.y) };
         const s = { id: nextShapeId(), type: S.tool, x1: start.x, y1: start.y, x2: start.x, y2: start.y, style: {} };
-        if (glue) { s.from = glue.id; s.fromPt = glue.pt; }
+        if (glue) setGlue(s, 0, glue);
         if (S.tool === 'connector') s.route = 'orthogonal';
         const before = snapshot();
         p.shapes.push(s);
@@ -602,7 +687,14 @@ function onPointerDown(evt) {
 
 function onPointerMove(evt) {
     const d = S.drag;
-    if (!d) return;
+    if (!d) {
+        if (S.tool === 'connector') {                 // show the raster of the shape under the mouse
+            const g = glueTarget(toModel(evt));
+            const key = g ? `${g.id}|${g.x}|${g.y}` : '';
+            if (key !== S.hoverKey) { S.hoverKey = key; S.hover = g; renderOverlay(); }
+        }
+        return;
+    }
     if (d.mode === 'pan') {
         S.pan = { x: d.pan.x + evt.clientX - d.start.x, y: d.pan.y + evt.clientY - d.start.y };
         $('dw-view').setAttribute('transform', `translate(${S.pan.x},${S.pan.y}) scale(${S.zoom})`);
@@ -640,11 +732,10 @@ function onPointerMove(evt) {
         render();
     } else if (d.mode === 'end') {
         const s = shape(d.id);
-        const key = d.end === 0 ? 'from' : 'to', ptKey = d.end === 0 ? 'fromPt' : 'toPt';
         const glue = s.type === 'connector' ? glueTarget(m, d.end === 0 ? s.to : s.from) : null;
-        if (glue) { s[key] = glue.id; s[ptKey] = glue.pt; }
-        else {
-            delete s[key]; delete s[ptKey];
+        d.hover = glue;
+        setGlue(s, d.end, glue);
+        if (!glue) {
             let x = snap(m.x), y = snap(m.y);
             if (evt.shiftKey && s.type === 'line') { const ox = d.end === 0 ? s.x2 : s.x1, oy = d.end === 0 ? s.y2 : s.y1; if (Math.abs(x - ox) > Math.abs(y - oy)) y = oy; else x = ox; }
             if (d.end === 0) { s.x1 = x; s.y1 = y; } else { s.x2 = x; s.y2 = y; }
@@ -745,8 +836,8 @@ function deleteSelected() {
         const p = page();
         p.shapes = p.shapes.filter(s => !ids.has(s.id));
         for (const s of p.shapes) {                    // a connector glued to a deleted shape keeps its place, unglued
-            if (ids.has(s.from)) { delete s.from; delete s.fromPt; }
-            if (ids.has(s.to)) { delete s.to; delete s.toPt; }
+            if (ids.has(s.from)) setGlue(s, 0, null);
+            if (ids.has(s.to)) setGlue(s, 1, null);
         }
         S.sel = [];
     });
@@ -765,7 +856,7 @@ function paste(offset = 20) {
         const copies = S.clipboard.map(s => { const c = JSON.parse(JSON.stringify(s)); c.id = nextShapeId(p); map.set(s.id, c.id); p.shapes.push(c); return c; });
         for (const c of copies) {
             if (ONE_D.has(c.type)) { c.x1 += offset; c.y1 += offset; c.x2 += offset; c.y2 += offset; } else { c.x += offset; c.y += offset; }
-            for (const end of ['from', 'to']) if (c[end]) { if (map.has(c[end])) c[end] = map.get(c[end]); else { delete c[end]; delete c[end + 'Pt']; } }
+            for (const [i, end] of ['from', 'to'].entries()) if (c[end]) { if (map.has(c[end])) c[end] = map.get(c[end]); else setGlue(c, i, null); }
         }
         S.clipboard = JSON.parse(JSON.stringify(copies));
         S.sel = copies.map(c => c.id);
@@ -793,7 +884,7 @@ function setTool(tool) {
     $('dw-hint').textContent = {
         pointer: '', rect: 'Drag on the page to draw a rectangle (Shift: square).', ellipse: 'Drag to draw an ellipse (Shift: circle).',
         line: 'Drag to draw a line (Shift: horizontal / vertical).', text: 'Click or drag on the page for a text box, then type.',
-        connector: 'Drag from a shape (or one of its × points) to another shape: the connector stays glued when they move.',
+        connector: 'Drag from a shape to another: on a shape\'s line the end snaps to the raster dots (twelfths of a side), inside a shape it takes the nearest side; it stays glued when the shapes move.',
         cpoint: 'Click on a shape to add a connection point there; click an own point (×) again to remove it.',
     }[tool];
 }
