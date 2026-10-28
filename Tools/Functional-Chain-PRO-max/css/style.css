@@ -30,7 +30,7 @@ body {
     color: #fff;
 }
 .topbar .brand { color: #fff; font-weight: 700; text-decoration: none; font-size: 16px; }
-.topbar nav a { color: #cbd5e1; text-decoration: none; margin-right: 13px; font-size: 13px; white-space: nowrap; display: inline-block; }
+.topbar nav a { color: #cbd5e1; text-decoration: none; margin-right: 10px; font-size: 13px; white-space: nowrap; display: inline-block; }
 .topbar nav a:hover { color: #fff; }
 .topbar .project-switch { margin-left: auto; color: #fde68a; text-decoration: none; font-size: 13px; white-space: nowrap; }
 .topbar .project-switch:hover { color: #fff; }

@@ -1,0 +1,94 @@
+/* Drawing tab (SFM-218) -- the same page is the standalone Drawing PRO max */
+.app-heading { display: flex; align-items: center; gap: 8px; }
+.app-heading img { width: 1.15em; height: 1.15em; }
+.app-heading .pro { font-size: .62em; font-weight: 700; letter-spacing: .02em; color: #3c5486; align-self: flex-end; margin-bottom: .2em; }
+.menubar { display: flex; gap: 2px; align-items: center; padding: 2px 4px; margin: -4px -4px 4px; border-bottom: 1px solid var(--border, #e5e7eb); }
+.menubar .menu { position: relative; }
+.menubar .menu-title { background: none; border: 1px solid transparent; color: var(--text, #111); padding: 3px 10px; font-size: 13px; border-radius: 4px; cursor: default; }
+.menubar .menu-title:hover, .menubar.open .menu-title:focus { background: #eef2ff; border-color: #c7d2fe; }
+.menubar .menu-list { position: absolute; top: 100%; left: 0; z-index: 40; min-width: 220px; padding: 4px 0; background: #fff;
+    border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 6px 18px rgba(15, 23, 42, .16); display: flex; flex-direction: column; }
+.menubar .menu-list[hidden] { display: none; }
+.menubar .menu-list button { text-align: left; background: none; border: 0; border-radius: 0; color: var(--text, #111); padding: 6px 14px; font-size: 13px; cursor: pointer; }
+.menubar .menu-list button:hover { background: #eef2ff; }
+.menubar .menu-list .danger { color: #b91c1c; }
+.menubar .menu-list hr { margin: 4px 0; border: 0; border-top: 1px solid #e5e7eb; }
+.menubar .menu-list .key { float: right; color: #9ca3af; margin-left: 18px; }
+.help-dialog { max-width: 760px; }
+.help-dialog .help-intro { font-size: 13px; color: var(--muted); }
+.help-table { border-collapse: collapse; font-size: 13px; }
+.help-table td, .help-table th { padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+.help-table th { background: #f8fafc; }
+
+/* the ribbon */
+.dw-ribbon { display: flex; flex-wrap: wrap; gap: 0; align-items: stretch; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px; padding: 3px 2px 0; flex: none; }
+.dw-group { display: flex; flex-direction: column; padding: 0 8px; border-right: 1px solid #d1d5db; }
+.dw-group:last-child { border-right: 0; }
+.dw-group[hidden] { display: none; }
+.dw-rows { display: flex; flex-direction: column; gap: 3px; flex: 1; justify-content: center; }
+.dw-row { display: flex; gap: 2px; align-items: center; }
+.dw-label { text-align: center; font-size: 11px; color: #4b5563; padding: 2px 0 3px; }
+.dw-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 26px; height: 24px; padding: 0 5px;
+    background: transparent; color: #111827; border: 1px solid transparent; border-radius: 3px; font-size: 13px; cursor: default; position: relative; }
+.dw-btn.wide { justify-content: flex-start; }
+.dw-btn:hover:not(:disabled) { background: #e5e7eb; border-color: #cbd5e1; }
+.dw-btn.on { background: #dbeafe; border-color: #93c5fd; }
+.dw-btn:disabled { color: #9ca3af; }
+.dw-btn svg { width: 16px; height: 16px; flex: none; }
+.dw-btn sup { font-size: 7px; }
+.dw-ribbon select { height: 24px; padding: 0 4px; font-size: 12px; margin: 0; }
+.dw-split { display: inline-flex; }
+.dw-split .dw-btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.dw-arrow { min-width: 14px; padding: 0 2px; font-size: 10px; border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important; }
+.dw-bar { position: absolute; left: 4px; right: 4px; bottom: 2px; height: 3px; border: 1px solid #9ca3af; box-sizing: border-box; }
+.dw-btn.wide .dw-bar { right: auto; width: 16px; }
+.dw-sep { width: 1px; align-self: stretch; background: #d1d5db; margin: 0 3px; }
+.dw-muted { color: var(--muted, #6b7280); font-size: 12px; }
+.dw-statusbar { display: flex; gap: 12px; font-size: 12px; color: var(--muted); padding: 3px 2px; min-height: 18px; flex: none; }
+#dw-hint { flex: 1; }
+#dw-status { color: #166534; }
+#dw-status.error { color: var(--error, #b91c1c); }
+
+/* dropdowns of the ribbon */
+.dw-dropdown { position: absolute; z-index: 60; min-width: 190px; max-height: 70vh; overflow: auto; background: #fff; border: 1px solid #cbd5e1;
+    border-radius: 6px; box-shadow: 0 6px 18px rgba(15, 23, 42, .18); padding: 4px 0; font-size: 13px; }
+.dw-dropdown[hidden] { display: none; }
+.dw-dd-item { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: none; border: 0; border-radius: 0; color: #111827; padding: 5px 12px; font-size: 13px; cursor: default; }
+.dw-dd-item:hover { background: #eef2ff; }
+.dw-dd-item svg { width: 18px; height: 18px; }
+.dw-dd-item input[type=color] { width: 30px; height: 20px; padding: 0; border: 0; margin-left: auto; }
+.dw-dd-title { font-size: 11px; color: #6b7280; padding: 2px 12px; }
+.dw-dropdown hr { margin: 4px 0; border: 0; border-top: 1px solid #e5e7eb; }
+.dw-swatches { display: grid; grid-template-columns: repeat(6, 22px); gap: 4px; padding: 6px 12px; }
+.dw-swatch { width: 22px; height: 22px; padding: 0; border: 1px solid #9ca3af; border-radius: 2px; cursor: default; }
+.dw-swatch:hover { outline: 2px solid #f59e0b; }
+
+/* the drawing area */
+.dw-panel #dw-canvas { position: relative; flex: 1; min-height: 0; background: #e5e7eb; border: 1px solid #d1d5db; overflow: hidden; }
+#dw-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; touch-action: none; }
+#dw-svg[data-tool="pointer"] { cursor: default; }
+#dw-svg[data-tool="rect"], #dw-svg[data-tool="ellipse"], #dw-svg[data-tool="line"], #dw-svg[data-tool="connector"] { cursor: crosshair; }
+#dw-svg[data-tool="text"] { cursor: text; }
+#dw-svg[data-tool="cpoint"] { cursor: cell; }
+#dw-svg .dw-shape { cursor: move; }
+#dw-svg[data-tool="rect"] .dw-shape, #dw-svg[data-tool="ellipse"] .dw-shape, #dw-svg[data-tool="line"] .dw-shape,
+#dw-svg[data-tool="connector"] .dw-shape { cursor: crosshair; }
+#dw-svg .dw-shape path { pointer-events: visibleStroke; }
+#dw-svg .dw-shape rect, #dw-svg .dw-shape ellipse { pointer-events: visible; }
+#dw-svg .dw-link { cursor: pointer; }
+#dw-svg .dw-link text { pointer-events: none; }
+#dw-svg .dw-cp { cursor: pointer; }
+#dw-text { position: absolute; z-index: 5; box-sizing: border-box; padding: 4px; margin: 0; resize: none; border: 1px solid #2563eb;
+    outline: 2px solid rgba(37, 99, 235, .25); background: rgba(255, 255, 255, .96); line-height: 1.2; overflow: auto; }
+#dw-text[hidden] { display: none; }
+.dw-tabs { display: flex; gap: 2px; flex: none; padding: 3px 2px 0; overflow-x: auto; }
+.dw-tab { background: #f3f4f6; color: #111827; border: 1px solid #d1d5db; border-top: 0; border-radius: 0 0 4px 4px; padding: 3px 12px; font-size: 12px; cursor: default; white-space: nowrap; }
+.dw-tab.active { background: #fff; font-weight: 600; }
+.dw-tab.add { padding: 3px 9px; }
+.dw-link-list { max-height: 50vh; overflow: auto; border: 1px solid #e5e7eb; margin-top: 6px; }
+.dw-link-list code { color: var(--accent, #1d4ed8); }
+@media (max-width: 760px) {
+    html, body { overflow-x: hidden; }
+    main.content.fill { padding-left: 6px; padding-right: 6px; }
+    .app-heading { font-size: 16px !important; }
+}

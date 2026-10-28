@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Drawing PRO max — Integrity Workbench</title>
+    <meta name="description" content="Draw diagrams in the browser like Visio: rectangles, ellipses, lines, text, glued connectors, text formatting, fill, line and effects; PNG, SVG and XML export. Free, no login, your data stays in your browser.">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="theme-color" content="#3c5486">
+    <link rel="stylesheet" href="css/style.css">
+    <script>window.FTA_STANDALONE = true;</script>
+    <script src="js/version.js"></script>
+    <script src="js/drawing_local.js"></script>
+    <style>
+    .standalone-note { flex: none; font-size: 11px; color: var(--muted, #6b7280); margin-top: 4px; }
+    .standalone-note a { color: inherit; }
+    #install-app { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+    #install-app[hidden] { display: none; }
+    #new-version { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+    #new-version[hidden] { display: none; }
+    #about-dialog table { border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+    #about-dialog td { padding: 3px 12px 3px 0; vertical-align: top; }
+    #about-dialog td:first-child { color: var(--muted, #6b7280); white-space: nowrap; }
+    #about-dialog .ok { color: #166534; } #about-dialog .warn { color: #9a3412; }
+    </style>
+    
+<link rel="stylesheet" href="css/drawing.css">
+<script src="js/drawing.js"></script>
+
+</head>
+<body>
+    <main class="content fill">
+        
+<h1 class="app-heading"><img src="favicon.svg" alt="">Integrity Workbench <span class="pro">&ndash; Drawing PRO max</span></h1>
+
+<div class="panel fill-panel dw-panel">
+    <nav class="menubar" id="dw-menubar" aria-label="Drawing menu">
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">File</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="dw-page-new">New page…</button>
+                <button type="button" role="menuitem" id="dw-page-rename">Rename page…</button>
+                <button type="button" role="menuitem" id="dw-page-copy">Duplicate page</button>
+                <hr>
+                <button type="button" role="menuitem" id="dw-page-delete" class="danger">Delete page…</button>
+            </div>
+        </div>
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">Edit</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="dw-cut">Cut<span class="key">Ctrl+X</span></button>
+                <button type="button" role="menuitem" id="dw-copy">Copy<span class="key">Ctrl+C</span></button>
+                <button type="button" role="menuitem" id="dw-paste">Paste<span class="key">Ctrl+V</span></button>
+                <button type="button" role="menuitem" id="dw-delete" class="danger">Delete<span class="key">Del</span></button>
+                <hr>
+                <button type="button" role="menuitem" id="dw-select-all">Select all<span class="key">Ctrl+A</span></button>
+                <button type="button" role="menuitem" id="dw-front">Bring to front</button>
+                <button type="button" role="menuitem" id="dw-back">Send to back</button>
+            </div>
+        </div>
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">Import / Export</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="dw-export-png" title="This page as a PNG image">Export PNG</button>
+                <button type="button" role="menuitem" id="dw-export-svg" title="This page as an SVG vector image (e.g. for Word, PowerPoint, LaTeX)">Export SVG</button>
+                <button type="button" role="menuitem" id="dw-export-xml" title="All pages as XML -- can be imported again here or in the other version of this tool">Export XML</button>
+                <hr>
+                <button type="button" role="menuitem" id="dw-import-xml" title="Adds the pages of an XML export">Import XML…</button>
+            </div>
+        </div>
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">Help</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="help-tricks" onclick="document.getElementById('dw-help-dialog').showModal()">Keyboard and mouse…</button>
+            </div>
+        </div>
+        <input type="file" id="dw-import-file" accept=".xml,application/xml,text/xml" hidden>
+    </nav>
+
+    <!-- the ribbon (like Visio's Home tab): Font, Paragraph, Tools, Shape styles -->
+    <div class="dw-ribbon" id="dw-ribbon">
+        <div class="dw-group">
+            <div class="dw-rows">
+                <div class="dw-row">
+                    <select id="dw-font" class="dw-needs-sel" title="Font" style="width:130px;"></select>
+                    <select id="dw-size" class="dw-needs-sel" title="Font size" style="width:66px;"></select>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-grow" title="Larger font">A<sup>&#9650;</sup></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-shrink" title="Smaller font">A<sup>&#9660;</sup></button>
+                </div>
+                <div class="dw-row">
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-bold" title="Bold (Ctrl+B)"><b>F</b></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-italic" title="Italic (Ctrl+I)"><i style="font-family:serif;">K</i></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-underline" title="Underline (Ctrl+U)"><u>U</u></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-strike" title="Strike-through"><s>ab</s></button>
+                    <button type="button" class="dw-btn dw-needs-sel dw-dd-btn" id="dw-case" title="Upper / lower case">Aa &#9662;</button>
+                    <span class="dw-split">
+                        <button type="button" class="dw-btn dw-needs-sel" id="dw-color" title="Font colour"><span style="font-weight:600;">A</span><span class="dw-bar" id="dw-color-bar"></span></button><button type="button" class="dw-btn dw-needs-sel dw-dd-btn dw-arrow" id="dw-color-dd" title="Font colour">&#9662;</button>
+                    </span>
+                </div>
+            </div>
+            <div class="dw-label">Font</div>
+        </div>
+        <div class="dw-group">
+            <div class="dw-rows">
+                <div class="dw-row">
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-valign-top" title="Text at the top"><svg viewBox="0 0 16 16"><path d="M2 2H14M4 5H12M2 8H14" stroke="currentColor"/></svg></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-valign-middle" title="Text in the middle"><svg viewBox="0 0 16 16"><path d="M2 5H14M4 8H12M2 11H14" stroke="currentColor"/></svg></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-valign-bottom" title="Text at the bottom"><svg viewBox="0 0 16 16"><path d="M2 8H14M4 11H12M2 14H14" stroke="currentColor"/></svg></button>
+                    <span class="dw-sep"></span>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-bullets" title="Bullets"><svg viewBox="0 0 16 16"><circle cx="3" cy="4" r="1.3" fill="currentColor"/><circle cx="3" cy="8" r="1.3" fill="currentColor"/><circle cx="3" cy="12" r="1.3" fill="currentColor"/><path d="M6 4H14M6 8H14M6 12H14" stroke="currentColor"/></svg></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-rotate-text" title="Rotate the text by 90°"><svg viewBox="0 0 16 16"><text x="3" y="13" font-size="11" font-family="Arial" fill="currentColor">A</text><path d="M12 3 A4 4 0 0 1 14 8" fill="none" stroke="currentColor"/><path d="M12.5 1.5 L12 3.5 L14 3.6" fill="none" stroke="currentColor"/></svg></button>
+                </div>
+                <div class="dw-row">
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-align-left" title="Align left"><svg viewBox="0 0 16 16"><path d="M2 3H14M2 6H10M2 9H14M2 12H10" stroke="currentColor"/></svg></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-align-center" title="Centre"><svg viewBox="0 0 16 16"><path d="M2 3H14M4 6H12M2 9H14M4 12H12" stroke="currentColor"/></svg></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-align-right" title="Align right"><svg viewBox="0 0 16 16"><path d="M2 3H14M6 6H14M2 9H14M6 12H14" stroke="currentColor"/></svg></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-align-justify" title="Justify"><svg viewBox="0 0 16 16"><path d="M2 3H14M2 6H14M2 9H14M2 12H14" stroke="currentColor"/></svg></button>
+                    <span class="dw-sep"></span>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-indent-less" title="Decrease indent"><svg viewBox="0 0 16 16"><path d="M7 3H14M7 6H14M7 9H14M2 12H14M5 5L2 7.5 5 10" stroke="currentColor" fill="none"/></svg></button>
+                    <button type="button" class="dw-btn dw-needs-sel" id="dw-indent-more" title="Increase indent"><svg viewBox="0 0 16 16"><path d="M7 3H14M7 6H14M7 9H14M2 12H14M2 5L5 7.5 2 10" stroke="currentColor" fill="none"/></svg></button>
+                </div>
+            </div>
+            <div class="dw-label">Paragraph</div>
+        </div>
+        <div class="dw-group">
+            <div class="dw-rows">
+                <div class="dw-row">
+                    <button type="button" class="dw-btn dw-tool wide" data-tool="pointer" title="Pointer tool (Esc): select, move, resize"><svg viewBox="0 0 16 16"><path d="M3 2 L3 13 L6 10 L8.5 14.5 L10 13.8 L7.6 9.4 L11.5 9.2 Z" fill="#fff" stroke="currentColor"/></svg> Pointer</button>
+                    <span class="dw-split"><button type="button" class="dw-btn" id="dw-shape-tool" title="Rectangle / ellipse / line -- drag on the page"><span id="dw-shape-icon"></span></button><button type="button" class="dw-btn dw-dd-btn dw-arrow" id="dw-shape-dd" title="Rectangle, ellipse or line">&#9662;</button></span>
+                </div>
+                <div class="dw-row">
+                    <button type="button" class="dw-btn dw-tool wide" data-tool="connector" title="Connector: drag from one shape to another -- stays glued when they move"><svg viewBox="0 0 16 16"><rect x="1" y="1.5" width="4" height="4" fill="#fff" stroke="#2563eb"/><rect x="11" y="10.5" width="4" height="4" fill="#fff" stroke="#2563eb"/><path d="M5 3.5 H8 V12.5 H11" fill="none" stroke="currentColor"/></svg> Connector</button>
+                    <button type="button" class="dw-btn dw-tool" data-tool="cpoint" title="Connection point: click on a shape to add one (connectors glue there); click it again to remove"><svg viewBox="0 0 16 16"><path d="M3 3 L13 13 M3 13 L13 3" stroke="currentColor" stroke-width="1.4"/></svg></button>
+                </div>
+                <div class="dw-row">
+                    <button type="button" class="dw-btn dw-tool wide" data-tool="text" title="Text: click or drag on the page for a text box"><span style="font-family:Georgia,serif;font-size:15px;line-height:1;">A</span> Text</button>
+                </div>
+            </div>
+            <div class="dw-label">Tools</div>
+        </div>
+        <div class="dw-group">
+            <div class="dw-rows">
+                <div class="dw-row"><button type="button" class="dw-btn dw-needs-sel dw-dd-btn wide" id="dw-fill" title="Fill colour"><svg viewBox="0 0 16 16"><path d="M3 8 L8 3 L13 8 L8 13 Z" fill="#fff" stroke="currentColor"/></svg><span class="dw-bar" id="dw-fill-bar"></span> Fill &#9662;</button></div>
+                <div class="dw-row"><button type="button" class="dw-btn dw-needs-sel dw-dd-btn wide" id="dw-line" title="Line: colour, weight, dashes, arrows, corners"><svg viewBox="0 0 16 16"><path d="M2 13 L14 3" stroke="currentColor" stroke-width="1.6"/></svg><span class="dw-bar" id="dw-line-bar"></span> Line &#9662;</button></div>
+                <div class="dw-row"><button type="button" class="dw-btn dw-needs-sel dw-dd-btn wide" id="dw-effects" title="Effects: shadow, glow"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="9" height="9" fill="#fff" stroke="currentColor"/><path d="M11 5 H13.5 V13.5 H5 V11" fill="#cbd5e1" stroke="none"/></svg> Effects &#9662;</button></div>
+            </div>
+            <div class="dw-label">Shape styles</div>
+        </div>
+        <div class="dw-group dw-model-only">
+            <div class="dw-rows">
+                <div class="dw-row"><button type="button" class="dw-btn wide" id="dw-link" title="Link the selected shape to a model object">&#x1F517; Link to object…</button></div>
+                <div class="dw-row"><button type="button" class="dw-btn wide" id="dw-open-link" title="Open the linked object (also Ctrl+click its badge)">Open object</button></div>
+                <div class="dw-row"><button type="button" class="dw-btn wide" id="dw-unlink" title="Remove the link">Remove link</button></div>
+            </div>
+            <div class="dw-label">Model</div>
+        </div>
+        <div class="dw-group">
+            <div class="dw-rows">
+                <div class="dw-row"><button type="button" class="dw-btn" id="dw-undo" title="Undo (Ctrl+Z)">&#8630; Undo</button><button type="button" class="dw-btn" id="dw-redo" title="Redo (Ctrl+Y)">&#8631; Redo</button></div>
+                <div class="dw-row"><button type="button" class="dw-btn" id="dw-fit" title="Show the whole page">Fit</button> <span id="dw-zoom" class="dw-muted"></span></div>
+                <div class="dw-row"><select id="dw-page-size" title="Page size" style="width:120px;"></select> <label class="dw-muted" style="margin:0;"><input type="checkbox" id="dw-snap" checked> Grid</label></div>
+            </div>
+            <div class="dw-label">Page</div>
+        </div>
+    </div>
+    <div class="dw-statusbar"><span id="dw-hint"></span><span id="dw-status" aria-live="polite"></span></div>
+
+    <div class="fill-graph" id="dw-canvas">
+        <svg id="dw-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+        <textarea id="dw-text" hidden spellcheck="false"></textarea>
+        <div id="dw-menu" class="context-menu" role="menu" hidden></div>
+    </div>
+    <div class="dw-tabs" id="dw-tabs"></div>
+</div>
+<div id="dw-dropdown" class="dw-dropdown" hidden></div>
+
+<dialog id="dw-text-dialog">
+    <form method="dialog">
+        <h3 id="dw-text-dialog-title" style="margin-top:0;"></h3>
+        <input id="dw-text-dialog-input" autocomplete="off" style="min-width:320px;">
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:10px;"><button value="cancel" class="secondary">Cancel</button><button value="ok">OK</button></div>
+    </form>
+</dialog>
+
+<dialog id="dw-link-dialog" class="dw-model-only">
+    <form method="dialog" style="min-width:460px;">
+        <h3 style="margin-top:0;">Link to a model object</h3>
+        <input id="dw-link-search" placeholder="Search ID, title or type" autocomplete="off">
+        <div id="dw-link-list" class="dw-link-list"></div>
+        <div style="text-align:right; margin-top:8px;"><button value="cancel" class="secondary">Cancel</button></div>
+    </form>
+</dialog>
+
+<dialog id="dw-help-dialog" class="help-dialog">
+    <form method="dialog">
+        <h3 style="margin-top:0;">Drawing PRO max &mdash; keyboard and mouse</h3>
+        <p class="help-intro">Free drawings like Visio: shapes, text, connectors glued to shapes, text formatting and shape styles, several pages. Everything is stored in this browser only.</p>
+        <table class="help-table">
+            <tr><th colspan="2">Drawing</th></tr>
+            <tr><td>Rectangle / ellipse / line (Tools)</td><td>drag on the page; a click gives the default size; <kbd>Shift</kbd>: square / circle / straight line</td></tr>
+            <tr><td>Text</td><td>click or drag on the page, type, click elsewhere (or <kbd>Esc</kbd>, <kbd>Ctrl</kbd>+<kbd>Enter</kbd>) to finish</td></tr>
+            <tr><td>Connector</td><td>drag from a shape onto another: the ends are glued (green handles) and follow the shapes; on a &times; point the end stays there, elsewhere on the shape it takes the nearest side; right angles or straight (Line menu)</td></tr>
+            <tr><td>Connection point (&times;)</td><td>click on a shape to add a point where connectors can glue; click an own point to remove it</td></tr>
+            <tr><th colspan="2">Editing</th></tr>
+            <tr><td>Click / <kbd>Shift</kbd> or <kbd>Ctrl</kbd> + click / drag on the empty page</td><td>select one / more / all inside the frame</td></tr>
+            <tr><td>Drag / handles / arrow keys</td><td>move / resize (<kbd>Shift</kbd>: keep the proportions) / nudge 1 px (<kbd>Shift</kbd>: 10)</td></tr>
+            <tr><td>Double-click, <kbd>F2</kbd>, or just type</td><td>edit the shape's text (typing replaces it)</td></tr>
+            <tr><td>Font, Paragraph, Shape styles</td><td>apply to the selected shapes (the whole text of a shape)</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd> / <kbd>D</kbd>, <kbd>Del</kbd></td><td>copy / cut / paste / duplicate, delete</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>undo / redo</td></tr>
+            <tr><td>Right-click</td><td>edit text, cut / copy / paste, front / back, link, delete</td></tr>
+            <tr><th colspan="2">Viewing and pages</th></tr>
+            <tr><td><kbd>Ctrl</kbd> + wheel / wheel / middle button or <kbd>Space</kbd> + drag</td><td>zoom / scroll / move the view; <b>Fit</b> shows the page</td></tr>
+            <tr><td>Page tabs (below)</td><td>switch; <b>+</b> new page; double-click renames; File: duplicate, delete</td></tr>
+            <tr><td>Export PNG / SVG / XML, Import XML</td><td>the page as an image; all pages as XML (the workbench and the standalone Drawing PRO max read each other's files)</td></tr>
+        </table>
+        <p style="margin-bottom:0; text-align:right;"><button value="close">Close</button></p>
+    </form>
+</dialog>
+
+<script>Drawing.init(window.DRAWING_STORE);</script>
+
+        <div class="standalone-note">Your drawings are stored in this browser (nothing is uploaded) &mdash;
+        Import / Export &gt; Export XML keeps a copy or moves them to another computer.
+        &copy; TEGRITY &middot; <a href="https://tegrity.eu" target="_blank" rel="noopener">tegrity.eu</a>
+        &middot; <span id="app-version"></span>
+        <button type="button" id="new-version" hidden title="A newer version is published -- load it">New version: reload</button>
+        <button type="button" class="secondary" id="install-app" hidden title="Install as an app: own window, Start menu / taskbar icon, works offline">Install as app</button></div>
+    </main>
+    <script>
+    // Progressive Web App (SFM-181): the service worker keeps every file for offline use; where the browser
+    // can install the page as an app (Edge / Chrome over HTTPS), the "Install as app" button offers it.
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+    (function () {
+        const button = document.getElementById('install-app');
+        let offer = null;
+        addEventListener('beforeinstallprompt', e => { e.preventDefault(); offer = e; button.hidden = false; });
+        addEventListener('appinstalled', () => { offer = null; button.hidden = true; });
+        button.addEventListener('click', async () => {
+            if (!offer) return;
+            offer.prompt();
+            await offer.userChoice;
+            offer = null; button.hidden = true;
+        });
+    })();
+    // Version and About (SFM-214, user 2026-10-27: "how i know i use the right software version?"): js/version.js
+    // is the running build (cached with the app), version.json the published one (never cached, fetched fresh).
+    (function () {
+        const mine = window.FTA_VERSION || { version: '?', build: '?' };
+        const label = v => `${v.version} (build ${v.build})`;
+        document.getElementById('app-version').textContent = `Version ${mine.version}`;
+        document.getElementById('app-version').title = `Build ${mine.build}`;
+        let published = null, checked = false;
+        async function check() {
+            try {
+                const r = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+                published = r.ok ? await r.json() : null;
+            } catch (e) { published = null; }
+            checked = true;
+            document.getElementById('new-version').hidden = !(published && published.build && published.build !== mine.build);
+            return published;
+        }
+        async function reloadNew() {          // drop the offline copy, so the reload loads the published files
+            try {
+                for (const k of await caches.keys()) if (k.startsWith('drawing-pro-max-')) await caches.delete(k);
+                const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+                if (reg) await reg.update();
+            } catch (e) { /* no cache / service worker: a plain reload */ }
+            location.reload();
+        }
+        document.getElementById('new-version').addEventListener('click', reloadNew);
+        if (location.protocol !== 'file:') check();
+        function browserName() {
+            const ua = navigator.userAgent;
+            for (const [name, re] of [['Microsoft Edge', 'Edg/([0-9.]+)'], ['Firefox', 'Firefox/([0-9.]+)'],
+                                      ['Chrome', 'Chrome/([0-9.]+)'], ['Safari', 'Version/([0-9.]+).*Safari']]) {
+                const m = ua.match(new RegExp(re));
+                if (m) return `${name} ${m[1]}`;
+            }
+            return ua;
+        }
+        const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+        const dialog = document.createElement('dialog');
+        dialog.id = 'about-dialog'; dialog.className = 'help-dialog';
+        document.body.appendChild(dialog);
+        async function showAbout() {
+            const folder = typeof window.showDirectoryPicker === 'function';
+            const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
+            const render = () => {
+                let update;
+                if (location.protocol === 'file:') update = 'not checked (opened from a file on this computer)';
+                else if (!checked) update = 'checking&hellip;';
+                else if (!published) update = '<span class="warn">could not check (offline?)</span>';
+                else if (published.build === mine.build) update = '<span class="ok">this is the latest published version</span>';
+                else update = `<span class="warn">a newer version is published: ${esc(label(published))}</span> `
+                    + '<button type="button" id="about-reload">Reload to use it</button>';
+                dialog.innerHTML = '<form method="dialog"><h3 style="margin-top:0;">About Drawing PRO max</h3><table>'
+                    + row('Version', `<b id="about-version">${esc(label(mine))}</b>`)
+                    + row('Update', `<span id="about-update">${update}</span>`)
+                    + row('Opened from', esc(location.href.split('?')[0]))
+                    + row('Browser', esc(browserName()))
+                    + '</table><p style="margin-bottom:0; text-align:right;"><button value="close">Close</button></p></form>';
+                const b = dialog.querySelector('#about-reload');
+                if (b) b.addEventListener('click', reloadNew);
+            };
+            render();
+            if (!dialog.open) dialog.showModal();
+            if (location.protocol !== 'file:') { await check(); render(); }
+        }
+        const tricks = document.getElementById('help-tricks');
+        if (tricks) {
+            const item = document.createElement('button');
+            item.type = 'button'; item.setAttribute('role', 'menuitem'); item.id = 'help-about';
+            item.textContent = 'About Drawing PRO max…';
+            item.addEventListener('click', showAbout);
+            tricks.parentElement.append(document.createElement('hr'), item);
+        }
+        window.FaultTreeAbout = { show: showAbout, check };
+    })();
+    </script>
+</body>
+</html>

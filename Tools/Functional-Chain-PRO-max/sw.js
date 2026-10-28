@@ -1,6 +1,6 @@
 // Functional Chain PRO max -- offline cache (SFM-217), written by scripts/build_standalone_chain.py.
 // Every file of the app is kept; a new build has a new CACHE name, so the next start loads it and drops the old.
-const CACHE = 'functional-chain-pro-max-bddf6e51d07f';
+const CACHE = 'functional-chain-pro-max-8ef96688cd38';
 const FILES = ["./", "css/style.css", "favicon.svg", "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "index.html", "js/chain_local.js", "js/graph_export.js", "js/manual_chain.js", "js/version.js", "manifest.json", "vendor/cytoscape-edgehandles.js", "vendor/cytoscape.min.js", "vendor/lodash.min.js"];
 self.addEventListener('install', e => {
     e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
