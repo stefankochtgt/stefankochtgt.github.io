@@ -222,7 +222,9 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <a role="menuitem" id="export-tex" href="/fta-export/manual.tex" title="The trees of this analysis as a LaTeX document: each tree a TikZ picture you can copy into your own document">Export LaTeX</a>
                 <a role="menuitem" id="export-pdf" hidden href="/fta-export/manual.pdf" target="_blank" title="The trees of this analysis as PDF, one per page, with the model identification (needs pdflatex)">Export PDF</a>
                 <a role="menuitem" id="export-xml" href="/fta-export/manual.xml" title="The trees of this analysis as XML (with the model identification) -- can be imported again">Export XML</a>
+                
                 <a role="menuitem" id="export-rwb" href="/fta-export/rwb/manual.xml" title="The trees of this analysis as Isograph Reliability Workbench XML -- import it in RWB with the import template IntegrityWorkbench_FTA.rwb-impx (descriptions and colours are not carried over)">Export Reliability Workbench XML</a>
+                
                 <hr>
                 <button type="button" role="menuitem" id="import-xml" title="Import Manual FTA trees from an XML export, or a fault tree from an Isograph Reliability Workbench XML export: checked and shown first; a tree replaces the one with the same top event ID">Import XML…</button>
             </div>
@@ -335,7 +337,9 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <tr><td>Mouse wheel / drag the background</td><td>zoom / move the view; fit-to-window icon shows everything</td></tr>
                 <tr><th colspan="2">Import / Export</th></tr>
                 <tr><td>Export JPG / LaTeX / PDF / XML</td><td>the chosen analysis, with the model revision (light grey above each top event); LaTeX: each tree a TikZ picture to copy into your own document</td></tr>
+                
                 <tr><td>Export Reliability Workbench XML</td><td>the chosen analysis for Isograph Reliability Workbench: import it there with the import template IntegrityWorkbench_FTA.rwb-impx; titles, gates, pages and criticality are carried over, descriptions and colours are not</td></tr>
+                
                 <tr><td>Import XML…</td><td>this tool's XML export, or a Reliability Workbench XML export (File &gt; Export &gt; XML); checked and shown first; a tree replaces the one with the same top event ID</td></tr>
             </table>
             <p style="margin-bottom:0; text-align:right;"><button type="button" class="secondary" id="help-tour-start">Guided tour</button> <button value="close">Close</button></p>
@@ -783,12 +787,17 @@ const INTEGRITY_LEVELS = ["QM", "ASIL A", "ASIL B", "ASIL C", "ASIL D"];        
 const COLORS = {"green": "#BBF7D0", "grey": "#E5E7EB", "orange": "#FED7AA", "purple": "#E9D5FF", "red": "#FECACA", "yellow": "#FDE68A"};
 const DEFAULT_FILL = '#ADD8E6';
 
-// the safety criticality: two rows -- H categories, then ASIL / QM; "–" clears it
+// the safety criticality: H categories and / or ASIL / QM -- in the app only the open project's profile
+// (SFM-220: one of the two lists is empty), the standalone both; "–" clears it
 function criticalityRows(current, apply) {
-    return [{ title: 'Safety criticality: H category', row: [{ label: '–', hint: 'No criticality', active: !current, run: () => apply('') },
-                ...CRITICALITY_LEVELS.map(level => ({ label: level, active: current === level, run: () => apply(level) }))] },
-            { title: 'ASIL', row: INTEGRITY_LEVELS.map(level => ({ label: level.replace('ASIL ', ''), hint: level,
-                active: current === level, run: () => apply(level) })) }];
+    const none = { label: '–', hint: 'No criticality', active: !current, run: () => apply('') };
+    const rows = [];
+    if (CRITICALITY_LEVELS.length) rows.push({ title: 'Safety criticality: H category', row: [none,
+        ...CRITICALITY_LEVELS.map(level => ({ label: level, active: current === level, run: () => apply(level) }))] });
+    if (INTEGRITY_LEVELS.length) rows.push({ title: rows.length ? 'ASIL' : 'Safety criticality: ASIL', row: [...(rows.length ? [] : [none]),
+        ...INTEGRITY_LEVELS.map(level => ({ label: level.replace('ASIL ', ''), hint: level,
+            active: current === level, run: () => apply(level) }))] });
+    return rows;
 }
 
 function colorRow(current, apply) {
@@ -1620,7 +1629,7 @@ const TOUR = [
         blows. A gate with two or more inputs shows its OR / AND symbol; right-click switches it.</p>` },
     { nodes: tourNodes('EV-1', 'EV-2'), title: 'Basic events', text: `<p>Basic events (circles) end a branch &ndash; nothing goes
         below them. EV-2 has a <b>colour</b> (yellow) and the criticality <b>QM</b>; EV-1 has none, so no square is drawn.</p>
-        <p>Criticalities: H1&ndash;H4+, ANY, QM, ASIL A&ndash;D.</p>` },
+        <p>Criticalities: H1&ndash;H4+, ANY, QM, ASIL A&ndash;D (in the Integrity Workbench: those of the project's profile).</p>` },
     { nodes: tourNodes('EV-3'), title: 'Repeated event', text: `<p>The <b>same fuse</b> feeds both lamps, so EV-3 appears twice
         &ndash; with the same ID it is the same event, drawn with a <b>dashed</b> box.</p><p>When you change one, you are
         asked: change <b>all occurrences</b>, or <b>only this one</b> (it then gets a new ID and becomes independent).</p>` },
@@ -1933,7 +1942,8 @@ function rememberAnalysis() {
     if (window.parent !== window) window.parent.postMessage({ type: 'tile-url', url: url.pathname + url.search }, location.origin);
     for (const kind of ['xml', 'tex', 'pdf'])
         document.getElementById('export-' + kind).href = `/fta-export/manual.${kind}?analysis=` + encodeURIComponent(analysisId);
-    document.getElementById('export-rwb').href = '/fta-export/rwb/manual.xml?analysis=' + encodeURIComponent(analysisId);
+    const rwb = document.getElementById('export-rwb');            // absent while the RWB plugin is off (SFM-220)
+    if (rwb) rwb.href = '/fta-export/rwb/manual.xml?analysis=' + encodeURIComponent(analysisId);
     for (const kind of ['tex', 'pdf']) if (compactOn) document.getElementById('export-' + kind).href += '&compact=' + compactOn;   // SFM-200/201
 }
 
