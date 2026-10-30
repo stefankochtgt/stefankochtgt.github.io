@@ -219,11 +219,11 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
             <button type="button" class="menu-title" aria-haspopup="true">Import / Export</button>
             <div class="menu-list" role="menu" hidden>
                 <button type="button" role="menuitem" id="export-jpg" title="The whole diagram as a high-resolution JPG image, with the model revision in light grey above each top event">Export JPG</button>
-                <a role="menuitem" id="export-tex" href="/fta-export/manual.tex" title="The trees of this analysis as a LaTeX document: each tree a TikZ picture you can copy into your own document">Export LaTeX</a>
-                <a role="menuitem" id="export-pdf" hidden href="/fta-export/manual.pdf" target="_blank" title="The trees of this analysis as PDF, one per page, with the model identification (needs pdflatex)">Export PDF</a>
-                <a role="menuitem" id="export-xml" href="/fta-export/manual.xml" title="The trees of this analysis as XML (with the model identification) -- can be imported again">Export XML</a>
+                <a role="menuitem" data-wp-export id="export-tex" href="/fta-export/manual.tex" title="The trees of this analysis as a LaTeX document: each tree a TikZ picture you can copy into your own document">Export LaTeX</a>
+                <a role="menuitem" data-wp-export id="export-pdf" hidden href="/fta-export/manual.pdf" target="_blank" title="The trees of this analysis as PDF, one per page, with the model identification (needs pdflatex)">Export PDF</a>
+                <a role="menuitem" data-wp-export id="export-xml" href="/fta-export/manual.xml" title="The trees of this analysis as XML (with the model identification) -- can be imported again">Export XML</a>
                 
-                <a role="menuitem" id="export-rwb" href="/fta-export/rwb/manual.xml" title="The trees of this analysis as Isograph Reliability Workbench XML -- import it in RWB with the import template IntegrityWorkbench_FTA.rwb-impx (descriptions and colours are not carried over)">Export Reliability Workbench XML</a>
+                <a role="menuitem" data-wp-export id="export-rwb" href="/fta-export/rwb/manual.xml" title="The trees of this analysis as Isograph Reliability Workbench XML -- import it in RWB with the import template IntegrityWorkbench_FTA.rwb-impx (descriptions and colours are not carried over)">Export Reliability Workbench XML</a>
                 
                 <hr>
                 <button type="button" role="menuitem" id="import-xml" title="Import Manual FTA trees from an XML export, or a fault tree from an Isograph Reliability Workbench XML export: checked and shown first; a tree replaces the one with the same top event ID">Import XML…</button>
@@ -1600,7 +1600,7 @@ async function loadGraph(options = {}) {
 
 // ---- XML import (SFM-169): check and show first, then write ---------------------------------------
 document.getElementById('import-xml').addEventListener('click', () => document.getElementById('import-xml-file').click());
-document.getElementById('export-jpg').addEventListener('click', () => exportGraphJpgIdentified(cy, 'fta_manual_' + analysisId));
+document.getElementById('export-jpg').addEventListener('click', () => exportGraphJpgIdentified(cy, 'fta_manual_' + analysisId, 'Fault trees of the Manual FTA, analysis ' + analysisId + ', JPG'));
 document.getElementById('help-tricks').addEventListener('click', () => document.getElementById('help-dialog').showModal());
 
 // ---- guided tour (SFM-178, SFM-182): every function and shortcut, shown on an example tree ---------

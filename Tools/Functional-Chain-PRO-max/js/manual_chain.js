@@ -662,17 +662,30 @@ const MENU_ACTIONS = {
     'edit-new': () => newFunction(),
     'edit-delete': deleteSelected,
     'edit-layout': relayout,
-    'export-xml': () => download(new Blob([toXml(S.doc)], { type: 'application/xml' }), 'functional-chain.xml'),
+    'export-xml': () => withControl('All functional chain diagrams, XML', c => download(new Blob(
+        [c ? exportControl.xmlWithComment(toXml(S.doc), c.xml_comment) : toXml(S.doc)], { type: 'application/xml' }), 'functional-chain.xml')),
     'import-xml': () => $('import-xml-file').click(),
-    'export-jpg': () => exportGraphJpg(S.cy, fileBase()),
+    'export-jpg': () => withControl(`Functional chain diagram "${diagram().name}", JPG`, c => exportGraphJpg(S.cy, fileBase(), '', null, c && c.line)),
     'export-png': () => {
         if (!S.cy.nodes().length) { alert('There is nothing to export yet.'); return; }
+        if (window.exportControl) {                    // with the document control in the footer (SFM-225)
+            withControl(`Functional chain diagram "${diagram().name}", PNG`, c => exportGraphJpg(S.cy, fileBase(), '', null, c.line, 'image/png'));
+            return;
+        }
         const bb = S.cy.elements().boundingBox();
         const scale = Math.max(1, Math.min(4, 12000 / Math.max(bb.w + 80, bb.h + 80)));
         download(S.cy.png({ full: true, scale, bg: '#ffffff', output: 'blob' }), fileBase() + '.png');
     },
     'help-tricks': () => $('help-dialog').showModal(),
 };
+
+// In the workbench: asks which work product the export is for and hands its document control to
+// `fn` (export_control.js, SFM-225); nothing when cancelled. In the standalone `fn(null)`.
+async function withControl(content, fn) {
+    if (!window.exportControl) return fn(null);
+    const c = await exportControl.ask(content);
+    if (c) fn(c);
+}
 
 function fileBase() {
     return (diagram().name || 'functional-chain').replace(/[^A-Za-z0-9 _.\-]+/g, '_').trim().replace(/\s+/g, '_') || 'functional-chain';

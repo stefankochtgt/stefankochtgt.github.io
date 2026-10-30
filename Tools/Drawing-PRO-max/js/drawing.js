@@ -1037,27 +1037,44 @@ function download(blob, name) {
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
-// The page as a standalone SVG: the page area only, without grid, selection or link badges.
-function pageSvg() {
-    const p = page();
-    for (const s of p.shapes) if (ONE_D.has(s.type)) resolveEnds(p, s);
-    return `<svg xmlns="${SVGNS}" width="${p.width}" height="${p.height}" viewBox="0 0 ${p.width} ${p.height}">${markerDefs()}`
-        + `<rect width="${p.width}" height="${p.height}" fill="#ffffff"/>${p.shapes.map(s => shapeSvg(p, s)).join('')}</svg>`;
+// In the workbench: asks which work product the export is for and hands its document control to
+// `fn` (export_control.js, SFM-225); nothing when cancelled. In the standalone `fn(null)`.
+async function withControl(content, fn) {
+    if (!window.exportControl) return fn(null);
+    const c = await exportControl.ask(content);
+    if (c) fn(c);
 }
 
-function exportPng() {
+const FOOTER_SIZE = 9, FOOTER_GREY = '#9ca3af';
+
+// The page as a standalone SVG: the page area only, without grid, selection or link badges. `footer`
+// (optional): the document control (SFM-225), in light grey below the page, split to fit its width.
+function pageSvg(footer) {
+    const p = page();
+    for (const s of p.shapes) if (ONE_D.has(s.type)) resolveEnds(p, s);
+    const lines = footer ? exportControl.wrap(footer, Math.max(60, Math.floor(p.width / (FOOTER_SIZE * 0.52)))) : [];
+    const h = p.height + (lines.length ? lines.length * (FOOTER_SIZE + 3) + 8 : 0);
+    const text = lines.map((t, i) => `<text x="8" y="${p.height + 4 + (i + 1) * (FOOTER_SIZE + 3)}" font-family="Arial, Helvetica, sans-serif" `
+        + `font-size="${FOOTER_SIZE}" fill="${FOOTER_GREY}">${xmlEsc(t)}</text>`).join('');
+    return `<svg xmlns="${SVGNS}" width="${p.width}" height="${h}" viewBox="0 0 ${p.width} ${h}">${markerDefs()}`
+        + `<rect width="${p.width}" height="${h}" fill="#ffffff"/>${p.shapes.map(s => shapeSvg(p, s)).join('')}${text}</svg>`;
+}
+
+function exportPng(footer) {
     const p = page(), scale = Math.max(1, Math.min(4, 8000 / Math.max(p.width, p.height)));
+    const svg = pageSvg(footer);
+    const height = Number(/height="([0-9.]+)"/.exec(svg)[1]);
     const img = new Image();
     img.onload = () => {
         const canvas = document.createElement('canvas');
-        canvas.width = Math.round(p.width * scale); canvas.height = Math.round(p.height * scale);
+        canvas.width = Math.round(p.width * scale); canvas.height = Math.round(height * scale);
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         canvas.toBlob(blob => download(blob, fileBase() + '.png'), 'image/png');
     };
     img.onerror = () => alert('The PNG export failed in this browser -- use Export SVG.');
-    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(pageSvg());
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
 async function importXml(file) {
@@ -1103,9 +1120,11 @@ const ACTIONS = {
         });
         openPage(S.pageId);
     },
-    'dw-export-png': exportPng,
-    'dw-export-svg': () => download(new Blob([pageSvg()], { type: 'image/svg+xml' }), fileBase() + '.svg'),
-    'dw-export-xml': () => download(new Blob([toXml(S.doc)], { type: 'application/xml' }), 'drawings.xml'),
+    'dw-export-png': () => withControl(`Drawing page "${page().name}", PNG`, c => exportPng(c && c.line)),
+    'dw-export-svg': () => withControl(`Drawing page "${page().name}", SVG`, c => download(
+        new Blob([pageSvg(c && c.line)], { type: 'image/svg+xml' }), fileBase() + '.svg')),
+    'dw-export-xml': () => withControl('All drawing pages, XML', c => download(new Blob(
+        [c ? exportControl.xmlWithComment(toXml(S.doc), c.xml_comment) : toXml(S.doc)], { type: 'application/xml' }), 'drawings.xml')),
     'dw-import-xml': () => $('dw-import-file').click(),
     'dw-help': () => $('dw-help-dialog').showModal(),
     'dw-undo': () => undoRedo(S.undo, S.redo),
