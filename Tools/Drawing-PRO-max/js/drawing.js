@@ -663,7 +663,12 @@ function onPointerDown(evt) {
     }
     S.lastDown = null;
     if (id) {
-        if (evt.shiftKey || evt.ctrlKey || evt.metaKey) {
+        if (evt.ctrlKey || evt.metaKey) {          // Ctrl+click toggles it, Ctrl+drag copies the selection (SFM-230)
+            S.drag = { mode: 'ctrl', id, start: m, before: snapshot() };
+            $('dw-svg').setPointerCapture(evt.pointerId);
+            return;
+        }
+        if (evt.shiftKey) {
             S.sel = S.sel.includes(id) ? S.sel.filter(x => x !== id) : [...S.sel, id];
             select(S.sel);
             return;
@@ -701,6 +706,17 @@ function onPointerMove(evt) {
         return;
     }
     const m = toModel(evt), p = page();
+    if (d.mode === 'ctrl') {                        // dragged: copies of the selection (with the shape) follow the mouse
+        if (Math.abs(m.x - d.start.x) + Math.abs(m.y - d.start.y) <= 3 / S.zoom) return;
+        if (!S.sel.includes(d.id)) S.sel = [...S.sel, d.id];
+        const copies = duplicate(selected(), 0);
+        S.sel = copies.map(c => c.id);
+        S.drag = { mode: 'move', start: d.start, orig: copies.map(x => ({ id: x.id, x: x.x, y: x.y, x1: x.x1, y1: x.y1, x2: x.x2, y2: x.y2 })),
+                   before: d.before, moved: true };
+        select(S.sel);
+        onPointerMove(evt);
+        return;
+    }
     if (d.mode === 'move') {
         let dx = m.x - d.start.x, dy = m.y - d.start.y;
         if (evt.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
@@ -760,6 +776,11 @@ function onPointerUp(evt) {
         return;
     }
     if (d.mode === 'pan') return;
+    if (d.mode === 'ctrl') {                        // Ctrl+click without moving: in / out of the selection
+        S.sel = S.sel.includes(d.id) ? S.sel.filter(x => x !== d.id) : [...S.sel, d.id];
+        select(S.sel);
+        return;
+    }
     if (d.mode === 'create') {
         const s = shape(d.id);
         if (s.w < 4 && s.h < 4) {                      // a click: the default size
@@ -849,15 +870,22 @@ function copySelected(cut) {
     if (cut) deleteSelected();
 }
 
+// Copies of `shapes` on the page, `offset` away: a line glued to a copied shape is glued to its copy,
+// one glued to a shape left behind comes loose. Paste and Ctrl+drag (SFM-230).
+function duplicate(shapes, offset) {
+    const p = page(), map = new Map();
+    const copies = shapes.map(s => { const c = JSON.parse(JSON.stringify(s)); c.id = nextShapeId(p); map.set(s.id, c.id); p.shapes.push(c); return c; });
+    for (const c of copies) {
+        if (ONE_D.has(c.type)) { c.x1 += offset; c.y1 += offset; c.x2 += offset; c.y2 += offset; } else { c.x += offset; c.y += offset; }
+        for (const [i, end] of ['from', 'to'].entries()) if (c[end]) { if (map.has(c[end])) c[end] = map.get(c[end]); else setGlue(c, i, null); }
+    }
+    return copies;
+}
+
 function paste(offset = 20) {
     if (!S.clipboard || !S.clipboard.length) return;
     change(() => {
-        const p = page(), map = new Map();
-        const copies = S.clipboard.map(s => { const c = JSON.parse(JSON.stringify(s)); c.id = nextShapeId(p); map.set(s.id, c.id); p.shapes.push(c); return c; });
-        for (const c of copies) {
-            if (ONE_D.has(c.type)) { c.x1 += offset; c.y1 += offset; c.x2 += offset; c.y2 += offset; } else { c.x += offset; c.y += offset; }
-            for (const [i, end] of ['from', 'to'].entries()) if (c[end]) { if (map.has(c[end])) c[end] = map.get(c[end]); else setGlue(c, i, null); }
-        }
+        const copies = duplicate(S.clipboard, offset);
         S.clipboard = JSON.parse(JSON.stringify(copies));
         S.sel = copies.map(c => c.id);
     });
