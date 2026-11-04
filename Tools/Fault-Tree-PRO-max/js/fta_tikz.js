@@ -17,6 +17,7 @@
     // compact display (SFM-200), as fta_tikz.py; cTagWidth / textWidth / TITLE_H / C_* come from fta_draw.js
     const COMPACT_BUS_SPAN = 8.0;
     const SIDE_Y = SYM_TOP - 2, SIDE_DX = 28.0, SIDE_TRI_H = 12.0, SIDE_TRI_HALF = 7.0;   // transfer-in triangle
+    const DIAMOND_HALF_W = 40;                                                              // undeveloped event (SFM-245)
     const SCALE = 0.0322, PT_PER_CM = 28.4528, VIEW_U = 1.5;
     const ADDED_FILL = 'yellow!35', FILL = 'blue!15', TITLE_CHARS = 64;
     const RAD_TO_DEG = 180 / Math.PI;
@@ -61,6 +62,11 @@
     function symbol(sym, sx, sy, fill = FILL) {
         const style = `draw, fill=${fill}`;
         if (sym === 'basic') return [`\\path[${style}] ${pt(sx + SYM_W / 2, sy + SYM_H / 2)} circle[radius=${cm(SYM_H / 2)}];`];
+        if (sym === 'undeveloped') {                 // a diamond, as fta_tikz.py (SFM-245)
+            const cx = sx + SYM_W / 2;
+            return [`\\path[${style}] ${pt(cx, sy)} -- ${pt(cx + DIAMOND_HALF_W, sy + SYM_H / 2)} -- ${pt(cx, sy + SYM_H)}`
+                + ` -- ${pt(cx - DIAMOND_HALF_W, sy + SYM_H / 2)} -- cycle;`];
+        }
         if (sym === 'and') return [`\\path[${style}] ${pt(sx, sy + SYM_H)} -- ${pt(sx, sy + 20)}`
             + ` arc[start angle=180, end angle=0, radius=${cm(20)}]`
             + ` -- ${pt(sx + SYM_W, sy + SYM_H)} -- cycle;`];

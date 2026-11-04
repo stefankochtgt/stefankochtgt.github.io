@@ -59,7 +59,7 @@
     const ev = (o = {}) => ({ id: o.id, title: o.title || '', description: o.description || '', label: o.label || '',
         kind: KINDS.includes(o.kind) ? o.kind : 'intermediate', gate: GATES.includes(o.gate) ? o.gate : 'or',
         causes: o.causes || [], criticality: o.criticality || '', color: o.color || '', analysis: o.analysis || '',
-        new_page: !!o.new_page, uid: o.uid || '' });
+        new_page: !!o.new_page, uid: o.uid || '', undeveloped: !!o.undeveloped && o.kind === 'basic' });
     const clone = e => JSON.parse(JSON.stringify(e));
     // the internal ID that never changes (manual_fta._ensure_uids(), SFM-202): kept; new events get one; every
     // occurrence of a repeated event shares one; one used by two different events is replaced for the later one
@@ -121,7 +121,7 @@
     }
     const parentPath = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
     const signature = e => JSON.stringify([e.id, e.title, e.description, e.label, e.kind, e.gate, e.criticality, e.color, !!e.new_page,
-                                          e.causes.map(signature)]);
+                                          !!e.undeveloped, e.causes.map(signature)]);
     function cloneNewIds(e, tops, counters, asTop) {
         const n = ev({ ...e, id: newId(tops, counters, asTop ? 'top' : e.kind), causes: [], analysis: '', new_page: !!e.new_page, uid: '' });
         const holder = [n];
@@ -201,17 +201,19 @@
             if (b.new_page) {                                    // SFM-184; a top event: its tree on a page of its own (SFM-192)
                 if ((b.kind || first.kind) === 'basic') throw new FtaError(`${id} is a basic event -- only a gate's branch can continue on a new page.`);
             }
+            if (b.undeveloped && (b.kind || first.kind) !== 'basic') throw new FtaError(`${id} is a gate -- only a basic event can be an undeveloped event.`);
             const kindId = b.kind !== undefined && b.kind !== first.kind && tg[0][1] ? newId(data.tops, data.counters, b.kind) : null;
             for (const [e] of tg) {
                 if (newIdV) e.id = newIdV;
                 if (b.title !== undefined) e.title = clean(b.title);
                 if (b.description !== undefined) e.description = (b.description || '').trim();
                 if (b.label !== undefined) e.label = clean(b.label);
-                if (b.kind !== undefined) { if (kindId) e.id = kindId; e.kind = b.kind; }
+                if (b.kind !== undefined) { if (kindId) e.id = kindId; e.kind = b.kind; if (b.kind !== 'basic') e.undeveloped = false; }
                 if (b.gate !== undefined) e.gate = b.gate;
                 if (crit !== null) e.criticality = crit;
                 if (col !== null) e.color = col;
                 if (b.new_page !== undefined) e.new_page = !!b.new_page;
+                if (b.undeveloped !== undefined) e.undeveloped = !!b.undeveloped;   // the diamond (SFM-245)
             }
             save(data); return first;
         },
@@ -231,6 +233,7 @@
                     if (crit !== null) e.criticality = crit;
                     if (col !== null) e.color = col;
                     if (b.gate !== undefined && e.kind !== 'basic') e.gate = b.gate;
+                    if (b.undeveloped !== undefined && e.kind === 'basic') e.undeveloped = !!b.undeveloped;
                     changed.push(e.id);
                 }
             }
@@ -305,7 +308,7 @@
     };
 
     // ---- layout (manual_fta.build_graph) -------------------------------------------------------
-    function symbol(e) { if (e.causes.length > 1) return e.gate; if (!e.causes.length) return e.kind === 'basic' ? 'basic' : 'triangle'; return 'none'; }
+    function symbol(e) { if (e.causes.length > 1) return e.gate; if (!e.causes.length) return e.kind === 'basic' ? (e.undeveloped ? 'undeveloped' : 'basic') : 'triangle'; return 'none'; }
     // compact display (SFM-200): the same blocks, neighbours 10 and rows 110 units apart (manual_fta.COMPACT_*)
     const COMPACT_H_GAP = 10 * UNIT, COMPACT_ROW_PITCH = 110 * UNIT;
     // compact stage 2 (SFM-201): branches packed row by row -- manual_fta._contour(), the same arithmetic
@@ -385,7 +388,7 @@
                 const n = e.causes.length;
                 row = { id: e.id, uid: e.uid || '', kind: parent ? (e.kind === 'intermediate' ? 'gate' : e.kind) : 'top',
                         title: e.title, description: e.description, label: e.label, criticality: e.criticality, color: e.color,
-                        type: e.kind === 'basic' ? '' : n > 1 ? e.gate.toUpperCase() : n === 1 ? 'single input' : 'not developed',
+                        type: e.kind === 'basic' ? (e.undeveloped ? 'undeveloped' : '') : n > 1 ? e.gate.toUpperCase() : n === 1 ? 'single input' : 'not developed',
                         inputs: e.causes.map(c => c.id), parents: [], trees: [], occurrences: 0,
                         page, page_number: (numbers[top.analysis] || {})[page] || 0, new_page: !!e.new_page,
                         analysis: top.analysis, analysis_name: names[top.analysis] || '', at: path };
@@ -655,7 +658,7 @@
             const nodeId = path ? `${path}/${seg(e.id)}` : seg(e.id);
             const transfer = e.new_page && row > 0;
             nodes.push({ data: { id: nodeId, type: 'manual_event', symbol: symbol(e), label: e.title, shared: (counts[e.id] || 0) > 1,
-                occurrences: counts[e.id] || 0, code: e.id, depth: row, kind: e.kind, gate: e.gate, top: topId,
+                occurrences: counts[e.id] || 0, code: e.id, depth: row, kind: e.kind, gate: e.gate, undeveloped: !!e.undeveloped, top: topId,
                 description: e.description, note: e.label, tag: e.criticality, tag_box: true, color: e.color,
                 fill: e.color ? COLORS[e.color] : '', tikz_fill: e.color ? TIKZ_COLORS[e.color] : '', causes: e.causes.length,
                 new_page: !!e.new_page, page_number: e.new_page ? (pageNo[e.id] || 0) : 0 }, position: { x, y: row * pitch } });
@@ -718,6 +721,7 @@
         if (e.criticality) a += ` criticality="${esc(e.criticality)}"`;
         if (e.color) a += ` color="${esc(e.color)}"`;
         if (e.new_page) a += ` newPage="true"`;
+        if (e.undeveloped && e.kind === 'basic') a += ` undeveloped="true"`;
         let s = `${pad}<event${a}>\n${pad}  <title>${esc(e.title)}</title>\n`;
         if (e.description) s += `${pad}  <description>${esc(e.description)}</description>\n`;
         for (const c of e.causes) s += eventXml(c, indent + 1);
@@ -783,7 +787,7 @@
                                         Page: g.new_page && !topIds.has(g.id) ? 'true' : 'false', Type: type }));
         }
         for (const e of events) rows.push(...row('PrimaryEvents', { Id: e.id, AsilEnabled: 'false', AsilRequirement: 'QM',
-                                                                    Description: e.title, EventType: 'Basic', Notes1: e.criticality }));
+                                                                    Description: e.title, EventType: e.undeveloped ? 'Undeveloped' : 'Basic', Notes1: e.criticality }));
         const head = ['<?xml version="1.0" standalone="yes"?>',
             `<!-- Fault trees exported by ${x(TOOL)} for Isograph Reliability Workbench (import with the template IntegrityWorkbench_FTA.rwb-impx). Not carried over: ${RWB_NOT_EXPORTED}. -->`,
             '<XMLExport>'];
@@ -796,6 +800,7 @@
             criticality: CRITICALITY_LEVELS.includes(el.getAttribute('criticality')) ? el.getAttribute('criticality') : '',
             color: (el.getAttribute('color') || '') in COLORS ? el.getAttribute('color') : '',
             new_page: el.getAttribute('newPage') === 'true', uid: el.getAttribute('uid') || '',
+            undeveloped: el.getAttribute('undeveloped') === 'true',
             causes: [...el.children].filter(c => c.tagName === 'event').map(parseEvent) });
     }
     function checkEvents(el, path, errors) {
@@ -853,10 +858,10 @@
         const eventXmlOf = (i, pad) => {
             const e = events[i], kind = text(e, 'EventType') || 'Basic';
             if (kind === 'House' || kind === 'Conditional') errors.push(`${eventIds[i]}: a ${kind.toLowerCase()} event changes the logic -- the Manual FTA has no such event.`);
-            else if (kind !== 'Basic') { if (!otherEvents.has(kind)) otherEvents.set(kind, new Set()); otherEvents.get(kind).add(eventIds[i]); }
+            else if (kind !== 'Basic' && kind !== 'Undeveloped') { if (!otherEvents.has(kind)) otherEvents.set(kind, new Set()); otherEvents.get(kind).add(eventIds[i]); }
             let c = crit(text(e, 'Notes1'));
             if (!c && text(e, 'AsilEnabled') === 'true') c = crit(text(e, 'AsilRequirement'));
-            return `${pad}<event id="${esc(eventIds[i])}" kind="basic" gate="or"${c ? ` criticality="${esc(c)}"` : ''}><title>${esc(oneLine(text(e, 'Description')))}</title></event>\n`;
+            return `${pad}<event id="${esc(eventIds[i])}" kind="basic" gate="or"${kind === 'Undeveloped' ? ' undeveloped="true"' : ''}${c ? ` criticality="${esc(c)}"` : ''}><title>${esc(oneLine(text(e, 'Description')))}</title></event>\n`;
         };
         const gateXmlOf = (i, stack, isTop, pad) => {
             const g = gates[i], gid = gateIds[i], kind = text(g, 'Type').toUpperCase(), ins = inputs.get(text(g, 'Id')) || [];

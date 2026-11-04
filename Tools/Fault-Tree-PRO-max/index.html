@@ -769,6 +769,10 @@ function eventMenuItems(node) {
         const other = d.kind === 'basic' ? 'intermediate' : 'basic';
         items.push({ label: `Make ${KIND_NAMES[other]}`, run: () => put({ kind: other }) });
     }
+    // an undeveloped event: the same basic event, drawn as a diamond (SFM-245)
+    if (d.kind === 'basic')
+        items.push(d.undeveloped ? { label: 'Make basic event (circle)', run: () => put({ undeveloped: false }) }
+                                 : { label: 'Make undeveloped event (diamond)', run: () => put({ undeveloped: true }) });
     if (d.id !== d.top) {
         items.push({ label: 'Move left', run: () => post('/move', { direction: 'left' }) });
         items.push({ label: 'Move right', run: () => post('/move', { direction: 'right' }) });
@@ -844,6 +848,10 @@ function bulkMenuItems() {
     if (nodes.some(n => n.data('kind') !== 'basic')) {
         items.push({ label: 'Make the gates AND gates', run: () => bulk({ gate: 'and' }) });
         items.push({ label: 'Make the gates OR gates', run: () => bulk({ gate: 'or' }) });
+    }
+    if (nodes.some(n => n.data('kind') === 'basic')) {
+        items.push({ label: 'Make the basic events undeveloped (diamond)', run: () => bulk({ undeveloped: true }) });
+        items.push({ label: 'Make the basic events basic (circle)', run: () => bulk({ undeveloped: false }) });
     }
     items.push({ label: 'Clear selection', run: clearPicks });
     items.push({ label: `Delete ${nodes.length} events…`, className: 'danger', run: () => {
@@ -1040,7 +1048,8 @@ const GRID_COLUMNS = {
         ['color', 'Colour', r => COLOR_NAMES[r.color] || ''], ['occurrences', 'Occurrences', r => r.occurrences, true],
         ['description', 'Description', r => r.description], ['analysis', 'Analysis', r => r.analysis_name]],
     events: [
-        ['id', 'ID', r => r.id], ['title', 'Title', r => r.title], ['parents', 'Below (parents)', r => idList(r.parents)],
+        ['id', 'ID', r => r.id], ['title', 'Title', r => r.title],
+        ['type', 'Type', r => r.type === 'undeveloped' ? 'undeveloped' : 'basic'], ['parents', 'Below (parents)', r => idList(r.parents)],
         ['trees', 'Tree (top event)', r => idList(r.trees)], ['page', 'Page', r => r.page_number ? String(r.page_number) : '', true],
         ['criticality', 'H category / ASIL', r => r.criticality], ['label', 'Label', r => r.label],
         ['color', 'Colour', r => COLOR_NAMES[r.color] || ''], ['occurrences', 'Occurrences', r => r.occurrences, true],
@@ -1624,7 +1633,7 @@ const TOUR = [
         <p>This tour explains every function on a small <b>example tree</b> (only shown &ndash; nothing is saved; your own
         trees come back afterwards). ${K('→')} / ${K('Enter')} next, ${K('←')} back, ${K('Esc')} ends.</p>` },
     { el: '#manual-fta-graph', title: 'The example', text: `<p>Both headlamps of a car go dark at night. The <b>top event</b>
-        is on top; below it, what has to happen for it to occur, down to the <b>basic events</b> (circles).</p>
+        is on top; below it, what has to happen for it to occur, down to the <b>basic events</b> (circles; a diamond: an <b>undeveloped event</b>, right-click switches).</p>
         <p>Each event is a box with its title, a symbol and its <b>ID</b> below (TP- top event, GT- gate, EV- basic event).</p>` },
     { nodes: tourNodes('TP-1'), title: 'Top event and AND gate', text: `<p>The top event uses an <b>AND</b> gate: it happens only
         when <b>both</b> headlamps are dark. The square next to the box is its <b>safety criticality</b> (here ASIL B);
