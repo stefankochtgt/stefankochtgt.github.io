@@ -17,7 +17,7 @@
     // compact display (SFM-200), as fta_tikz.py; cTagWidth / textWidth / TITLE_H / C_* come from fta_draw.js
     const COMPACT_BUS_SPAN = 8.0;
     const SIDE_Y = SYM_TOP - 2, SIDE_DX = 28.0, SIDE_TRI_H = 12.0, SIDE_TRI_HALF = 7.0;   // transfer-in triangle
-    const DIAMOND_HALF_W = 40;                                                              // undeveloped event (SFM-245)
+    const DIAMOND_HALF_W = 34;                                                              // undeveloped event (SFM-245)
     const SCALE = 0.0322, PT_PER_CM = 28.4528, VIEW_U = 1.5;
     const ADDED_FILL = 'yellow!35', FILL = 'blue!15', TITLE_CHARS = 64;
     const RAD_TO_DEG = 180 / Math.PI;

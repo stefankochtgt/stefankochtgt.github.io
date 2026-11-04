@@ -36,9 +36,10 @@ const GATE_PATHS = {
     transfer: `M${SYM_W / 2} ${TRI_TIP - SYM_TOP} L${SYM_W} ${SYM_H} H0 Z`,
 };
 const TRANSFER_TEXT_Y = (LABEL_TOP + LABEL_H + BLOCK_H) / 2 + 0.5;
-// Manual FTA: an undeveloped event (SFM-245) -- a diamond from the stub's end to the bottom of the block, wider than
-// the ID label so its side corners show beside it. fta_tikz.py / standalone/fta_tikz.js draw the same.
-const DIAMOND_HALF_W = 40;
+// Manual FTA: an undeveloped event (SFM-245) -- a diamond from the stub's end to the bottom of the block, its side
+// corners hidden behind the ID label (narrower than its 36 half-width; user, 2026-11-04: "the diamond tips shall not
+// appear"). fta_tikz.py / standalone/fta_tikz.js draw the same.
+const DIAMOND_HALF_W = 34;
 // A gate continued from an earlier page (Manual FTA, on top of its continuation page: data.page_start) gets a small
 // transfer-in triangle on the side, joined to the stub by a short line -- as Reliability Workbench draws it
 // (user, 2026-10-23, screenshot). fta_tikz.py / standalone/fta_tikz.js draw the same.
