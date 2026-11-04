@@ -109,7 +109,7 @@ button.danger, .btn.danger { background: #fff; color: var(--error); border-color
 .embedded #fta-graph { height: calc(100vh - 150px); }
 
 .content.wide { max-width: none; }
-.split-view { display: flex; height: calc(100vh - 150px); min-height: 420px; }
+.split-view { display: flex; height: calc(100vh - 92px - var(--topbar-h, 58px)); min-height: 420px; }
 .split-left { flex: 0 0 60%; min-width: 240px; display: flex; flex-direction: column; }
 .split-left .cy-graph { flex: 1; height: auto; min-height: 0; }
 .split-divider { flex: 0 0 8px; cursor: col-resize; background: var(--border); border-radius: 4px; margin: 0 6px; }
@@ -178,4 +178,5 @@ main.content.fill .fill-graph > .cy-graph { position: absolute; inset: 0; width:
 .topbar .brand-icon { width: 22px; height: 22px; }
 .topbar .brand-name { display: inline-flex; flex-direction: column; line-height: 1.05; white-space: nowrap; font-size: 13px; }
 .topbar .brand-name small { font-size: 8.5px; font-weight: 500; opacity: .8; letter-spacing: .02em; }
-/* keep the top bar at two rows at 1280 px: the views size themselves to 100vh minus a fixed bar height */
+/* Views that fill the window subtract the top bar's real height (--topbar-h, measured in base.html; 58 px = two
+   rows), so a menu that wraps to more rows shrinks them instead of pushing them below the window (SFM-236). */
