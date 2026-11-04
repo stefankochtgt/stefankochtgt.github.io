@@ -224,6 +224,10 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <a role="menuitem" data-wp-export id="export-xml" href="/fta-export/manual.xml" title="The trees of this analysis as XML (with the model identification) -- can be imported again">Export XML</a>
                 
                 <a role="menuitem" data-wp-export id="export-rwb" href="/fta-export/rwb/manual.xml" title="The trees of this analysis as Isograph Reliability Workbench XML -- import it in RWB with the import template IntegrityWorkbench_FTA.rwb-impx (descriptions and colours are not carried over)">Export Reliability Workbench XML</a>
+                                
+
+<a role="menuitem" id="rwb-import-template" href="rwb/IntegrityWorkbench_FTA.rwb-impx" download="IntegrityWorkbench_FTA.rwb-impx" title="The import template for Isograph Reliability Workbench / FaultTree+: in RWB, File &gt; Import, choose the XML exported here and this template -- it reads the Gates, PrimaryEvents and GateInputs tables">Download RWB import template (.rwb-impx)</a>
+<a role="menuitem" id="rwb-export-template" href="rwb/IntegrityWorkbench_FTA.rwb-expx" download="IntegrityWorkbench_FTA.rwb-expx" title="The export template for Isograph Reliability Workbench / FaultTree+: in RWB, File &gt; Export to XML with this template, then Import XML in the Manual FTA reads the fault tree">Download RWB export template (.rwb-expx)</a>
                 
                 <hr>
                 <button type="button" role="menuitem" id="import-xml" title="Import Manual FTA trees from an XML export, or a fault tree from an Isograph Reliability Workbench XML export: checked and shown first; a tree replaces the one with the same top event ID">Import XML…</button>

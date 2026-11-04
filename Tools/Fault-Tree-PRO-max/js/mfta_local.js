@@ -12,7 +12,10 @@
     const KINDS = ['intermediate', 'basic'];
     const GATES = ['or', 'and'];
     const ID_PREFIX = { top: 'TP', intermediate: 'GT', basic: 'EV' };
-    const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+    const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_.-]+)*$/;      // '/' between parts (SFM-244)
+    // an ID as one part of an occurrence path: its own '/' (and '%') escaped -- manual_fta.py :: _seg() / _unseg()
+    const seg = id => String(id).replace(/%/g, '%25').replace(/\//g, '%2F');
+    const unseg = s => s.replace(/%2F/g, '/').replace(/%25/g, '%');
     const CRITICALITY_LEVELS = ['H1', 'H2', 'H3', 'H3+', 'H4', 'H4+', 'ANY', 'QM', 'ASIL A', 'ASIL B', 'ASIL C', 'ASIL D'];
     const COLORS = { yellow: '#FDE68A', green: '#BBF7D0', red: '#FECACA', orange: '#FED7AA', grey: '#E5E7EB', purple: '#E9D5FF' };
     const TIKZ_COLORS = { yellow: 'yellow!35', green: 'green!25', red: 'red!25', orange: 'orange!30', grey: 'gray!20', purple: 'violet!20' };
@@ -86,7 +89,7 @@
         const found = [];
         (function search(events, parent, path) {
             for (const e of events) {
-                const here = path ? `${path}/${e.id}` : e.id;
+                const here = path ? `${path}/${seg(e.id)}` : seg(e.id);
                 if (e.id === id) found.push([e, parent, here]);
                 search(e.causes, e, here);
             }
@@ -185,7 +188,7 @@
             if (b.scope === 'this' && newIdV === id) newIdV = null;
             const first = tg[0][0];
             if (newIdV !== null && newIdV !== first.id) {
-                if (!ID_PATTERN.test(newIdV)) throw new FtaError(`'${newIdV}' is not a valid ID -- use letters, digits, '-', '_' and '.' only (no spaces).`);
+                if (!ID_PATTERN.test(newIdV)) throw new FtaError(`'${newIdV}' is not a valid ID -- use letters, digits, '-', '_', '.' and '/' between parts (e.g. ECU/PWR-1; no spaces, not at the start or end).`);
                 if ([...walk(data.tops)].some(e => e.id === newIdV)) throw new FtaError(`The ID ${newIdV} is already used by another event.`);
             } else newIdV = null;
             if (b.kind !== undefined) {
@@ -310,7 +313,7 @@
     function contour(e, path, root, gap) {
         const half = LEAF_W / 2, right = reach(e, gap, true);            // its label included (SFM-212)
         if (!e.causes.length || (e.new_page && !root)) return [{ [path]: 0 }, [[-half, right]], []];
-        const kids = e.causes.map(c => contour(c, `${path}/${c.id}`, false, gap));
+        const kids = e.causes.map(c => contour(c, `${path}/${seg(c.id)}`, false, gap));
         const offsets = [], rowsU = [], bandsU = [];
         for (const [, rows, bands] of kids) {
             let need = null;
@@ -355,17 +358,17 @@
         // parent: the page the gate's transfer triangle is on (null for page 1 and an own-page tree, SFM-193)
         function visit(e, path, owner) {
             for (const c of e.causes) {
-                const here = `${path}/${c.id}`;
+                const here = `${path}/${seg(c.id)}`;
                 if (c.new_page && !seen.has(c.id)) { seen.add(c.id); result.push({ id: c.id, number: result.length + 1, code: c.id, title: c.title, at: here, parent: owner }); }
                 visit(c, here, c.new_page ? c.id : owner);
             }
         }
-        for (const t of loose) visit(t, t.id, '');
+        for (const t of loose) visit(t, seg(t.id), '');
         for (const t of tops) {
             if (!t.new_page || seen.has(t.id)) continue;
             seen.add(t.id);
             result.push({ id: t.id, number: result.length + 1, code: t.id, title: t.title, at: t.id, parent: null });
-            visit(t, t.id, t.id);
+            visit(t, seg(t.id), t.id);
         }
         return result;
     }
@@ -391,9 +394,9 @@
             row.occurrences += 1;
             if (parent && !row.parents.includes(parent.id)) row.parents.push(parent.id);
             if (!row.trees.includes(top.id)) row.trees.push(top.id);
-            for (const c of e.causes) walk(c, e, `${path}/${c.id}`, top, page);
+            for (const c of e.causes) walk(c, e, `${path}/${seg(c.id)}`, top, page);
         }
-        for (const t of data.tops) if (!analysis || t.analysis === analysis) walk(t, null, t.id, t, t.new_page ? t.id : '');
+        for (const t of data.tops) if (!analysis || t.analysis === analysis) walk(t, null, seg(t.id), t, t.new_page ? t.id : '');
         const all = [...rows.values()];
         return { gates: all.filter(r => r.kind !== 'basic'), events: all.filter(r => r.kind === 'basic') };
     }
@@ -649,7 +652,7 @@
         const pageList = pagesOf(tops), pageNo = Object.fromEntries(pageList.map(p => [p.id, p.number]));
         const start = page ? pageList.find(p => p.id === page) : null;
         function place(e, x, row, topId, path) {
-            const nodeId = path ? `${path}/${e.id}` : e.id;
+            const nodeId = path ? `${path}/${seg(e.id)}` : seg(e.id);
             const transfer = e.new_page && row > 0;
             nodes.push({ data: { id: nodeId, type: 'manual_event', symbol: symbol(e), label: e.title, shared: (counts[e.id] || 0) > 1,
                 occurrences: counts[e.id] || 0, code: e.id, depth: row, kind: e.kind, gate: e.gate, top: topId,
@@ -661,7 +664,7 @@
             const ext = e.causes.map(c => extent(c, false, gap, !!stage));
             let cursor = x - span(ext, gap) / 2;
             e.causes.forEach((c, i) => {
-                const child = `${nodeId}/${c.id}`;
+                const child = `${nodeId}/${seg(c.id)}`;
                 edges.push({ data: { id: `mfta-${child}`, source: nodeId, target: child, input_index: i, input_count: e.causes.length } });
                 place(c, stage === 2 ? tight[child] : cursor + ext[i][0], row + 1, topId, nodeId);
                 cursor += ext[i][0] + ext[i][1] + gap;
@@ -671,11 +674,11 @@
             const [e, , path] = resolve(tops, start.code, start.at);
             const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
             if (stage === 2) {
-                const [pos, rows] = contour(e, parent ? `${parent}/${e.id}` : e.id, true, gap);
+                const [pos, rows] = contour(e, parent ? `${parent}/${seg(e.id)}` : seg(e.id), true, gap);
                 const base = -Math.min(...rows.map(r => r[0]));
                 for (const [key, x] of Object.entries(pos)) tight[key] = base + x;
-                place(e, base, 0, path.split('/')[0], parent);
-            } else place(e, extent(e, true, gap, !!stage)[0], 0, path.split('/')[0], parent);
+                place(e, base, 0, unseg(path.split('/')[0]), parent);
+            } else place(e, extent(e, true, gap, !!stage)[0], 0, unseg(path.split('/')[0]), parent);
             if (parent) {                                  // continued from an earlier page: the side triangle, "…" (SFM-193)
                 const back = start.parent || '';
                 Object.assign(nodes[0].data, { page_start: true, from_page_id: back, from_page: pageNo[back] || 0 });
@@ -686,7 +689,7 @@
         const placedRows = [];
         for (const t of tops.filter(x => !x.new_page)) {
             if (stage === 2) {                             // trees side by side, also packed row by row
-                const [pos, rows] = contour(t, t.id, true, gap);
+                const [pos, rows] = contour(t, seg(t.id), true, gap);
                 let base = -Math.min(...rows.map(r => r[0]));
                 if (placedRows.length) {
                     base = -Infinity;
@@ -797,7 +800,7 @@
     }
     function checkEvents(el, path, errors) {
         const id = el.getAttribute('id') || '', where = `${path}/${id || '?'}`;
-        if (!ID_PATTERN.test(id)) errors.push(`${where}: '${id}' is not a valid ID (letters, digits, - _ . only).`);
+        if (!ID_PATTERN.test(id)) errors.push(`${where}: '${id}' is not a valid ID (letters, digits, - _ . and / between parts only).`);
         if (!KINDS.includes(el.getAttribute('kind') || 'intermediate')) errors.push(`${where}: unknown kind '${el.getAttribute('kind')}'.`);
         if (!GATES.includes(el.getAttribute('gate') || 'or')) errors.push(`${where}: unknown gate '${el.getAttribute('gate')}'.`);
         if (el.getAttribute('criticality') && !CRITICALITY_LEVELS.includes(el.getAttribute('criticality'))) errors.push(`${where}: unknown criticality '${el.getAttribute('criticality')}'.`);
@@ -818,7 +821,7 @@
         const transfers = new Set(), inhibits = new Set(), otherEvents = new Map();   // insertion-ordered, once per ID
         const listed = (ids, limit = 10) => ids.slice(0, limit).join(', ') + (ids.length > limit ? ` ... and ${ids.length - limit} more` : '');
         const cleanId = (raw, row) => {
-            let neu = raw.replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^[_.-]+|[_.-]+$/g, '') || row;
+            let neu = raw.replace(/[^A-Za-z0-9_.\/-]+/g, '_').replace(/\/{2,}/g, '/').replace(/^[_.\/-]+|[_.\/-]+$/g, '') || row;
             const base = neu; let n = 2;
             while (used.has(neu)) neu = `${base}_${n++}`;
             used.add(neu);
@@ -884,7 +887,7 @@
         if (gates.length && gates.every((g, i) => usedGates.has(i))) errors.push('Every gate is another gate\'s input -- no top event (the gates loop).');
         const nTops = gates.filter((g, i) => !usedGates.has(i)).length;
         if (nTops) notes.push(`${nTops} top event(s), each a fault tree page of its own.`);
-        if (renamed.length) notes.push(`${renamed.length} ID(s) made valid (letters, digits, - _ . only, one ID per event): ${listed(renamed, 5)}.`);
+        if (renamed.length) notes.push(`${renamed.length} ID(s) made valid (letters, digits, - _ . and / only, one ID per event): ${listed(renamed, 5)}.`);
         if (inhibits.size) notes.push(`${inhibits.size} INHIBIT gate(s) imported as AND gates labelled INHIBIT (RWB evaluates an INHIBIT gate as AND of its inputs): ${listed([...inhibits])}.`);
         if (transfers.size) notes.push(`${transfers.size} transfer gate(s) without inputs here, imported as gates with nothing below them (drawn as a triangle): ${listed([...transfers])}.`);
         for (const [kind, ids] of otherEvents) notes.push(`${ids.size} ${kind} event(s) imported as basic events: ${listed([...ids])}.`);
