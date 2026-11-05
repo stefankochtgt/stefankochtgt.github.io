@@ -1,8 +1,8 @@
-// Drawing PRO max (SFM-218): the standalone's store -- the document (the same XML as the workbench's
-// model/drawings.xml and Export XML) is kept in this browser's localStorage. No model here, so no links.
-window.DRAWING_STORE = {
-    key: 'drawingProMax',
-    models: false,
+// Functional Chain (SFM-217): the standalone's store -- the document (the same XML as the
+// workbench's model/manual_chain.xml and Export XML) is kept in this browser's localStorage.
+// app/static/js/manual_chain.js uses window.CHAIN_STORE instead of the workbench's /api/manual-chain.
+window.CHAIN_STORE = {
+    key: 'functionalChainProMax',
     async load() {
         try { return localStorage.getItem(this.key); } catch (e) { return null; }
     },

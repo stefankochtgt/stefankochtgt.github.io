@@ -1,4 +1,4 @@
-/* Drawing tab (SFM-218) -- the same page is the standalone Drawing PRO max */
+/* Drawing tab (SFM-218) -- the same page is the standalone Drawing */
 .app-heading { display: flex; align-items: center; gap: 8px; }
 .app-heading img { width: 1.15em; height: 1.15em; }
 .app-heading .pro { font-size: .62em; font-weight: 700; letter-spacing: .02em; color: #3c5486; align-self: flex-end; margin-bottom: .2em; }

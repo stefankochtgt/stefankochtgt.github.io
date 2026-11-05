@@ -1,4 +1,4 @@
-// The fault tree as a TikZ picture, in the browser (standalone Fault Tree PRO max, SFM-180). A line-by-line port
+// The fault tree as a TikZ picture, in the browser (standalone Fault Tree, SFM-180). A line-by-line port
 // of app/services/fta_tikz.py :: picture() and its helpers -- the same geometry, the same number formatting --
 // so the standalone's LaTeX export is identical to the app's; tests/browser/test_browser_standalone_fta.py
 // compares the two on the same graph. Keep them in step.

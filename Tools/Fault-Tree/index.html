@@ -1,0 +1,2248 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fault Tree — Integrity Workbench</title>
+    <meta name="description" content="Draw fault trees in the browser: top events, AND / OR gates, basic events, safety criticality (H categories, ASIL), XML and JPG export. Free, no login, your data stays in your browser.">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="theme-color" content="#3c5486">
+    <link rel="stylesheet" href="css/style.css">
+    <script>window.FTA_STANDALONE = true;</script>
+    <script src="js/version.js"></script>
+    <script src="js/fta_tikz.js"></script>
+    <script src="js/mfta_local.js"></script>
+    <style>
+    .standalone-note { flex: none; font-size: 11px; color: var(--muted, #6b7280); margin-top: 4px; }
+    .standalone-note a { color: inherit; }
+    #install-app { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+    #install-app[hidden] { display: none; }
+    #new-version { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+    #new-version[hidden] { display: none; }
+    #about-dialog table { border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+    #about-dialog td { padding: 3px 12px 3px 0; vertical-align: top; }
+    #about-dialog td:first-child { color: var(--muted, #6b7280); white-space: nowrap; }
+    #about-dialog .ok { color: #166534; } #about-dialog .warn { color: #9a3412; }
+    </style>
+    
+<script src="vendor/cytoscape.min.js"></script>
+<script src="js/fta_draw.js"></script>
+<script src="js/graph_export.js"></script>
+<style>
+/* right-click menu: a row of small buttons (H categories, colour swatches) */
+.context-menu-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 4px 10px; max-width: 300px; }
+.context-menu-row span { font-size: 11px; color: var(--muted); width: 100%; }
+.context-menu-row .mini { min-width: 26px; height: 22px; padding: 0 5px; font-size: 11px; border: 1px solid #cbd5e1;
+    background: #fff; color: #111; border-radius: 4px; cursor: pointer; }
+.context-menu-row .mini.active { outline: 2px solid #2563eb; outline-offset: 1px; font-weight: 600; }
+.context-menu-row .mini:hover { border-color: #2563eb; }
+#pick-badge[hidden] { display: none; }
+/* page heading: the product (user, 2026-10-21) */
+.app-heading { display: flex; align-items: center; gap: 8px; }
+.app-heading img { width: 1.15em; height: 1.15em; }
+.app-heading .pro { font-size: .62em; font-weight: 700; letter-spacing: .02em; color: #3c5486; align-self: flex-end; margin-bottom: .2em; }
+/* menu bar (SFM-176) */
+.menubar { display: flex; gap: 2px; align-items: center; padding: 2px 4px; margin: -4px -4px 6px; border-bottom: 1px solid var(--border, #e5e7eb); }
+.menubar .menu { position: relative; }
+.menubar .menu-title { background: none; border: 1px solid transparent; color: var(--text, #111); padding: 3px 10px; font-size: 13px; border-radius: 4px; cursor: default; }
+.menubar .menu-title:hover, .menubar.open .menu-title:focus { background: #eef2ff; border-color: #c7d2fe; }
+.menubar .menu-list { position: absolute; top: 100%; left: 0; z-index: 40; min-width: 210px; padding: 4px 0; background: #fff;
+    border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 6px 18px rgba(15, 23, 42, .16); display: flex; flex-direction: column; }
+.menubar .menu-list[hidden] { display: none; }
+.menubar .menu-list button, .menubar .menu-list a { text-align: left; background: none; border: 0; border-radius: 0; color: var(--text, #111);
+    padding: 6px 14px; font-size: 13px; text-decoration: none; cursor: pointer; }
+.menubar .menu-list button:hover, .menubar .menu-list a:hover { background: #eef2ff; }
+.menubar .menu-list button:disabled { color: #9ca3af; background: none; cursor: default; }
+.menubar .menu-list .danger { color: #b91c1c; }
+.menubar .menu-list hr { margin: 4px 0; border: 0; border-top: 1px solid #e5e7eb; }
+.fta-toolbar { align-items: center; }
+/* the tabs and the icons sit together on the left; only the hint / badge / empty-note blocks take the rest (user, 2026-10-26) */
+.fta-toolbar > .view-tabs, .fta-toolbar > .icon-bar { flex: none; }
+.help-dialog { max-width: 760px; }
+.menubar .menu-list .check { display: inline-block; width: 1.2em; }
+/* guided hints (SFM-211): a bubble below the icons to click next; only its buttons take clicks */
+#guide-pop { position: fixed; z-index: 60; width: 310px; max-width: calc(100vw - 16px); box-sizing: border-box; background: #1e3a8a;
+    color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.45;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, .3); pointer-events: none; }
+#guide-pop[hidden] { display: none; }
+#guide-pop::before { content: ""; position: absolute; top: -7px; left: calc(var(--arrow, 50%) - 7px);
+    border-style: solid; border-width: 0 7px 7px; border-color: transparent transparent #1e3a8a; }
+#guide-pop .guide-nav { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+#guide-pop button { pointer-events: auto; font-size: 12px; padding: 2px 10px; }
+#guide-pop button.secondary { background: transparent; color: #dbeafe; border-color: #93c5fd; }
+.guide-target { animation: guide-pulse 1.4s ease-in-out infinite; }
+@keyframes guide-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } 50% { box-shadow: 0 0 0 4px rgba(245, 158, 11, .8); } }
+.page-picker { display: flex; gap: 4px; align-items: center; }
+.page-picker[hidden] { display: none; }
+#page-select { max-width: 260px; min-width: 120px; flex: none; }
+/* explorer (SFM-194): analyses and their fault tree pages as a tree left of the diagram, like Reliability Workbench */
+#fta-explorer { position: absolute; left: 0; top: 0; bottom: 0; width: 240px; box-sizing: border-box; overflow: auto;
+    border: 1px solid var(--border, #e5e7eb); border-radius: 6px; background: #fff; padding: 6px 2px; font-size: 13px; }
+#fta-explorer[hidden] { display: none; }
+main.content.fill .fill-graph.with-explorer > .cy-graph { left: 248px; }
+.xp ul { list-style: none; margin: 0; padding-left: 15px; }
+.xp > ul { padding-left: 0; }
+.xp-row { display: flex; align-items: center; gap: 4px; padding: 1px 6px 1px 2px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
+.xp-row:hover { background: #eef2ff; }
+.xp-row.current { background: #dbeafe; outline: 1px dotted #2563eb; }
+.xp-row:focus-visible { outline: 2px solid #2563eb; }
+.xp-tog { width: 9px; height: 9px; border: 1px solid #9ca3af; background: #fff; flex: none; position: relative; }
+.xp-tog::before { content: ""; position: absolute; left: 1px; right: 1px; top: 4px; border-top: 1px solid #374151; }
+.xp-tog.closed::after { content: ""; position: absolute; top: 1px; bottom: 1px; left: 4px; border-left: 1px solid #374151; }
+.xp-tog.none { visibility: hidden; }
+.xp-ico { width: 17px; height: 15px; flex: none; }
+.icon-btn.active { background: #dbeafe; border-color: #93c5fd; }
+#toggle-compact { position: relative; }
+.stage-badge { position: absolute; right: 1px; bottom: 0; font-size: 9px; font-weight: 700; line-height: 1; color: #1e3a8a; }
+.stage-badge[hidden] { display: none; }
+/* Diagram / Grid (SFM-195) */
+.view-tabs { display: flex; gap: 2px; margin-right: 6px; }
+.view-tab { display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 13px; background: #f8fafc; color: #111;
+    border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; }
+.view-tab svg { width: 16px; height: 16px; }
+.view-tab.active { background: #fff; border-color: #2563eb; box-shadow: inset 0 -2px 0 #2563eb; font-weight: 600; }
+#fta-grid { position: absolute; inset: 0; display: flex; flex-direction: column; box-sizing: border-box; background: #fff;
+    border: 1px solid var(--border, #e5e7eb); border-radius: 6px; }
+#fta-grid[hidden] { display: none; }
+main.content.fill .fill-graph.with-explorer > #fta-grid { left: 248px; }
+.grid-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid #e5e7eb; }
+.grid-bar select, .grid-bar input { width: auto; margin: 0; padding: 3px 6px; font-size: 13px; }
+#grid-search { min-width: 200px; }
+#grid-count { color: var(--muted, #6b7280); font-size: 12px; margin-left: auto; }
+.grid-scroll { flex: 1; overflow: auto; }
+.grid-table { border-collapse: separate; border-spacing: 0; font-size: 12px; width: max-content; min-width: 100%; }
+.grid-table th, .grid-table td { border-right: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; padding: 3px 6px; text-align: left;
+    white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.grid-table thead th { position: sticky; top: 0; z-index: 2; background: #f1f5f9; font-weight: 600; cursor: pointer; user-select: none; }
+.grid-table thead tr.grid-filters th { top: 25px; background: #f8fafc; cursor: default; padding: 2px 3px; }
+.grid-table thead tr.grid-filters input { width: 100%; min-width: 60px; box-sizing: border-box; margin: 0; padding: 2px 4px; font-size: 12px; }
+.grid-table tbody tr { cursor: default; }
+.grid-table tbody tr:hover { background: #eef2ff; }
+.grid-table tbody tr.selected { background: #dbeafe; }
+.grid-table td.num { text-align: right; }
+/* version control (SFM-197) */
+#save-version.dirty { border-color: #f59e0b; box-shadow: inset 0 0 0 1px #f59e0b; }
+#save-version.dirty::after { content: ""; position: absolute; top: 2px; right: 2px; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; }
+#save-version { position: relative; }
+.save-status { font-size: 12px; color: #166534; min-width: 0; white-space: nowrap; }
+#fta-versions { position: absolute; inset: 0; display: flex; flex-direction: column; box-sizing: border-box; background: #fff;
+    border: 1px solid var(--border, #e5e7eb); border-radius: 6px; }
+#fta-versions[hidden] { display: none; }
+main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
+#versions-state { font-size: 13px; }
+#versions-state.dirty { color: #92400e; font-weight: 600; }
+.versions-table td { vertical-align: top; }
+.versions-table td.changes { white-space: normal; max-width: 720px; }
+.versions-table ul { margin: 4px 0 0; padding-left: 18px; }
+.versions-table li { margin: 1px 0; }
+/* the selected event (SFM-185): red with a dashed frame, like a selected file; renamed in place */
+.rename-box { position: absolute; z-index: 25; box-sizing: border-box; resize: none; overflow: hidden; margin: 0;
+    padding: 2px; border: 1px solid #2563eb; outline: 2px solid #93c5fd; background: #fff; color: #000;
+    font-family: Arial, Helvetica, sans-serif; text-align: center; line-height: 1.15; }
+.context-menu-item .check { display: inline-block; width: 1.2em; }
+.rename-box.rename-id { font-family: Arial, Helvetica, sans-serif; padding: 0 2px; }
+/* phones and narrow windows (SFM-183): everything wraps inside the screen, nothing makes the page wider */
+.fta-toolbar { flex-wrap: wrap; row-gap: 6px; }
+@media (max-width: 760px) {
+    html, body { overflow-x: hidden; }
+    main.content.fill { padding-left: 6px; padding-right: 6px; }
+    .app-heading { font-size: 16px !important; flex-wrap: wrap; row-gap: 0; }
+    .menubar .menu-title { padding: 3px 7px; }
+    #analysis-select { min-width: 0 !important; width: 44vw; }
+    #fta-explorer { width: 70vw; z-index: 20; box-shadow: 0 6px 18px rgba(15, 23, 42, .16); }   /* over the diagram */
+    main.content.fill .fill-graph.with-explorer > .cy-graph { left: 0; }
+    main.content.fill .fill-graph.with-explorer > #fta-grid { left: 0; }
+    main.content.fill .fill-graph.with-explorer > #fta-versions { left: 0; }
+    .view-tab { padding: 3px 7px; }
+    .icon-sep { display: none; }
+    .help-table td:first-child { white-space: normal; }
+}
+/* guided tour (SFM-178) */
+.tour-btn { font-size: 12px; font-weight: 600; padding: 0 9px; color: #1e3a8a; }
+#tour-block { position: fixed; inset: 0; z-index: 999; background: transparent; }
+#tour-block[hidden] { display: none; }
+#tour-spot { position: fixed; z-index: 1000; border-radius: 6px; box-shadow: 0 0 0 9999px rgba(15, 23, 42, .45);
+    outline: 2px solid #f59e0b; pointer-events: none; transition: all .18s ease; }
+#tour-pop { position: fixed; z-index: 1001; width: 340px; max-width: calc(100vw - 32px); background: #fff; color: #111;
+    border-radius: 8px; box-shadow: 0 10px 30px rgba(15, 23, 42, .3); padding: 12px 14px; font-size: 13px; line-height: 1.45; }
+#tour-pop h4 { margin: 0 0 6px; font-size: 14px; color: #1e3a8a; }
+#tour-pop .tour-text p { margin: 0 0 6px; }
+#tour-pop kbd { font-size: 11px; padding: 0 4px; border: 1px solid #cbd5e1; border-radius: 3px; background: #f8fafc; }
+#tour-pop .tour-nav { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+#tour-pop .tour-step { color: var(--muted, #6b7280); font-size: 12px; margin-right: auto; }
+#tour-pop table { border-collapse: collapse; width: 100%; font-size: 12px; }
+#tour-pop td { padding: 2px 4px; vertical-align: top; }
+#tour-pop td:first-child { white-space: nowrap; }
+.help-dialog .help-intro { font-size: 13px; color: var(--muted); }
+.help-table { border-collapse: collapse; font-size: 13px; width: 100%; }
+.help-table th { text-align: left; padding: 8px 6px 3px; color: #1e3a8a; border-bottom: 1px solid #e5e7eb; }
+.help-table td { padding: 3px 6px; vertical-align: top; }
+.help-table td:first-child { white-space: nowrap; color: #374151; width: 1%; padding-right: 14px; }
+.help-table kbd { font-size: 11px; padding: 0 4px; border: 1px solid #cbd5e1; border-radius: 3px; background: #f8fafc; }
+/* toolbar icons (SFM-174) and the search bar */
+.icon-bar { display: flex; gap: 3px; align-items: center; }
+.icon-btn { width: 34px; height: 30px; padding: 3px 4px; display: inline-flex; align-items: center; justify-content: center; }
+.icon-btn svg { width: 26px; height: 22px; overflow: visible; }
+.icon-btn:not(.secondary) svg { filter: drop-shadow(0 0 1px #fff); }     /* an add mode that is on */
+.icon-sep { width: 1px; height: 22px; background: var(--border, #d1d5db); margin: 0 4px; }
+.search-bar { display: flex; gap: 4px; align-items: center; padding: 2px 6px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; }
+.search-bar[hidden] { display: none; }
+.search-bar input { width: 260px; font-size: 13px; padding: 3px 6px; }
+.search-bar #search-what { font-size: 12px; font-weight: 600; color: #92400e; white-space: nowrap; }
+.search-count { font-size: 12px; color: var(--muted); min-width: 70px; }          /* .badge's display would otherwise win over [hidden] */
+</style>
+
+</head>
+<body>
+    <main class="content fill">
+        
+<h1 class="app-heading"><img src="favicon.svg" alt="">Integrity Workbench <span class="pro">&ndash; Fault Tree</span></h1>
+
+<div class="panel fill-panel">
+    <!-- menu bar (SFM-176): File, Import / Export, Help -->
+    <nav class="menubar" id="menubar" aria-label="Manual FTA menu">
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">File</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="menu-save" title="Save a new revision with its changes and time (Version control)">Save (new revision)&nbsp;&nbsp;Ctrl+S</button>
+                <hr>
+                <button type="button" role="menuitem" id="analysis-new" title="A new, empty analysis">New analysis…</button>
+                <button type="button" role="menuitem" id="analysis-rename" title="Rename this analysis">Rename analysis…</button>
+                <button type="button" role="menuitem" id="analysis-copy" title="A copy of this analysis with all its trees (the copies get new IDs)">Duplicate analysis</button>
+                <hr>
+                <button type="button" role="menuitem" id="analysis-delete" class="danger" title="Delete this analysis with all its trees">Delete analysis…</button>
+            </div>
+        </div>
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">Import / Export</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="export-jpg" title="The whole diagram as a high-resolution JPG image, with the model revision in light grey above each top event">Export JPG</button>
+                <a role="menuitem" data-wp-export id="export-tex" href="/fta-export/manual.tex" title="The trees of this analysis as a LaTeX document: each tree a TikZ picture you can copy into your own document">Export LaTeX</a>
+                <a role="menuitem" data-wp-export id="export-pdf" hidden href="/fta-export/manual.pdf" target="_blank" title="The trees of this analysis as PDF, one per page, with the model identification (needs pdflatex)">Export PDF</a>
+                <a role="menuitem" data-wp-export id="export-xml" href="/fta-export/manual.xml" title="The trees of this analysis as XML (with the model identification) -- can be imported again">Export XML</a>
+                
+                <a role="menuitem" data-wp-export id="export-rwb" href="/fta-export/rwb/manual.xml" title="The trees of this analysis as Isograph Reliability Workbench XML -- import it in RWB with the import template IntegrityWorkbench_FTA.rwb-impx (descriptions and colours are not carried over)">Export Reliability Workbench XML</a>
+                                
+
+<a role="menuitem" id="rwb-import-template" href="rwb/IntegrityWorkbench_FTA.rwb-impx" download="IntegrityWorkbench_FTA.rwb-impx" title="The import template for Isograph Reliability Workbench / FaultTree+: in RWB, File &gt; Import, choose the XML exported here and this template -- it reads the Gates, PrimaryEvents and GateInputs tables">Download RWB import template (.rwb-impx)</a>
+<a role="menuitem" id="rwb-export-template" href="rwb/IntegrityWorkbench_FTA.rwb-expx" download="IntegrityWorkbench_FTA.rwb-expx" title="The export template for Isograph Reliability Workbench / FaultTree+: in RWB, File &gt; Export to XML with this template, then Import XML in the Manual FTA reads the fault tree">Download RWB export template (.rwb-expx)</a>
+                
+                <hr>
+                <button type="button" role="menuitem" id="import-xml" title="Import Manual FTA trees from an XML export, or a fault tree from an Isograph Reliability Workbench XML export: checked and shown first; a tree replaces the one with the same top event ID">Import XML…</button>
+            </div>
+        </div>
+        <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">Help</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="help-tour" title="A step-by-step tour of every function and shortcut">Guided tour</button>
+                <button type="button" role="menuitem" id="help-tricks">Keyboard and mouse…</button>
+                <hr>
+                <button type="button" role="menuitemcheckbox" id="help-guide" aria-checked="true" title="Hints for the first steps: with an empty page it points at the new top event icon, with only a top event at the gate / basic event icons">
+                    <span class="check"></span>Guided hints</button>
+            </div>
+        </div>
+        <input type="file" id="import-xml-file" accept=".xml,application/xml,text/xml" hidden>
+    </nav>
+
+    <div class="filters fta-toolbar">
+        <div id="analysis-picker" hidden style="display:none; gap:4px; align-items:center;" title="Separate Manual FTAs in this model: each analysis is its own set of trees">
+            <label for="analysis-select" style="margin:0;">Analysis</label>
+            <select id="analysis-select" style="min-width:180px;"></select>
+        </div>
+        <div id="page-picker" class="page-picker" hidden title="Pages of this analysis: a branch marked &quot;Continue on a new page&quot; (right-click a gate) continues on a page of its own">
+            <label for="page-select" style="margin:0;">Page</label>
+            <select id="page-select"></select>
+        </div>
+        <div class="view-tabs" role="tablist" aria-label="View">
+            <button type="button" class="view-tab active" id="view-diagram" role="tab" aria-selected="true" title="The fault tree diagram">
+                <svg viewBox="0 0 16 16"><path d="M2 14 L3 10.5 L11 2.5 L13.5 5 L5.5 13 Z" fill="#fde68a" stroke="#b45309"/><path d="M2 14 L3 10.5 L5.5 13 Z" fill="#374151"/></svg>Diagram</button>
+            <button type="button" class="view-tab" id="view-grid" role="tab" aria-selected="false" title="All gates or all basic events as a table, with filters">
+                <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" fill="#fff" stroke="#3a5ca8"/><path d="M1.5 6 H14.5 M1.5 9.5 H14.5 M6 2.5 V13.5 M10.5 2.5 V13.5" stroke="#3a5ca8"/><rect x="1.5" y="2.5" width="13" height="3.5" fill="#dbeafe" stroke="#3a5ca8"/></svg>Grid</button>
+            <button type="button" class="view-tab" id="view-versions" role="tab" aria-selected="false" title="Saved revisions: what changed and when; restore one">
+                <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="#fff" stroke="#3a5ca8" stroke-width="1.2"/><path d="M8 4.2 V8 L10.8 9.6" fill="none" stroke="#3a5ca8" stroke-width="1.4" stroke-linecap="round"/></svg>Version control</button>
+        </div>
+        <div class="icon-bar">
+            <!-- SFM-197: Save = a new revision (Version control); marked while there are unsaved changes -->
+            <button type="button" class="secondary icon-btn" id="save-version" title="Save a new revision (Ctrl+S)" aria-label="Save">
+                <svg viewBox="0 0 26 22"><use href="#ico-save"/></svg></button>
+            <span id="save-status" class="save-status" aria-live="polite"></span>
+            <span class="icon-sep"></span>
+            <!-- SFM-194: the explorer tree of analyses and fault tree pages, left of the diagram (like RWB's) -->
+            <button type="button" class="secondary icon-btn" id="toggle-explorer" title="Show / hide the fault tree pages (explorer)" aria-label="Fault tree pages" aria-pressed="false">
+                <svg viewBox="0 0 26 22"><use href="#ico-explorer"/></svg></button>
+            <!-- SFM-193: up to the page this one continues from / down to a page continued from here -->
+            <button type="button" class="secondary icon-btn" id="page-up" title="Page above -- the page this one continues from" aria-label="Page above">
+                <svg viewBox="0 0 26 22"><use href="#ico-page-up"/></svg></button>
+            <button type="button" class="secondary icon-btn" id="page-down" title="Page below -- the page of the selected transfer triangle, else the first page continued from here" aria-label="Page below">
+                <svg viewBox="0 0 26 22"><use href="#ico-page-down"/></svg></button>
+            <span class="icon-sep"></span>
+            <!-- own icons in the style of a classic FTA tool's toolbar (SFM-174); the arrow = select: ends adding, like Esc (SFM-211) -->
+            <button type="button" class="secondary icon-btn active" id="select-mode" title="Select (Esc) -- stop adding gates / basic events and select events again" aria-label="Select" aria-pressed="true">
+                <svg viewBox="0 0 26 22"><use href="#ico-select"/></svg></button>
+            <button type="button" class="secondary icon-btn" id="add-top" title="New top event" aria-label="New top event">
+                <svg viewBox="0 0 26 22"><use href="#ico-top"/></svg></button>
+            <button type="button" class="secondary icon-btn" id="add-gate" title="New gate -- then click a gate to add it below (Esc ends)" aria-label="New gate">
+                <svg viewBox="0 0 26 22"><use href="#ico-gate"/></svg></button>
+            <button type="button" class="secondary icon-btn" id="add-basic" title="New basic event -- then click a gate to add it below (Esc ends)" aria-label="New basic event">
+                <svg viewBox="0 0 26 22"><use href="#ico-basic"/></svg></button>
+            <span class="icon-sep"></span>
+            <!-- SFM-200: compact display -- the same blocks closer together, ASIL / H square in the box (the label stays outside, SFM-212) -->
+            <button type="button" class="secondary icon-btn" id="toggle-compact" title="Compact display: the gates and events closer together, the ASIL / H square inside the box" aria-label="Compact display" aria-pressed="false">
+                <svg viewBox="0 0 26 22"><use href="#ico-compact"/></svg><span id="compact-stage" class="stage-badge" hidden>2</span></button>
+            <button type="button" class="secondary icon-btn" id="fit-window" title="Fit to window" aria-label="Fit to window" onclick="cy && cy.fit(undefined, 30)">
+                <svg viewBox="0 0 26 22"><use href="#ico-fit"/></svg></button>
+            <span class="icon-sep"></span>
+            <button type="button" class="secondary icon-btn" id="find-gate" title="Find gates -- by ID, text, H category or colour" aria-label="Find gates">
+                <svg viewBox="0 0 26 22"><use href="#ico-find-gate"/></svg></button>
+            <button type="button" class="secondary icon-btn" id="find-basic" title="Find basic events -- by ID, text, H category or colour" aria-label="Find basic events">
+                <svg viewBox="0 0 26 22"><use href="#ico-find-basic"/></svg></button>
+        </div>
+        <div id="search-bar" class="search-bar" hidden>
+            <span id="search-what"></span>
+            <input id="search-input" placeholder="ID, text, H category / ASIL (e.g. H3+, ASIL B) or colour" autocomplete="off" spellcheck="false">
+            <span id="search-count" class="search-count"></span>
+            <button type="button" class="secondary" id="search-prev" title="Previous match (Shift+Enter)">&uarr;</button>
+            <button type="button" class="secondary" id="search-next" title="Next match (Enter)">&darr;</button>
+            <button type="button" class="secondary" id="search-close" title="Close the search (Esc)">&times;</button>
+        </div>
+        <div id="manual-fta-hint" style="font-size:13px;" hidden></div>
+        <div><span id="pick-badge" class="badge" style="background:#dbeafe; border-color:#93c5fd;" hidden></span></div>
+        <div id="manual-fta-empty" style="color:var(--muted); font-size:13px;" hidden>No fault tree in this analysis yet &mdash; click the <strong>new top event</strong> icon.</div>
+    </div>
+
+    <dialog id="help-dialog" class="help-dialog">
+        <form method="dialog">
+            <h3 style="margin-top:0;">Fault Tree &mdash; keyboard and mouse</h3>
+            <p class="help-intro">Fault trees drawn by hand. <strong>File</strong> holds the analyses &mdash; separate sets of trees; event IDs (TP-, GT-, EV-) are unique across all of them. Everything is stored in this browser only.</p>
+            <table class="help-table">
+                <tr><th colspan="2">Building</th></tr>
+                <tr><td>New top event icon</td><td>a new tree &mdash; asks: this analysis or a new analysis page</td></tr>
+                <tr><td>New gate / basic event icon, then click gates</td><td>adds one below each gate you click; <kbd>Esc</kbd>, the <b>arrow</b> icon or the icon again ends &mdash; then clicks select events again</td></tr>
+                <tr><td>Click an event</td><td>selects it (red); a second click on the title (or <kbd>F2</kbd>) renames the title in place, a second click on the <strong>ID box</strong> renames the ID &mdash; <kbd>Enter</kbd> or a click elsewhere saves, <kbd>Esc</kbd> cancels</td></tr>
+                <tr><td>Double-click an event</td><td>edit title, description, ID, label, H category / ASIL &mdash; <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> new line, <kbd>Esc</kbd> cancels</td></tr>
+                <tr><td>Right-click a gate &gt; Continue on a new page</td><td>its branch goes onto a page of its own (Page list); on this page a triangle with &ldquo;&hellip;&rdquo; stands for it &mdash; <strong>click the triangle</strong> to jump to that page; for big trees and PDFs (printed with its page number)</td></tr>
+                <tr><td>Explorer (left) / Diagram &middot; Grid</td><td>the tree on the left lists the analyses and their fault tree pages (a continued page below the page it continues from) &mdash; click a page to open it, the boxes open / close a branch, the toolbar icon shows / hides it; <b>Grid</b>: all gates or all basic events as a table with every field &mdash; search all columns, filter each column, click a header to sort, double-click a row to show it in the diagram</td></tr>
+                <tr><td>Compact icon</td><td>first click: compact display &mdash; the same gates and events, closer together; the ASIL / H square is drawn inside the description box (the label stays beside it); second click: <b>compact 2</b> (&ldquo;2&rdquo; on the icon) &mdash; branches may also go below each other where the rows allow (lines stay separate); third click: normal display; also for the JPG, LaTeX and PDF export</td></tr>
+                <tr><td>Save (Ctrl+S) / Version control</td><td>every change is kept at once; <b>Save</b> also creates a numbered revision with what changed and when (the button is marked while there are unsaved changes); the <b>Version control</b> tab lists the revisions with their changes &mdash; <b>Restore</b> makes one current again (unsaved changes are saved first)</td></tr>
+                <tr><td>Small triangle on the side / &#9650; &#9660;</td><td>on its own page the continued gate has a small triangle with &ldquo;&hellip;&rdquo; &mdash; click it to go back to the page it continues from; &#9650; next to the Page list: the page above, &#9660;: the page of the selected transfer triangle, else the first page continued from here</td></tr>
+                <tr><td>Right-click an event</td><td>add below, edit, add / edit / remove the label (the boxed text right of it), AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
+                <tr><th colspan="2">Moving and copying</th></tr>
+                <tr><td>Phone / tablet</td><td>tap = click, <strong>long-press</strong> = right-click; the event menu has <em>Select</em> and <em>Move / copy to…</em> (then tap the gate); pinch zooms</td></tr>
+                <tr><td><kbd>Ctrl</kbd> + drag onto a gate</td><td>menu: move here, copy (same IDs = the same event, dashed box), copy with new IDs</td></tr>
+                <tr><td>Change a repeated (dashed) event</td><td>asks: change all occurrences, or only this one (it gets a new ID)</td></tr>
+                <tr><th colspan="2">Selecting several</th></tr>
+                <tr><td><kbd>Ctrl</kbd> or <kbd>Shift</kbd> + click</td><td>select / unselect events (blue); an event selected by a plain click before joins them</td></tr>
+                <tr><td>Right-click a selected event</td><td>H category, colour, AND / OR gates or delete for all of them</td></tr>
+                <tr><td>Plain click anywhere, <kbd>Esc</kbd></td><td>clear the selection</td></tr>
+                <tr><th colspan="2">Finding and viewing</th></tr>
+                <tr><td>Find gates / basic events icon</td><td>by ID, text, H category / ASIL (exact: H3 &ne; H3+) or colour &mdash; in <b>all pages and analyses</b> (the open analysis first); <kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> next / previous, opening the match's page; <kbd>Esc</kbd> closes</td></tr>
+                <tr><td>Mouse wheel / drag the background</td><td>zoom / move the view; fit-to-window icon shows everything</td></tr>
+                <tr><th colspan="2">Import / Export</th></tr>
+                <tr><td>Export JPG / LaTeX / PDF / XML</td><td>the chosen analysis, with the model revision (light grey above each top event); LaTeX: each tree a TikZ picture to copy into your own document</td></tr>
+                
+                <tr><td>Export Reliability Workbench XML</td><td>the chosen analysis for Isograph Reliability Workbench: import it there with the import template IntegrityWorkbench_FTA.rwb-impx; titles, gates, pages and criticality are carried over, descriptions and colours are not</td></tr>
+                
+                <tr><td>Import XML…</td><td>this tool's XML export, or a Reliability Workbench XML export (File &gt; Export &gt; XML); checked and shown first; a tree replaces the one with the same top event ID</td></tr>
+            </table>
+            <p style="margin-bottom:0; text-align:right;"><button type="button" class="secondary" id="help-tour-start">Guided tour</button> <button value="close">Close</button></p>
+        </form>
+    </dialog>
+    <div class="fill-graph">
+        <nav id="fta-explorer" class="xp" aria-label="Analyses and fault tree pages" hidden></nav>
+        <div id="manual-fta-graph" class="cy-graph"></div>
+        <div id="fta-grid" hidden>
+            <div class="grid-bar">
+                <select id="grid-kind" aria-label="Table"><option value="gates">Gates</option><option value="events">Basic events</option></select>
+                <select id="grid-scope" aria-label="Scope"><option value="this">This analysis</option><option value="all">All analyses</option></select>
+                <input id="grid-search" type="search" placeholder="Search all columns" aria-label="Search all columns">
+                <button type="button" class="secondary" id="grid-clear">Clear filters</button>
+                <span id="grid-count"></span>
+            </div>
+            <div class="grid-scroll"><table id="grid-table" class="grid-table"><thead></thead><tbody></tbody></table></div>
+        </div>
+        <div id="fta-versions" hidden>
+            <div class="grid-bar">
+                <button type="button" id="versions-save">Save now</button>
+                <span id="versions-state"></span>
+            </div>
+            <div class="grid-scroll"><table id="versions-table" class="grid-table versions-table">
+                <thead><tr><th>Revision</th><th>Saved</th><th>Changes</th><th></th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <div id="manual-fta-menu" class="context-menu" role="menu" hidden></div>
+    </div>
+</div>
+
+<dialog id="event-dialog" style="min-width:380px;">
+    <form id="event-form" method="dialog">
+        <h3 id="event-dialog-title" style="margin-top:0;"></h3>
+        <label>ID</label>
+        <input name="eventId" autocomplete="off" spellcheck="false">
+        <label>Title</label>
+        <input name="title" autocomplete="off">
+        <label>Description</label>
+        <textarea name="description" rows="3"></textarea>
+        <label>Label <span style="color:var(--muted); font-weight:normal;">(shown next to the box)</span></label>
+        <input name="label" autocomplete="off">
+        <label>Safety criticality <span style="color:var(--muted); font-weight:normal;">(H category or ASIL, the square next to the box)</span></label>
+        <select name="criticality">
+            <option value="">&mdash; none &mdash;</option>
+            <optgroup label="H category"><option value="H1">H1</option><option value="H2">H2</option><option value="H3">H3</option><option value="H3+">H3+</option><option value="H4">H4</option><option value="H4+">H4+</option><option value="ANY">ANY</option></optgroup>
+            <optgroup label="ASIL / QM"><option value="QM">QM</option><option value="ASIL A">ASIL A</option><option value="ASIL B">ASIL B</option><option value="ASIL C">ASIL C</option><option value="ASIL D">ASIL D</option></optgroup>
+        </select>
+        <p id="event-dialog-error" style="color:var(--error, #c00); font-size:12px;" hidden></p>
+        <p style="margin-bottom:0;">
+            <button type="submit">Save</button>
+            <button type="button" class="secondary" id="event-dialog-cancel">Cancel</button>
+        </p>
+    </form>
+</dialog>
+
+<!-- toolbar icons (SFM-174): drawn for this tool -- gate = rounded pointed shape, basic event = circle -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+        <linearGradient id="ico-fill" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#e3ecff"/><stop offset="1" stop-color="#9db8ee"/>
+        </linearGradient>
+        <g id="ico-gate-shape"><path d="M0 9 Q0 2 4.5 0 Q9 2 9 9 Z" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width="1.1" stroke-linejoin="round"/></g>
+        <g id="ico-plus"><path d="M1 6 H9 M5 2 V10" stroke="#3a5ca8" stroke-width="1.8" stroke-linecap="square"/></g>
+        <g id="ico-select"><path d="M9 2 V18 L12.8 14.4 L15.4 20 L17.8 18.9 L15.2 13.4 L20.2 13.2 Z" fill="#2563eb"
+            stroke="#1e3a8a" stroke-width="1" stroke-linejoin="round"/></g>
+        <g id="ico-top">
+            <g transform="translate(1 1)"><rect width="9" height="9" fill="#f6d77a" stroke="#d9a520" stroke-width="0.8"/>
+                <path d="M4.5 1 V8 M1 4.5 H8 M2 2 L7 7 M7 2 L2 7" stroke="#fff6c8" stroke-width="1"/></g>
+            <use href="#ico-gate-shape" transform="translate(12 10) scale(1.2)"/>
+        </g>
+        <g id="ico-gate">
+            <use href="#ico-plus" transform="translate(0 3)"/>
+            <path d="M17.4 2 V8" stroke="#3a5ca8" stroke-width="1.6"/>
+            <use href="#ico-gate-shape" transform="translate(12 8) scale(1.2)"/>
+        </g>
+        <g id="ico-basic">
+            <use href="#ico-plus" transform="translate(0 3)"/>
+            <path d="M18 2 V8" stroke="#3a5ca8" stroke-width="2.2"/>
+            <circle cx="18" cy="14" r="6" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width="1.1"/>
+        </g>
+        <g id="ico-save" stroke="#1e3a8a" stroke-width="1.1" stroke-linejoin="round">
+            <path d="M5 2.5 H18.5 L21.5 5.5 V19.5 H5 Z" fill="url(#ico-fill)"/><rect x="8" y="2.5" width="9" height="5.5" fill="#fff"/>
+            <rect x="14" y="3.5" width="2" height="3.5" fill="#1e3a8a" stroke="none"/><rect x="8" y="12" width="10.5" height="7.5" fill="#fff"/>
+        </g>
+        <g id="ico-compact" stroke="#3a5ca8" stroke-width="1.1" fill="url(#ico-fill)">
+            <rect x="9" y="2" width="8" height="5"/><rect x="3.5" y="14" width="8" height="5"/><rect x="14.5" y="14" width="8" height="5"/>
+            <path d="M13 7 V10.5 M7.5 10.5 H18.5 M7.5 10.5 V14 M18.5 10.5 V14" fill="none"/>
+            <path d="M1 16.5 L3 15 L3 18 Z M25 16.5 L23 15 L23 18 Z" fill="#3a5ca8" stroke="none"/>
+        </g>
+        <g id="ico-explorer" fill="none" stroke="#3a5ca8" stroke-width="1.2">
+            <rect x="3" y="2.5" width="6" height="4.5" fill="url(#ico-fill)"/><path d="M6 7 V18.5 M6 11.5 H11 M6 17 H11"/>
+            <rect x="11" y="9.3" width="11" height="4.5" fill="url(#ico-fill)"/><rect x="11" y="14.8" width="11" height="4.5" fill="url(#ico-fill)"/>
+        </g>
+        <g id="ico-page-up" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width="1.1" stroke-linejoin="round">
+            <rect x="6" y="3" width="14" height="2.6"/><path d="M13 8 L20.5 18 H5.5 Z"/>
+        </g>
+        <g id="ico-page-down" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width="1.1" stroke-linejoin="round">
+            <path d="M5.5 4 H20.5 L13 14 Z"/><rect x="6" y="16.4" width="14" height="2.6"/>
+        </g>
+        <g id="ico-fit" stroke="#111" fill="none">
+            <path d="M4 2 V10 M4 6 H16" stroke-width="1.6"/><path d="M4.5 6 L9 3 V9 Z" fill="#111"/>
+            <path d="M22 12 V20 M10 16 H22" stroke-width="1.6"/><path d="M21.5 16 L17 13 V19 Z" fill="#111"/>
+        </g>
+        <g id="ico-binoculars">
+            <rect x="0" y="0" width="3.2" height="9" rx="0.8" fill="#111"/><rect x="5.8" y="0" width="3.2" height="9" rx="0.8" fill="#111"/>
+            <rect x="2.6" y="2.5" width="3.8" height="2.6" fill="#555"/>
+            <rect x="0.9" y="5" width="1.4" height="3" fill="#e8e3d4"/><rect x="6.7" y="5" width="1.4" height="3" fill="#e8e3d4"/>
+        </g>
+        <g id="ico-find-gate">
+            <path d="M7.4 1 V6" stroke="#3a5ca8" stroke-width="1.6"/>
+            <use href="#ico-gate-shape" transform="translate(2 6) scale(1.2)"/>
+            <use href="#ico-binoculars" transform="translate(14 11)"/>
+        </g>
+        <g id="ico-find-basic">
+            <path d="M8 1 V5" stroke="#3a5ca8" stroke-width="2.2"/>
+            <circle cx="8" cy="11" r="6" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width="1.1"/>
+            <use href="#ico-binoculars" transform="translate(14 11)"/>
+        </g>
+    </defs>
+</svg>
+
+<dialog id="top-dialog" style="max-width:420px;">
+    <form method="dialog">
+        <h3 style="margin-top:0;">New top event</h3>
+        <p style="margin:0 0 6px;">Where should the new fault tree go?</p>
+        <p style="margin:0 0 10px; display:flex; gap:6px; flex-wrap:wrap;">
+            <button value="here" id="top-here">Add to this analysis</button>
+        </p>
+        <label for="top-new-name" style="font-size:13px;">or on a new analysis page, named</label>
+        <div style="display:flex; gap:6px; margin-top:4px;">
+            <input id="top-new-name" placeholder="New analysis" autocomplete="off" style="flex:1;"
+                   onkeydown="if (event.key === 'Enter') { event.preventDefault(); document.getElementById('top-new').click(); }">
+            <button value="new" id="top-new" class="secondary">On a new analysis page</button>
+        </div>
+        <p style="margin:10px 0 0;"><button value="" class="secondary">Cancel</button></p>
+    </form>
+</dialog>
+
+<dialog id="scope-dialog" style="max-width:440px;">
+    <form method="dialog">
+        <h3 style="margin-top:0;">Repeated event</h3>
+        <p id="scope-text"></p>
+        <p style="color:var(--muted); font-size:13px;">Change it everywhere, or only here -- then this occurrence gets a new ID and is
+        independent from the others.</p>
+        <p style="margin-bottom:0; display:flex; gap:6px; flex-wrap:wrap;">
+            <button value="all" id="scope-all">Change all occurrences</button>
+            <button value="this" id="scope-this" class="secondary">Only this one (new ID)</button>
+            <button value="" class="secondary">Cancel</button>
+        </p>
+    </form>
+</dialog>
+
+<script>
+let cy = null;
+const menu = document.getElementById('manual-fta-menu');
+
+async function api(method, path, body) {
+    const resp = await fetch(path, {
+        method, headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+        const d = data.detail;
+        const error = new Error((typeof d === 'string' ? d : d && d.message) || `${method} ${path} failed (${resp.status})`);
+        error.status = resp.status;
+        error.detail = d;
+        throw error;
+    }
+    return data;
+}
+
+// ---- repeated events (SFM-172): the same event in several places --------------------------------
+// A change to one of them is asked: all occurrences, or only this one (it then gets a new ID). The server
+// answers 409 needs_scope when it needs to know; `call(scope)` is then repeated with the answer.
+const scopeDialog = document.getElementById('scope-dialog');
+
+function askScope(detail) {
+    document.getElementById('scope-text').textContent =
+        `${detail.event} appears ${detail.occurrences} times -- it is the same event in each place.`;
+    document.getElementById('scope-all').textContent = `Change all ${detail.occurrences} occurrences`;
+    return new Promise(resolve => {
+        scopeDialog.onclose = () => resolve(scopeDialog.returnValue === 'all' || scopeDialog.returnValue === 'this'
+                                            ? scopeDialog.returnValue : null);
+        scopeDialog.returnValue = '';
+        scopeDialog.showModal();
+    });
+}
+
+async function withScope(call) {
+    try {
+        return await call(undefined);
+    } catch (e) {
+        if (e.status !== 409 || !e.detail || !e.detail.needs_scope) throw e;
+        const scope = await askScope(e.detail);
+        if (!scope) return null;                         // cancelled: nothing changes
+        return await call(scope);
+    }
+}
+
+// the event id behind a node (its `code`) and where the clicked occurrence is (the node id = its path)
+const eventUrl = node => `/api/manual-fta/events/${encodeURIComponent(node.data('code'))}`;
+
+// ---- dialog: new tree, new cause, edit -- Enter saves from any field ------------------------------
+const dialog = document.getElementById('event-dialog');
+const form = document.getElementById('event-form');
+const dialogError = document.getElementById('event-dialog-error');
+let onSave = null, fitAfterSave = false;
+
+function openDialog(heading, values, { fit = false }, save) {
+    document.getElementById('event-dialog-title').textContent = heading;
+    form.title.value = values.title || '';
+    form.description.value = values.description || '';
+    form.label.value = values.label || '';
+    form.criticality.value = values.criticality || '';
+    form.eventId.value = values.id || '';
+    dialogError.hidden = true;
+    onSave = save;
+    fitAfterSave = fit;
+    dialog.showModal();
+    form.title.focus();
+    form.title.select();
+}
+
+form.addEventListener('submit', async evt => {
+    evt.preventDefault();
+    try {
+        const saved = await onSave({ id: form.eventId.value, title: form.title.value, description: form.description.value,
+                                     label: form.label.value, criticality: form.criticality.value });
+        if (saved === null) return;                      // a repeated event's question was cancelled: keep editing
+        dialog.close();
+        await loadGraph({ keepViewport: !fitAfterSave, reveal: saved && saved.id });
+    } catch (e) {
+        dialogError.textContent = e.message;
+        dialogError.hidden = false;
+    }
+});
+form.addEventListener('keydown', evt => {
+    if (evt.key !== 'Enter' || evt.shiftKey || evt.isComposing) return;
+    if (evt.target.tagName === 'BUTTON') return;
+    evt.preventDefault();
+    form.requestSubmit();
+});
+document.getElementById('event-dialog-cancel').addEventListener('click', () => dialog.close());
+
+// New elements are created at once with a default id (TP-<n> / GT-<n> / EV-<n>) and no title -- click one
+// later to fill in title and description (user, 2026-10-01).
+// A new top event asks where it goes (user, 2026-10-21): this analysis, or a new analysis page.
+function askWhereTop() {
+    const dlg = document.getElementById('top-dialog');
+    document.getElementById('top-here').textContent = `Add to "${analysisName()}"`;
+    const name = document.getElementById('top-new-name');
+    name.value = '';
+    return new Promise(resolve => {
+        dlg.onclose = () => resolve(dlg.returnValue === 'here' ? { where: 'here' }
+            : dlg.returnValue === 'new' ? { where: 'new', name: name.value.trim() || 'New analysis' } : null);
+        dlg.returnValue = '';
+        dlg.showModal();
+        document.getElementById('top-here').focus();
+    });
+}
+
+async function newTree() {
+    try {
+        const choice = await askWhereTop();
+        if (!choice) return;
+        let target = analysisId;
+        if (choice.where === 'new') target = (await api('POST', '/api/manual-fta/analyses', { name: choice.name })).id;
+        const top = await api('POST', '/api/manual-fta/trees', { analysis: target });
+        if (target !== analysisId) await switchAnalysis(target);
+        const toPage1 = pageId !== '';                 // a new tree is on page 1 (SFM-192: maybe not shown yet)
+        if (toPage1) pageId = '';
+        await loadGraph({ keepViewport: target === analysisId && !toPage1, reveal: top.id });
+    } catch (e) { alert(e.message); }
+}
+
+// kind: "intermediate" = a gate, "basic" = a basic event (stored kinds, manual_fta.py)
+const KIND_NAMES = { intermediate: 'gate', basic: 'basic event' };
+
+async function addBelow(node, kind) {
+    try {
+        const added = await withScope(scope => api('POST', eventUrl(node) + '/causes', { kind, at: node.id(), scope }));
+        if (added) await loadGraph({ keepViewport: true, reveal: added.id });
+    } catch (e) { alert(e.message); }
+}
+
+function editEvent(node) {
+    const d = node.data();
+    const repeated = d.occurrences > 1 ? ` (appears ${d.occurrences} times)` : '';
+    openDialog(`Edit ${d.code}${repeated}`, { id: d.code, title: d.label, description: d.description, label: d.note, criticality: d.tag }, {},
+        v => withScope(scope => api('PUT', eventUrl(node), { ...v, at: node.id(), scope })));
+}
+
+// ---- toolbar: Add top event / Add gate / Add basic event -------------------------------------
+// Add gate / Add basic event: every click on a gate (or top event) adds one below it; the mode stays on
+// until Esc or the button again, so several can be added quickly.
+let addMode = null;
+const hint = document.getElementById('manual-fta-hint');
+const modeButtons = { intermediate: document.getElementById('add-gate'), basic: document.getElementById('add-basic') };
+
+const selectButton = document.getElementById('select-mode');
+function setAddMode(kind, message) {
+    addMode = kind;
+    for (const [k, button] of Object.entries(modeButtons)) button.classList.toggle('secondary', k !== kind);
+    selectButton.classList.toggle('active', !kind);              // the arrow is on while nothing is being added
+    selectButton.setAttribute('aria-pressed', String(!kind));
+    hint.hidden = !kind && !message;
+    hint.style.color = message ? 'var(--error, #c00)' : '';
+    hint.textContent = message || (kind ? `Click a gate to add a ${KIND_NAMES[kind]} below it -- as often as you like (Esc or the button again ends).` : '');
+}
+
+document.getElementById('add-top').addEventListener('click', () => { setAddMode(null); newTree(); });
+selectButton.addEventListener('click', () => { setAddMode(null); endMoveTo(); });   // the same as Esc
+for (const [kind, button] of Object.entries(modeButtons)) {
+    button.addEventListener('click', () => {
+        if (addMode === kind) { setAddMode(null); return; }
+        if (!cy || !cy.nodes('[type = "manual_event"]').length) { setAddMode(null, 'Add a top event first.'); return; }
+        setAddMode(kind);
+    });
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && addMode && !dialog.open) setAddMode(null); });
+
+function placeOn(node) {
+    if (node.data('kind') === 'basic') {
+        setAddMode(addMode, `${node.id()} is a basic event and cannot have anything below it -- click a gate.`);
+        return;
+    }
+    setAddMode(addMode);                       // clears an earlier message, stays in the mode
+    addBelow(node, addMode);
+}
+
+// ---- right-click menu ---------------------------------------------------------------------
+function hideMenu() { menu.hidden = true; }
+
+function showMenu(renderedPos, headerText, items) {
+    menu.replaceChildren();
+    const header = document.createElement('div');
+    header.className = 'context-menu-header';
+    header.textContent = headerText;
+    menu.appendChild(header);
+    for (const { label, className, run, row, title, check } of items) {
+        if (row) {                                   // a compact row of small buttons: H categories, colours
+            const line = document.createElement('div');
+            line.className = 'context-menu-row';
+            const caption = document.createElement('span');
+            caption.textContent = title;
+            line.appendChild(caption);
+            for (const b of row) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'mini' + (b.active ? ' active' : '');
+                button.textContent = b.label;
+                button.title = b.hint || b.label;
+                if (b.swatch) button.style.background = b.swatch;
+                button.addEventListener('click', () => { hideMenu(); b.run(); });
+                line.appendChild(button);
+            }
+            menu.appendChild(line);
+            continue;
+        }
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'context-menu-item' + (className ? ' ' + className : '');
+        if (check !== undefined) {                    // a check box item (SFM-184)
+            const box = document.createElement('input');
+            box.type = 'checkbox'; box.checked = check; box.tabIndex = -1; box.className = 'check';
+            box.style.pointerEvents = 'none';
+            item.append(box, document.createTextNode(' ' + label));
+            item.setAttribute('role', 'menuitemcheckbox'); item.setAttribute('aria-checked', String(check));
+        } else item.textContent = label;
+        item.addEventListener('click', () => { hideMenu(); run(); });
+        menu.appendChild(item);
+    }
+    // renderedPos is in the diagram's coordinates; the menu lives in the graph area, where the diagram starts after the
+    // explorer tree (SFM-194) -- so its offset is added (user, 2026-10-24: the menu / edit field opened left of the box)
+    const { x: ox, y: oy } = diagramOffset();
+    menu.style.left = renderedPos.x + ox + 'px';
+    menu.style.top = renderedPos.y + oy + 'px';
+    menu.hidden = false;
+    // kept inside the graph area: moved left / up when it would stick out (a phone, or near the edge)
+    const area = menu.parentElement.getBoundingClientRect();
+    menu.style.left = Math.max(0, Math.min(renderedPos.x + ox, area.width - menu.offsetWidth - 4)) + 'px';
+    menu.style.top = Math.max(0, Math.min(renderedPos.y + oy, area.height - menu.offsetHeight - 4)) + 'px';
+}
+
+async function run(action) {
+    try { await action(); } catch (e) { alert(e.message); }
+    await loadGraph({ keepViewport: true });
+}
+
+function eventMenuItems(node) {
+    const d = node.data();
+    const path = eventUrl(node);
+    const put = change => run(() => withScope(scope => api('PUT', path, { ...change, at: node.id(), scope })));
+    const post = (suffix, body) => run(() => withScope(scope => api('POST', path + suffix, { ...body, at: node.id(), scope })));
+    const items = d.kind === 'basic' ? [] : [
+        { label: '+ Add gate below', run: () => addBelow(node, 'intermediate') },
+        { label: '+ Add basic event below', run: () => addBelow(node, 'basic') },
+    ];
+    items.push({ label: 'Edit…', run: () => editEvent(node) });
+    // the label: the boxed text right of the event (user, 2026-10-26)
+    items.push({ label: d.note ? 'Edit label…' : '+ Add label…', run: () => {
+        const text = prompt(`Label of ${d.code}:`, d.note || '');
+        if (text !== null && text.trim() !== (d.note || '')) put({ label: text.trim() });
+    } });
+    if (d.note) items.push({ label: 'Remove label', run: () => put({ label: '' }) });
+    // without a Ctrl key (phone, tablet) these are the way to select several and to move / copy (SFM-183)
+    items.push({ label: picked.has(node.id()) ? 'Unselect' : 'Select (for several)', run: () => togglePick(node) });
+    if (d.id !== d.top || cy.nodes('[type = "manual_event"]').length > 1)
+        items.push({ label: 'Move / copy to…', run: () => startMoveTo(node) });
+    // pages (SFM-184): the branch below a gate continues on a page of its own, the gate on top there
+    // a top event: its whole tree on a page of its own (SFM-192, every tree of a Reliability Workbench import)
+    if (d.kind !== 'basic')
+        items.push({ label: d.id === d.top ? 'Tree on a page of its own' : 'Continue on a new page', check: !!d.new_page,
+                     run: () => put({ new_page: !d.new_page }) });
+    if (d.symbol === 'transfer' && d.page_number)
+        items.push({ label: `Open page ${d.page_number}`, run: () => goToPage(d.code) });
+    if (d.causes >= 2) {
+        const other = d.gate === 'and' ? 'or' : 'and';
+        items.push({ label: `Change to ${other.toUpperCase()} gate`, run: () => put({ gate: other }) });
+    }
+    if (d.causes === 0 && d.id !== d.top) {
+        const other = d.kind === 'basic' ? 'intermediate' : 'basic';
+        items.push({ label: `Make ${KIND_NAMES[other]}`, run: () => put({ kind: other }) });
+    }
+    // an undeveloped event: the same basic event, drawn as a diamond (SFM-245)
+    if (d.kind === 'basic')
+        items.push(d.undeveloped ? { label: 'Make basic event (circle)', run: () => put({ undeveloped: false }) }
+                                 : { label: 'Make undeveloped event (diamond)', run: () => put({ undeveloped: true }) });
+    if (d.id !== d.top) {
+        items.push({ label: 'Move left', run: () => post('/move', { direction: 'left' }) });
+        items.push({ label: 'Move right', run: () => post('/move', { direction: 'right' }) });
+    }
+    items.push(...criticalityRows(d.tag, level => put({ criticality: level })));
+    items.push(colorRow(d.color, name => put({ color: name })));
+    items.push({ label: d.id === d.top ? 'Delete fault tree…' : 'Delete…', className: 'danger', run: () => {
+        const below = cy.nodes().filter(n => n.id() !== d.id && isBelow(n, node)).length;
+        const what = d.id === d.top ? `the whole fault tree ${d.code} (${d.label})` : `${d.code} (${d.label})`;
+        const others = d.occurrences > 1 ? `\n\nOnly this occurrence goes -- ${d.code} stays in its ${d.occurrences - 1} other place(s).` : '';
+        if (!confirm(`Delete ${what}` + (below ? ` and the ${below} event(s) below it?` : '?') + others)) return;
+        run(() => withScope(scope => api('DELETE', `${path}?at=${encodeURIComponent(node.id())}` + (scope ? `&scope=${scope}` : ''))));
+    } });
+    return items;
+}
+
+// ---- H category and colour (user, 2026-10-21), for one event or the Ctrl+click selection -----------
+const CRITICALITY_LEVELS = ["H1", "H2", "H3", "H3+", "H4", "H4+", "ANY"];
+const INTEGRITY_LEVELS = ["QM", "ASIL A", "ASIL B", "ASIL C", "ASIL D"];          // ASIL A-D, QM (Manual FTA only)
+const COLORS = {"green": "#BBF7D0", "grey": "#E5E7EB", "orange": "#FED7AA", "purple": "#E9D5FF", "red": "#FECACA", "yellow": "#FDE68A"};
+const DEFAULT_FILL = '#ADD8E6';
+
+// the safety criticality: H categories and / or ASIL / QM -- in the app only the open project's profile
+// (SFM-220: one of the two lists is empty), the standalone both; "–" clears it
+function criticalityRows(current, apply) {
+    const none = { label: '–', hint: 'No criticality', active: !current, run: () => apply('') };
+    const rows = [];
+    if (CRITICALITY_LEVELS.length) rows.push({ title: 'Safety criticality: H category', row: [none,
+        ...CRITICALITY_LEVELS.map(level => ({ label: level, active: current === level, run: () => apply(level) }))] });
+    if (INTEGRITY_LEVELS.length) rows.push({ title: rows.length ? 'ASIL' : 'Safety criticality: ASIL', row: [...(rows.length ? [] : [none]),
+        ...INTEGRITY_LEVELS.map(level => ({ label: level.replace('ASIL ', ''), hint: level,
+            active: current === level, run: () => apply(level) }))] });
+    return rows;
+}
+
+function colorRow(current, apply) {
+    return { title: 'Colour', row: [{ label: ' ', hint: 'Standard (light blue)', swatch: DEFAULT_FILL, active: !current, run: () => apply('') },
+        ...Object.entries(COLORS).map(([name, hex]) => ({ label: ' ', hint: name, swatch: hex, active: current === name, run: () => apply(name) }))] };
+}
+
+// Ctrl+click picks several events (Ctrl+drag still moves a branch); a right-click on a picked event then acts
+// on all of them. Esc or a plain click clears the selection. Kept across reloads, by id.
+const picked = new Set();
+const pickBadge = () => document.getElementById('pick-badge');
+
+function showPicks() {
+    if (!cy) return;
+    cy.nodes('.picked').removeClass('picked');
+    for (const id of [...picked]) {
+        const node = cy.$id(id);
+        if (node.length) node.addClass('picked'); else picked.delete(id);     // deleted meanwhile
+    }
+    const badge = pickBadge();
+    badge.hidden = picked.size === 0;
+    badge.textContent = `${picked.size} selected — right-click one of them for actions, Esc clears`;
+}
+
+function togglePick(node) {
+    if (picked.has(node.id())) picked.delete(node.id()); else picked.add(node.id());
+    showPicks();
+}
+
+function clearPicks() { picked.clear(); showPicks(); }
+
+// Ctrl / Shift+click (user, 2026-11-05: "when one element is already selected then shift selecting shall lead to
+// multiple selection"): the event selected by a plain click joins the selection, then the clicked one toggles
+function addPick(node) {
+    if (!picked.size && chosen && chosen !== node.id() && cy.$id(chosen).length) picked.add(chosen);
+    unchoose();
+    togglePick(node);
+}
+
+function bulkMenuItems() {
+    const nodes = [...picked].map(id => cy.$id(id));
+    const ids = nodes.map(n => ({ id: n.data('code'), at: n.id() }));
+    const names = nodes.map(n => n.data('code'));
+    const same = key => { const values = new Set(nodes.map(n => n.data(key) || '')); return values.size === 1 ? [...values][0] : null; };
+    const bulk = change => run(() => withScope(scope => api('POST', '/api/manual-fta/events/bulk', { ids, ...change, scope })));
+    const items = [...criticalityRows(same('tag'), level => bulk({ criticality: level })),
+                   colorRow(same('color'), name => bulk({ color: name }))];
+    if (nodes.some(n => n.data('kind') !== 'basic')) {
+        items.push({ label: 'Make the gates AND gates', run: () => bulk({ gate: 'and' }) });
+        items.push({ label: 'Make the gates OR gates', run: () => bulk({ gate: 'or' }) });
+    }
+    if (nodes.some(n => n.data('kind') === 'basic')) {
+        items.push({ label: 'Make the basic events undeveloped (diamond)', run: () => bulk({ undeveloped: true }) });
+        items.push({ label: 'Make the basic events basic (circle)', run: () => bulk({ undeveloped: false }) });
+    }
+    items.push({ label: 'Clear selection', run: clearPicks });
+    items.push({ label: `Delete ${nodes.length} events…`, className: 'danger', run: () => {
+        const all = new Set(nodes.flatMap(n => branchOf(n).map(b => b.id())));
+        const below = all.size - ids.length;
+        if (!confirm(`Delete ${names.join(', ')}` + (below > 0 ? ` and the ${below} event(s) below them?` : '?'))) return;
+        run(() => withScope(scope => api('POST', '/api/manual-fta/events/bulk-delete', { ids, scope })));
+    } });
+    return items;
+}
+
+function isBelow(candidate, ancestor) {
+    let current = candidate;
+    while (true) {
+        const parent = cy.edges('.tree-edge').filter(e => e.data('target') === current.id()).sources()[0];
+        if (!parent) return false;
+        if (parent.id() === ancestor.id()) return true;
+        current = parent;
+    }
+}
+
+document.getElementById('manual-fta-graph').addEventListener('contextmenu', e => e.preventDefault());
+menu.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('mousedown', e => { if (!menu.contains(e.target)) hideMenu(); });
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!menu.hidden) { hideMenu(); return; }
+    if (!dialog.open && !addMode && picked.size) clearPicks();
+});
+
+// ---- drag and drop (SFM-123): move an event with its branch onto a gate / top event ----------------
+// Only while Ctrl is held (user, 2026-10-02), so a plain drag cannot move anything by accident. The
+// move follows the pointer itself (tapstart / tapdrag / tapend): cytoscape keeps Ctrl+drag for box
+// selection and would not move a grabbed node. While Ctrl is held the view does not pan.
+let drag = null, moveModeOn = false, held = false;
+
+// ---- pages (SFM-184): page 1 = the trees; a gate marked "Continue on a new page" ends there in a transfer
+// triangle with its page number, and its branch is a page of its own with that gate on top --------------
+let pageId = new URLSearchParams(location.search).get('page') || '';
+const pagePicker = document.getElementById('page-picker'), pageSelect = document.getElementById('page-select');
+let pageList = [];
+function showPages(pages) {
+    pageList = pages;
+    pagePicker.hidden = true;                          // the explorer tree shows the pages (SFM-194)
+    pageSelect.replaceChildren(...pages.map(p => new Option(
+        p.id === '' ? '1: the trees' : `${p.number}: ${p.code}${p.title ? ' ' + p.title : ''}`, p.id, false, p.id === pageId)));
+    rememberAnalysis();
+    renderExplorer();
+    refreshSaveState();
+    if (view === 'grid') loadGrid();
+}
+// Is `pos` (model coordinates) on the "…" triangle of a transfer node -- below its ID label box?
+function onTransfer(node, pos) {
+    if (node.data('symbol') !== 'transfer' || !pos) return false;
+    const c = node.position(), top = c.y - BLOCK_H * U / 2, left = c.x - BOX_W * U / 2;
+    return pos.y >= top + (LABEL_TOP + LABEL_H) * U - 2 && pos.y <= top + BLOCK_H * U + 2
+        && pos.x >= left + SYM_X * U - 2 && pos.x <= left + (SYM_X + SYM_W) * U + 2;
+}
+// ---- compact display (SFM-200): the same blocks closer together, the ASIL / H square and the label in the box;
+// remembered per browser, also for the JPG / LaTeX / PDF export
+const COMPACT_KEY = 'manualFtaCompact';
+let compactOn = 0;                                 // 0 normal, 1 compact, 2 compact with stacked branches (SFM-201)
+try { compactOn = Number(localStorage.getItem(COMPACT_KEY)) || 0; } catch (e) { /* private window */ }
+if (![0, 1, 2].includes(compactOn)) compactOn = 0;
+const COMPACT_TITLES = [
+    'Compact display: click once -- the gates and events closer together, the ASIL / H square and the label inside the box',
+    'Compact (1 of 2) -- click for stage 2: branches may also go below each other where the rows allow',
+    'Compact 2: branches below each other where the rows allow -- click for the normal display'];
+function showCompactButton() {
+    const b = document.getElementById('toggle-compact');
+    b.classList.toggle('active', !!compactOn); b.setAttribute('aria-pressed', String(!!compactOn));
+    b.title = COMPACT_TITLES[compactOn];
+    document.getElementById('compact-stage').hidden = compactOn !== 2;
+}
+showCompactButton();
+document.getElementById('toggle-compact').addEventListener('click', async () => {
+    compactOn = (compactOn + 1) % 3;                 // off -> compact -> compact 2 -> off
+    try { localStorage.setItem(COMPACT_KEY, String(compactOn)); } catch (e) { /* private window */ }
+    showCompactButton();
+    rememberAnalysis();                              // the export links follow
+    await loadGraph({ keepViewport: false });
+});
+
+// ---- explorer (SFM-194): the project, its analyses and their fault tree pages as a tree, like Reliability
+// Workbench's (without its "Fault Tree Pages" folder level, user 2026-10-26); a continuation page sits below the page it continues from. A click on a page
+// opens it, on an analysis its first page; the boxes open / close a branch.
+const explorer = document.getElementById('fta-explorer');
+const XP_KEY = 'manualFtaExplorer';
+const xpOpen = new Set();                              // opened branches: "a:<analysis>", "p:<analysis>:<page>"
+let explorerShown = false, xpProject = '', xpAuto = '', xpData = null;
+function setExplorer(show) {
+    explorerShown = show;
+    explorer.hidden = !show;
+    explorer.parentElement.classList.toggle('with-explorer', show);
+    const btn = document.getElementById('toggle-explorer');
+    btn.classList.toggle('active', show); btn.setAttribute('aria-pressed', String(show));
+    try { localStorage.setItem(XP_KEY, show ? '1' : '0'); } catch (e) { /* private window */ }
+    if (cy) cy.resize();
+    if (show) renderExplorer();
+}
+document.getElementById('toggle-explorer').addEventListener('click', () => setExplorer(!explorerShown));
+const XP_ICONS = {
+    project: '<rect x="1.5" y="2" width="14" height="11" fill="#fff" stroke="#3a5ca8"/><rect x="1.5" y="2" width="14" height="2.5" fill="#3a5ca8"/>',
+    analysis: '<rect x="1.5" y="1.5" width="14" height="12" rx="1" fill="url(#ico-fill)" stroke="#3a5ca8"/><path d="M4 5 H13 M4 8 H13 M4 11 H10" stroke="#3a5ca8"/>',
+    page: '<rect x="2.5" y="1.5" width="12" height="12" fill="#fff" stroke="#3a5ca8"/><path d="M8.5 3.5 V6 M5 6 H12 M5 6 V8.5 M12 6 V8.5" stroke="#3a5ca8"/>'
+        + '<rect x="3.5" y="8.5" width="3" height="3" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width=".8"/><rect x="10.5" y="8.5" width="3" height="3" fill="url(#ico-fill)" stroke="#3a5ca8" stroke-width=".8"/>',
+};
+function xpItem(key, icon, label, kids, onActivate, current = false) {
+    const li = document.createElement('li');
+    const row = document.createElement('div');
+    row.className = 'xp-row' + (current ? ' current' : '');
+    row.dataset.key = key; row.setAttribute('role', 'treeitem'); row.tabIndex = 0;
+    const open = xpOpen.has(key);
+    if (kids.length) row.setAttribute('aria-expanded', String(open));
+    const tog = document.createElement('span');
+    tog.className = 'xp-tog' + (kids.length ? (open ? '' : ' closed') : ' none');
+    tog.addEventListener('click', e => { e.stopPropagation(); xpToggle(key); });
+    const text = document.createElement('span');
+    text.className = 'xp-label'; text.textContent = label; text.title = label;
+    row.append(tog);
+    row.insertAdjacentHTML('beforeend', `<svg class="xp-ico" viewBox="0 0 17 15">${XP_ICONS[icon]}</svg>`);
+    row.append(text);
+    row.addEventListener('click', onActivate || (() => xpToggle(key)));
+    row.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
+        if (e.key === 'ArrowRight' && kids.length && !open) xpToggle(key);
+        if (e.key === 'ArrowLeft' && open) xpToggle(key);
+    });
+    li.append(row);
+    if (kids.length && open) { const ul = document.createElement('ul'); ul.setAttribute('role', 'group'); ul.append(...kids); li.append(ul); }
+    return li;
+}
+function xpToggle(key) { if (xpOpen.has(key)) xpOpen.delete(key); else xpOpen.add(key); renderExplorer(false); }
+async function xpOpenPage(analysis, page) {
+    setView('diagram');
+    if (analysis !== analysisId) await switchAnalysis(analysis);
+    if (page !== pageId) await goToPage(page);
+}
+// page 1 (the trees without a page of their own): named after its top event when it holds one tree, like every other
+// page; with several their IDs (SFM-196)
+function pageOneName(p) {
+    const trees = p.trees || [];
+    if (trees.length === 1) return `${trees[0].id}: ${trees[0].title || ''}`;
+    return trees.length ? `Page 1: ${trees.map(t => t.id).join(', ')}` : 'Page 1 (empty)';
+}
+async function renderExplorer(refetch = true) {
+    if (!explorerShown) return;
+    try {
+        if (refetch || !xpData) xpData = await api('GET', '/api/manual-fta/explorer');
+        if (!xpProject) xpProject = (await api('GET', '/api/model-identity')).project || 'Project';
+    } catch (e) { return; }
+    // open the way to the current page once each time it changes
+    const auto = analysisId + '|' + pageId;
+    if (auto !== xpAuto) {
+        xpAuto = auto;
+        xpOpen.add('a:' + analysisId); xpOpen.add(`p:${analysisId}:${pageId}`);
+        const mine = (xpData.analyses.find(a => a.id === analysisId) || { pages: [] }).pages;
+        let cur = mine.find(p => p.id === pageId);
+        while (cur && cur.parent != null) { xpOpen.add(`p:${analysisId}:${cur.parent}`); cur = mine.find(p => p.id === cur.parent); }
+    }
+    const analysesItems = xpData.analyses.map(a => {
+        const below = id => a.pages.filter(p => p.parent === id);
+        const pageItem = p => xpItem(`p:${a.id}:${p.id}`, 'page', p.id === '' ? pageOneName(p) : `${p.code}: ${p.title || ''}`,
+            below(p.id).map(pageItem), () => xpOpenPage(a.id, p.id), a.id === analysisId && p.id === pageId);
+        const roots = a.pages.filter(p => p.parent == null).map(pageItem);
+        return xpItem('a:' + a.id, 'analysis', `${a.name} (${a.trees} tree${a.trees === 1 ? '' : 's'})`, roots,
+            () => { xpOpen.add('a:' + a.id); if (a.id !== analysisId) switchAnalysis(a.id); else renderExplorer(false); });
+    });
+    xpOpen.add('root');
+    const ul = document.createElement('ul'); ul.setAttribute('role', 'tree');
+    // the standalone has no projects: no "standalone" row, the analyses are the top level (user, 2026-10-26)
+    if (window.FTA_STANDALONE) ul.append(...analysesItems);
+    else ul.append(xpItem('root', 'project', xpProject, analysesItems));
+    const keep = explorer.scrollTop;
+    explorer.replaceChildren(ul);
+    explorer.scrollTop = keep;
+    const cur = explorer.querySelector('.xp-row.current');
+    if (cur && refetch) cur.scrollIntoView({ block: 'nearest' });
+}
+// ---- Diagram / Grid (SFM-195): every gate or every basic event as a table with all its information, a search
+// over all columns and a filter per column, sorted by a click on a column header; a double-click shows the event
+// in the diagram (its page, selected). Rows: GET /api/manual-fta/table (manual_fta.table()).
+let view = 'diagram', gridData = null, gridSort = { key: 'id', dir: 1 }, gridSelected = null;
+const gridFilters = { gates: {}, events: {} };
+const idList = v => (v || []).join(", ");
+const COLOR_NAMES = { yellow: 'yellow', green: 'green', red: 'red', orange: 'orange', grey: 'grey', purple: 'purple' };
+const GRID_COLUMNS = {
+    gates: [
+        ['id', 'ID', r => r.id], ['kind', 'Kind', r => r.kind === 'top' ? 'Top event' : 'Gate'], ['title', 'Title', r => r.title],
+        ['type', 'Type', r => r.type], ['n_inputs', 'Inputs', r => r.inputs.length, true], ['inputs', 'Input IDs', r => idList(r.inputs)],
+        ['parents', 'Below (parents)', r => idList(r.parents)], ['trees', 'Tree (top event)', r => idList(r.trees)],
+        ['page', 'Page', r => r.page_number ? String(r.page_number) + (r.new_page ? (r.kind === 'top' ? ' (own page)' : ' (continued here)') : '') : '', true],
+        ['criticality', 'H category / ASIL', r => r.criticality], ['label', 'Label', r => r.label],
+        ['color', 'Colour', r => COLOR_NAMES[r.color] || ''], ['occurrences', 'Occurrences', r => r.occurrences, true],
+        ['description', 'Description', r => r.description], ['analysis', 'Analysis', r => r.analysis_name]],
+    events: [
+        ['id', 'ID', r => r.id], ['title', 'Title', r => r.title],
+        ['type', 'Type', r => r.type === 'undeveloped' ? 'undeveloped' : 'basic'], ['parents', 'Below (parents)', r => idList(r.parents)],
+        ['trees', 'Tree (top event)', r => idList(r.trees)], ['page', 'Page', r => r.page_number ? String(r.page_number) : '', true],
+        ['criticality', 'H category / ASIL', r => r.criticality], ['label', 'Label', r => r.label],
+        ['color', 'Colour', r => COLOR_NAMES[r.color] || ''], ['occurrences', 'Occurrences', r => r.occurrences, true],
+        ['description', 'Description', r => r.description], ['analysis', 'Analysis', r => r.analysis_name]],
+};
+function setView(v) {
+    if (v === view) return;
+    view = v;
+    document.getElementById('fta-grid').hidden = v !== 'grid';
+    document.getElementById('fta-versions').hidden = v !== 'versions';
+    document.getElementById('manual-fta-graph').style.visibility = v === 'diagram' ? '' : 'hidden';
+    for (const [id, on] of [['view-diagram', v === 'diagram'], ['view-grid', v === 'grid'], ['view-versions', v === 'versions']]) {
+        const b = document.getElementById(id);
+        b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on));
+    }
+    if (v === 'grid') loadGrid(); else if (v === 'versions') loadVersions(); else if (cy) cy.resize();
+}
+document.getElementById('view-diagram').addEventListener('click', () => setView('diagram'));
+document.getElementById('view-grid').addEventListener('click', () => setView('grid'));
+document.getElementById('view-versions').addEventListener('click', () => setView('versions'));
+
+// ---- version control (SFM-197): Save creates a revision of the whole Manual FTA with its changes and time
+// (manual_fta_versions.py); the Save button is marked while something changed since the last revision
+let versionInfo = null, saveStatusTimer = null;
+function showSaveState(info) {
+    versionInfo = info;
+    const btn = document.getElementById('save-version');
+    btn.classList.toggle('dirty', !!info.dirty);
+    btn.title = info.dirty ? `Save a new revision (Ctrl+S) -- changed since ${info.current ? 'revision ' + info.current : 'never saved'}`
+                           : `Save a new revision (Ctrl+S) -- everything is saved in revision ${info.current}`;
+    const state = document.getElementById('versions-state');
+    state.textContent = info.dirty ? (info.current ? `Changed since revision ${info.current} -- not saved yet.` : 'Not saved yet.')
+                                   : info.current ? `Everything is saved in revision ${info.current}.` : 'Nothing to save yet.';
+    state.classList.toggle('dirty', !!info.dirty);
+    if (info.folder) state.textContent += ` Kept in the folder "${info.folder}" on this computer (browser app).`;
+}
+async function refreshSaveState() {
+    try { showSaveState(await api('GET', '/api/manual-fta/versions')); } catch (e) { /* not available */ }
+}
+function flashSaveStatus(text) {
+    const el = document.getElementById('save-status');
+    el.textContent = text;
+    clearTimeout(saveStatusTimer);
+    saveStatusTimer = setTimeout(() => { el.textContent = ''; }, 4000);
+}
+async function saveVersion() {
+    try {
+        const r = await api('POST', '/api/manual-fta/versions');
+        showSaveState(r);
+        flashSaveStatus(r.saved ? `Saved: revision ${r.saved.n} (${r.saved.summary})` : `No changes since revision ${r.current}`);
+        if (view === 'versions') renderVersions();
+    } catch (e) { alert(e.message); }
+}
+function localTime(iso) { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString(); }
+async function loadVersions() { await refreshSaveState(); renderVersions(); }
+function renderVersions() {
+    const body = document.querySelector('#versions-table tbody');
+    const versions = (versionInfo && versionInfo.versions) || [];
+    if (!versions.length) {
+        const tr = document.createElement('tr'), td = document.createElement('td');
+        td.colSpan = 4; td.textContent = 'No revision yet -- Save (Ctrl+S) creates the first one.';
+        tr.append(td); body.replaceChildren(tr); return;
+    }
+    body.replaceChildren(...versions.map(v => {
+        const tr = document.createElement('tr');
+        tr.dataset.n = v.n;
+        const rev = document.createElement('td'); rev.textContent = v.n + (v.n === versionInfo.current ? ' (current)' : '');
+        const when = document.createElement('td'); when.textContent = localTime(v.saved); when.title = v.saved;
+        const what = document.createElement('td'); what.className = 'changes';
+        const head = document.createElement('div');
+        head.textContent = v.note ? `${v.note} -- ${v.summary}` : v.summary;              // e.g. "Restored revision 1"
+        what.append(head);
+        if (v.changes.length) {
+            const det = document.createElement('details'), sum = document.createElement('summary');
+            sum.textContent = `${v.total} line${v.total === 1 ? '' : 's'}`;
+            const ul = document.createElement('ul');
+            ul.append(...v.changes.map(c => { const li = document.createElement('li'); li.textContent = c; return li; }));
+            if (v.total > v.changes.length) { const li = document.createElement('li'); li.textContent = `... and ${v.total - v.changes.length} more`; ul.append(li); }
+            det.append(sum, ul); what.append(det);
+        }
+        const act = document.createElement('td'), btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'secondary'; btn.textContent = 'Restore';
+        btn.title = `Make revision ${v.n} the current Manual FTA (unsaved changes are saved as a revision first)`;
+        btn.addEventListener('click', () => restoreVersion(v.n));
+        act.append(btn);
+        tr.append(rev, when, what, act);
+        return tr;
+    }));
+}
+async function restoreVersion(n) {
+    if (!confirm(`Restore revision ${n}? It becomes the current Manual FTA. Unsaved changes are saved as a revision first, `
+                 + 'so nothing is lost.')) return;
+    try {
+        const r = await api('POST', `/api/manual-fta/versions/${n}/restore`);
+        showSaveState(r);
+        renderVersions();
+        flashSaveStatus(`Revision ${n} restored`);
+        await loadAnalyses();
+        await loadGraph({ keepViewport: false });
+    } catch (e) { alert(e.message); }
+}
+document.getElementById('save-version').addEventListener('click', saveVersion);
+document.getElementById('versions-save').addEventListener('click', saveVersion);
+document.getElementById('menu-save').addEventListener('click', saveVersion);
+document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); saveVersion(); }
+});
+async function loadGrid() {
+    const all = document.getElementById('grid-scope').value === 'all';
+    try { gridData = await api('GET', '/api/manual-fta/table?analysis=' + encodeURIComponent(all ? '' : analysisId)); }
+    catch (e) { gridData = { gates: [], events: [] }; }
+    renderGrid();
+}
+function renderGrid() {
+    if (!gridData) return;
+    const kind = document.getElementById('grid-kind').value, cols = GRID_COLUMNS[kind], filters = gridFilters[kind];
+    const search = document.getElementById('grid-search').value.trim().toLowerCase();
+    const text = (c, r) => { const v = c[2](r); return v === null || v === undefined ? '' : String(v); };
+    let rows = gridData[kind].filter(r =>
+        (!search || cols.some(c => text(c, r).toLowerCase().includes(search)))
+        && cols.every(c => !filters[c[0]] || text(c, r).toLowerCase().includes(filters[c[0]].toLowerCase())));
+    const sortCol = cols.find(c => c[0] === gridSort.key) || cols[0];
+    rows = rows.slice().sort((a, b) => {
+        const x = sortCol[2](a), y = sortCol[2](b);
+        const cmp = sortCol[3] ? (parseFloat(x) || 0) - (parseFloat(y) || 0)
+                               : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' });
+        return cmp * gridSort.dir;
+    });
+    const table = document.getElementById('grid-table');
+    const head = document.createElement('tr'), filterRow = document.createElement('tr');
+    filterRow.className = 'grid-filters';
+    for (const c of cols) {
+        const th = document.createElement('th');
+        th.textContent = c[1] + (gridSort.key === c[0] ? (gridSort.dir > 0 ? ' \u25B2' : ' \u25BC') : '');
+        th.dataset.key = c[0];
+        th.addEventListener('click', () => { gridSort = { key: c[0], dir: gridSort.key === c[0] ? -gridSort.dir : 1 }; renderGrid(); });
+        head.append(th);
+        const fth = document.createElement('th'), input = document.createElement('input');
+        input.type = 'search'; input.value = filters[c[0]] || ''; input.dataset.key = c[0];
+        input.placeholder = 'Filter'; input.setAttribute('aria-label', 'Filter ' + c[1]);
+        input.addEventListener('input', () => {
+            filters[c[0]] = input.value;
+            const pos = input.selectionStart;
+            renderGrid();
+            const again = table.querySelector(`thead input[data-key="${c[0]}"]`);
+            if (again) { again.focus(); again.setSelectionRange(pos, pos); }
+        });
+        fth.append(input); filterRow.append(fth);
+    }
+    table.tHead.replaceChildren(head, filterRow);
+    const body = document.createDocumentFragment();
+    for (const r of rows) {
+        const tr = document.createElement('tr');
+        tr.dataset.id = r.id;
+        if (r.id === gridSelected) tr.classList.add('selected');
+        for (const c of cols) {
+            const td = document.createElement('td'), v = text(c, r);
+            td.textContent = v; td.title = v;
+            if (c[3]) td.className = 'num';
+            tr.append(td);
+        }
+        tr.addEventListener('click', () => {
+            gridSelected = r.id;
+            table.querySelectorAll('tbody tr.selected').forEach(x => x.classList.remove('selected'));
+            tr.classList.add('selected');
+        });
+        tr.addEventListener('dblclick', () => showInDiagram(r));
+        tr.title = 'Double-click: show it in the diagram';
+        body.append(tr);
+    }
+    table.tBodies[0].replaceChildren(body);
+    const total = gridData[kind].length;
+    document.getElementById('grid-count').textContent =
+        `${rows.length} of ${total} ${kind === 'gates' ? 'gate' : 'basic event'}${total === 1 ? '' : 's'}`;
+}
+async function showInDiagram(r) {
+    setView('diagram');
+    if (r.analysis !== analysisId) await switchAnalysis(r.analysis);
+    if (r.page !== pageId) await goToPage(r.page);
+    const node = cy && cy.$id(r.at);
+    if (node && node.length) { choose(node); cy.animate({ center: { eles: node }, duration: 250 }); }
+}
+document.getElementById('grid-kind').addEventListener('change', () => { gridSort = { key: 'id', dir: 1 }; renderGrid(); });
+document.getElementById('grid-scope').addEventListener('change', loadGrid);
+document.getElementById('grid-search').addEventListener('input', renderGrid);
+document.getElementById('grid-clear').addEventListener('click', () => {
+    const kind = document.getElementById('grid-kind').value;
+    gridFilters[kind] = {}; document.getElementById('grid-search').value = ''; renderGrid();
+});
+// ---- SFM-193: the side triangle of a gate continued from an earlier page ("…": a click goes back there) and the
+// page above / page below buttons
+function onPageStart(node, pos) {
+    if (!node.data('page_start') || !pos) return false;
+    const c = node.position(), top = c.y - BLOCK_H * U / 2, left = c.x - BOX_W * U / 2, x = BOX_W / 2 + SIDE_DX;
+    return pos.y >= top + SIDE_Y * U - 2 && pos.y <= top + (SIDE_Y + SIDE_TRI_H) * U + 2
+        && pos.x >= left + (x - SIDE_TRI_HALF) * U - 2 && pos.x <= left + (x + SIDE_TRI_HALF) * U + 2;
+}
+const pageAbove = () => { const cur = pageList.find(p => p.id === pageId); return cur && cur.parent != null ? cur.parent : null; };
+function pageBelow() {
+    const node = chosen && cy && cy.$id(chosen);
+    if (node && node.length && node.data('symbol') === 'transfer') return node.data('code');      // the selected one
+    const child = pageList.find(p => p.parent === pageId);
+    return child ? child.id : null;
+}
+function updatePageButtons() {
+    document.getElementById('page-up').disabled = pageAbove() === null;
+    document.getElementById('page-down').disabled = pageBelow() === null;
+}
+document.getElementById('page-up').addEventListener('click', () => { const id = pageAbove(); if (id !== null) goToPage(id); });
+document.getElementById('page-down').addEventListener('click', () => { const id = pageBelow(); if (id !== null) goToPage(id); });
+async function goToPage(id) {
+    pageId = id;
+    setAddMode(null); clearPicks(); unchoose();
+    await loadGraph({ keepViewport: false });
+}
+pageSelect.addEventListener('change', () => goToPage(pageSelect.value));
+
+// ---- selecting and renaming (SFM-185), like files in Windows: a click selects (red, dashed frame), a second
+// click on the selected event renames its title in place (Enter or a click elsewhere saves, Esc cancels;
+// F2 does the same), a double-click opens the full edit dialog ---------------------------------------
+const CHOSEN_FILL = '#FF0000';
+let chosen = null, renameTimer = null, renaming = null;
+function paintChosen() {
+    if (!cy) return;
+    cy.nodes('.chosen').forEach(n => { n.removeClass('chosen'); n.data('svg', blockSvg({ ...n.data() })); });
+    const node = chosen && cy.$id(chosen);
+    if (!node || !node.length) { chosen = null; return; }
+    node.addClass('chosen');
+    node.data('svg', blockSvg({ ...node.data(), fill: CHOSEN_FILL, text_color: '#fff' }));
+    updatePageButtons();
+}
+function choose(node) { chosen = node.id(); paintChosen(); }
+function unchoose() { clearTimeout(renameTimer); if (chosen) { chosen = null; paintChosen(); } updatePageButtons(); }
+// Is `pos` (model coordinates) on the ID label box of `node`? A second click there renames the ID (SFM-188).
+function onIdLabel(node, pos) {
+    if (!pos) return false;
+    const c = node.position(), top = c.y - BLOCK_H * U / 2, left = c.x - BOX_W * U / 2;
+    return pos.x >= left + LABEL_X * U && pos.x <= left + (LABEL_X + LABEL_W) * U
+        && pos.y >= top + LABEL_TOP * U && pos.y <= top + (LABEL_TOP + LABEL_H) * U;
+}
+// part: 'title' (in the description box) or 'id' (in the ID label box, SFM-188)
+function startRename(node, part = 'title') {
+    if (tourAt >= 0 || renaming || !node || !node.length) return;
+    hideMenu();
+    const box = document.createElement(part === 'id' ? 'input' : 'textarea');
+    box.className = 'rename-box' + (part === 'id' ? ' rename-id' : '');
+    box.value = part === 'id' ? node.data('code') : node.data('label') || '';
+    box.spellcheck = part !== 'id';
+    box.setAttribute('aria-label', part === 'id' ? `New ID of ${node.data('code')}` : `New title of ${node.data('code')}`);
+    document.getElementById('manual-fta-graph').parentElement.appendChild(box);
+    renaming = { node, box, part };
+    positionRename();
+    node.addClass('renaming');
+    box.focus(); box.select();
+    box.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); endRename(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); endRename(false); }
+    });
+    box.addEventListener('blur', () => endRename(true));
+}
+// where the diagram sits in the graph area: right of the explorer tree when it is shown (SFM-194)
+function diagramOffset() {
+    const g = document.getElementById('manual-fta-graph');
+    return { x: g.offsetLeft, y: g.offsetTop };
+}
+function positionRename() {
+    if (!renaming) return;
+    const { node, box, part } = renaming, z = cy.zoom(), p = node.renderedPosition(), o = diagramOffset();
+    const left = o.x + p.x - BOX_W * U * z / 2, top = o.y + p.y - BLOCK_H * U * z / 2;
+    if (part === 'id') Object.assign(box.style, { left: `${left + LABEL_X * U * z}px`, top: `${top + LABEL_TOP * U * z}px`,
+        width: `${LABEL_W * U * z}px`, height: `${LABEL_H * U * z}px`, fontSize: `${Math.max(9, 7.5 * z)}px` });
+    else Object.assign(box.style, { left: `${left}px`, top: `${top}px`,
+        width: `${BOX_W * U * z}px`, height: `${BOX_H * U * z}px`, fontSize: `${Math.max(9, 9 * z)}px` });
+}
+async function endRename(save) {
+    if (!renaming) return;
+    const { node, box, part } = renaming;
+    renaming = null;
+    const value = box.value.replace(/\s+/g, ' ').trim();
+    box.remove();
+    if (node.removed()) return;
+    node.removeClass('renaming');
+    if (part === 'id') {                              // the ID (SFM-188): checked by the server -- unique, no spaces
+        const old = node.data('code');
+        if (!save || !value || value === old) return;
+        const path = node.id();
+        await run(async () => {
+            await withScope(scope => api('PUT', eventUrl(node), { id: value, at: path, scope }));
+            // keep it selected (its occurrence path ends in the new ID) and its page, if it starts one
+            chosen = path.slice(0, path.length - old.length) + value;
+            if (pageId === old) pageId = value;
+        });
+        return;
+    }
+    if (!save || value === (node.data('label') || '')) return;
+    await run(() => withScope(scope => api('PUT', eventUrl(node), { title: value, at: node.id(), scope })));
+}
+document.addEventListener('keydown', e => {
+    if (dialog.open || renaming || tourAt >= 0) return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName)) return;
+    if (e.key === 'F2' && chosen && cy) { e.preventDefault(); startRename(cy.$id(chosen)); }
+    else if (e.key === 'Escape' && chosen && menu.hidden) unchoose();
+});
+// The graph area moves or changes size when a hint line wraps in (narrow screens) -- the graph then has to
+// measure itself again, or taps land beside the boxes (SFM-183).
+new ResizeObserver(() => { if (cy) cy.resize(); }).observe(document.getElementById('manual-fta-graph'));
+for (const el of [document.getElementById('manual-fta-hint'), document.getElementById('pick-badge')])
+    new MutationObserver(() => requestAnimationFrame(() => { if (cy) cy.resize(); }))
+        .observe(el, { attributes: true, childList: true, characterData: true, subtree: true });
+
+function setMoveMode(on) {
+    moveModeOn = on;
+    if (cy) { cy.userPanningEnabled(!on); cy.boxSelectionEnabled(false); }
+}
+document.addEventListener('keydown', e => { if (e.key === 'Control' && !moveModeOn) setMoveMode(true); });
+document.addEventListener('keyup', e => { if (e.key === 'Control') setMoveMode(false); });
+window.addEventListener('blur', () => setMoveMode(false));
+
+function branchOf(node) {
+    const branch = [node];
+    for (let i = 0; i < branch.length; i++) {
+        cy.edges('.tree-edge').filter(e => e.data('source') === branch[i].id())
+            .forEach(e => branch.push(cy.$id(e.data('target'))));
+    }
+    return branch;
+}
+
+function startDrag(node, pointer) {
+    hideMenu();
+    const branch = branchOf(node);
+    const moving = branch.flatMap(n => [n, cy.$id(n.id() + '#note')]).filter(n => n.length);
+    drag = { node, ids: new Set(branch.map(n => n.id())), start: { ...pointer }, moved: false,
+             moving: moving.map(n => ({ n, pos: { ...n.position() } })), target: null };
+}
+
+function dropTargetAt(pos) {
+    return cy.nodes('[type = "manual_event"]').filter(n => {
+        if (drag.ids.has(n.id())) return false;
+        const b = n.boundingBox({ includeLabels: false });
+        return pos.x >= b.x1 && pos.x <= b.x2 && pos.y >= b.y1 && pos.y <= b.y2;
+    })[0] || null;
+}
+
+function duringDrag(pointer) {
+    const dx = pointer.x - drag.start.x, dy = pointer.y - drag.start.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;          // not a drag (yet): a click stays a click
+    if (!drag.moved) { drag.moved = true; drag.moving.forEach(({ n }) => n.addClass('dragging')); }
+    for (const { n, pos } of drag.moving) n.position({ x: pos.x + dx, y: pos.y + dy });
+    const target = dropTargetAt(pointer);
+    if (drag.target && drag.target !== target) drag.target.removeClass('drop-ok drop-no');
+    drag.target = target;
+    if (target) target.addClass(target.data('kind') === 'basic' ? 'drop-no' : 'drop-ok');
+}
+
+// What to do with `node` (and its branch) on the gate `target` (user, 2026-10-21): move, copy with the same IDs
+// (repeated events), copy with new IDs -- after a Ctrl+drag, or "Move / copy to…" then a tap (SFM-183).
+async function dropMenu(node, target) {
+        const place = mode => async () => {
+            try {
+                const result = await withScope(scope => api('POST', eventUrl(node) + '/move-to',
+                    { parent: target.data('code'), at: node.id(), target_at: target.id(), mode, scope }));
+                await loadGraph({ keepViewport: true });
+                const placed = result && cy.nodes().filter(n => n.data('code') === result.id && n.id().startsWith(target.id() + '/'))[0];
+                if (placed) reveal(cy.collection(branchOf(placed)));   // the whole branch in view
+            } catch (e) { alert(e.message); await loadGraph({ keepViewport: true }); }
+        };
+        await loadGraph({ keepViewport: true });               // the dragged branch back in place while choosing
+        const at = cy.$id(target.id()).renderedPosition();
+        showMenu({ x: at.x + 20, y: at.y }, `${node.data('code')} onto ${target.data('code')}`, [
+            { label: 'Move here', run: place('move') },
+            { label: 'Copy here (same IDs = the same events)', run: place('copy') },
+            { label: 'Copy here with new IDs', run: place('copy_new') },
+            { label: 'Cancel', run: () => {} },
+        ]);
+}
+
+// "Move / copy to…" from the event menu (SFM-183): the next tap on a gate opens the drop menu there --
+// the same as a Ctrl+drag, for phones and tablets (no Ctrl key). Esc or a tap on the background cancels.
+let moveSource = null;
+function startMoveTo(node) {
+    setAddMode(null);
+    moveSource = node.id();
+    hint.hidden = false; hint.style.color = '';
+    hint.textContent = `Tap the gate to move or copy ${node.data('code')} to (Esc or a tap on the background cancels).`;
+}
+function endMoveTo() { if (moveSource) { moveSource = null; hint.hidden = true; } }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') endMoveTo(); });
+async function moveToTapped(target) {
+    const node = cy.$id(moveSource);
+    endMoveTo();
+    if (!node.length) return;
+    if (target.data('kind') === 'basic') { alert(`${target.data('code')} is a basic event and cannot have anything below it -- tap a gate.`); return; }
+    if (target.id() === node.id() || target.id().startsWith(node.id() + '/')) { alert(`${node.data('code')} cannot be placed below itself.`); return; }
+    await dropMenu(node, target);
+}
+
+async function endDrag() {
+    const { node, target, moved } = drag;
+    drag = null;
+    if (!moved) return;                                         // a plain (Ctrl+)click: tap handles it
+    if (target && target.data('kind') !== 'basic') { await dropMenu(node, target); return; }
+    if (target) alert(`${target.data('code')} is a basic event and cannot have anything below it -- drop onto a gate.`);
+    await loadGraph({ keepViewport: true });                  // nowhere to drop: everything snaps back
+}
+
+// ---- graph ----------------------------------------------------------------------------------
+const MAX_FIT_ZOOM = 1.5;
+
+// Brings an event that was just added or edited into view if it is (partly) outside it.
+function reveal(node) {
+    if (!node || !node.length) return;
+    const box = node.renderedBoundingBox(), w = cy.width(), h = cy.height();
+    if (box.x1 >= 0 && box.y1 >= 0 && box.x2 <= w && box.y2 <= h) return;
+    cy.fit(undefined, 30);
+    if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(node); }
+}
+
+async function loadGraph(options = {}) {
+    // Keep zoom and position while editing -- not when the canvas was empty (its viewport would put
+    // the first tree half off-screen) or when asked to fit.
+    const viewport = options.keepViewport && cy && cy.nodes().length
+        ? { zoom: cy.zoom(), pan: { ...cy.pan() } } : null;
+    // options.data: draw this graph instead of the analysis (the guided tour's example, SFM-182)
+    const data = options.data || await api('GET', '/api/manual-fta/graph?analysis=' + encodeURIComponent(analysisId)
+                                                 + '&page=' + encodeURIComponent(pageId) + (compactOn ? '&compact=' + compactOn : ''));
+    if (options.data && compactOn) options.data.nodes.forEach(n => { n.data.compact = true; });   // the tour's example too
+    if (!options.data) { pageId = data.page || ''; showPages(data.pages || []); }
+    document.getElementById('manual-fta-empty').hidden = data.nodes.length > 0;
+    if (cy) cy.destroy();
+    data.nodes.forEach(n => { n.data.svg = blockSvg(n.data); fitLabel(n.data); });
+    // the tree edges are kept (hidden) next to the drawn connector segments, for "what is below"
+    const treeEdges = data.edges.map(e => ({ data: { ...e.data, tree: true }, classes: 'tree-edge' }));
+    // an event's label: text right of its description box (own invisible node, so it is not clipped)
+    // compact too (SFM-212: compacting does not affect the label) -- there the square is in the box
+    const notes = data.nodes.filter(n => n.data.note).map(n => ({
+        data: { id: `${n.data.id}#note`, note: n.data.note }, classes: 'note',
+        // right of the box -- or of its criticality square, when it has one (it was drawn over it)
+        position: { x: n.position.x + (BOX_W / 2 + (n.data.tag && !n.data.compact ? TAG_GAP + TAG_W : 0) + 3) * U, y: n.position.y + (BOX_H / 2 - BLOCK_H / 2) * U },
+    }));
+    cy = cytoscape({
+        container: document.getElementById('manual-fta-graph'),
+        elements: [...data.nodes, ...treeEdges, ...notes, ...connectorElements(data.nodes, data.edges)],
+        style: [
+            { selector: 'node', style: {
+                'shape': 'rectangle', 'width': NODE_W * U, 'height': BLOCK_H * U,
+                'background-opacity': 0, 'border-width': 0,
+                'background-image': 'data(svg)', 'background-width': '100%', 'background-height': '100%',
+                'label': 'data(label)', 'font-family': 'Arial, Helvetica, sans-serif', 'font-size': 9,
+                'color': '#000', 'text-wrap': 'wrap', 'text-max-width': (BOX_W - 6) * U,
+                'text-valign': 'center', 'text-halign': 'center',
+                'text-margin-y': (BOX_H / 2 - BLOCK_H / 2) * U,
+            }},
+            FIT_STYLE,                                  // the title always fits its box (SFM-186)
+            FIT_SHIFT_STYLE,                            // compact: below the square / label in the box (SFM-200)
+            { selector: 'node.junction', style: {
+                'width': 0.1, 'height': 0.1, 'background-image': 'none', 'label': '', 'events': 'no',
+            }},
+            { selector: 'node.note', style: {
+                'width': 0.1, 'height': 0.1, 'background-image': 'none', 'events': 'no',
+                'label': 'data(note)', 'font-size': 9, 'font-weight': 'bold', 'color': '#000',
+                'text-halign': 'right', 'text-valign': 'center', 'text-margin-y': 0, 'text-margin-x': 3,
+                // at most as wide as the description box -- the layout keeps that much room right of it (SFM-212)
+                'text-wrap': 'wrap', 'text-max-width': BOX_W * U,
+                // a box around the label (user, 2026-10-26)
+                'text-background-color': '#fff', 'text-background-opacity': 1, 'text-background-padding': 2,
+                'text-background-shape': 'rectangle', 'text-border-width': 1, 'text-border-color': '#000',
+                'text-border-opacity': 1,
+            }},
+            { selector: 'edge', style: {
+                'curve-style': 'straight', 'width': 1, 'line-color': STROKE,
+                'target-arrow-shape': 'none', 'events': 'no', 'label': '',
+            }},
+            { selector: 'edge.tree-edge', style: { 'display': 'none' } },
+            // drag and drop (SFM-123): the branch being moved, and where it would land
+            { selector: 'node.dragging', style: { 'opacity': 0.6 } },
+            { selector: 'node.drop-ok', style: { 'overlay-color': '#16a34a', 'overlay-opacity': 0.25, 'overlay-padding': 4 } },
+            { selector: 'node.drop-no', style: { 'overlay-color': '#dc2626', 'overlay-opacity': 0.25, 'overlay-padding': 4 } },
+            // Ctrl+click selection
+            { selector: 'node.chosen', style: { 'color': '#fff', 'border-width': 1, 'border-style': 'dashed', 'border-color': '#000' } },
+            { selector: 'node.renaming', style: { 'label': '' } },
+            { selector: 'node.picked', style: { 'overlay-color': '#2563eb', 'overlay-opacity': 0.22, 'overlay-padding': 5 } },
+            // search (SFM-174): matches marked, the current one stronger, the rest faded
+            { selector: 'node.search-dim', style: { 'opacity': 0.25 } },
+            { selector: 'node.found', style: { 'overlay-color': '#f59e0b', 'overlay-opacity': 0.22, 'overlay-padding': 6 } },
+            { selector: 'node.found-current', style: { 'overlay-color': '#f59e0b', 'overlay-opacity': 0.5, 'overlay-padding': 8 } },
+        ],
+        layout: { name: 'preset', padding: 40 },
+    });
+    if (viewport) cy.viewport(viewport);
+    else if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(); }   // a small tree is not blown up
+    if (options.reveal) reveal(cy.nodes().filter(n => n.data('code') === options.reveal).first());
+    cy.on('pan zoom', hideMenu);
+    cy.autoungrabify(true);                         // moving is done by Ctrl+drag below (SFM-123)
+    setMoveMode(moveModeOn);
+    cy.on('tapstart', 'node[type = "manual_event"]', evt => { if (moveModeOn) startDrag(evt.target, evt.position); });
+    cy.on('tapdrag', evt => { if (drag) duringDrag(evt.position); });
+    cy.on('tapend', () => { if (drag) endDrag(); });
+    cy.on('tap', 'node[type = "manual_event"]', evt => {
+        const oe = evt.originalEvent || {};
+        if (held) return;                                                      // the release of a long-press
+        if (moveSource) { moveToTapped(evt.target); return; }                  // "Move / copy to…" (SFM-183)
+        if (oe.ctrlKey || oe.metaKey || oe.shiftKey) { addPick(evt.target); return; }   // Ctrl / Shift+click: pick several
+        if (addMode) { placeOn(evt.target); return; }
+        if (picked.size) { clearPicks(); return; }                             // a plain click first just unselects
+        if (onTransfer(evt.target, evt.position)) { goToPage(evt.target.data('code')); return; }   // "…": its page
+        if (onPageStart(evt.target, evt.position)) { goToPage(evt.target.data('from_page_id')); return; }   // back (SFM-193)
+        // SFM-185: the first click selects; a click on the selected event renames it -- unless it is the second
+        // click of a double-click, which opens the edit dialog (dbltap below)
+        if (chosen === evt.target.id()) {
+            clearTimeout(renameTimer);
+            const node = evt.target, part = onIdLabel(node, evt.position) ? 'id' : 'title';   // ID box: the ID
+            renameTimer = setTimeout(() => startRename(node, part), 450);
+        } else choose(evt.target);
+    });
+    cy.on('dbltap', 'node[type = "manual_event"]', evt => {
+        const oe = evt.originalEvent || {};
+        if (addMode || moveSource || held || oe.ctrlKey || oe.metaKey || oe.shiftKey) return;
+        clearTimeout(renameTimer);
+        choose(evt.target);
+        editEvent(evt.target);
+    });
+    cy.on('pan zoom', positionRename);
+    // the "…" triangle of a branch continued on another page: a pointer hand and a tooltip over it
+    cy.on('mousemove', evt => {
+        const node = evt.target !== cy && evt.target.isNode && evt.target.isNode() ? evt.target : null;
+        const over = node && onTransfer(node, evt.position), back = node && onPageStart(node, evt.position);
+        const box = cy.container();
+        box.style.cursor = over || back ? 'pointer' : '';
+        box.title = over ? `Go to page ${node.data('page_number')} (${node.data('code')} continues there)`
+                  : back ? `Back to page ${node.data('from_page')} (${node.data('code')} continues from there)` : '';
+    });
+    cy.on('tap', evt => {                                                      // a plain click on the empty canvas
+        const oe = evt.originalEvent || {};
+        if (evt.target === cy) { endMoveTo(); unchoose(); }
+        if (evt.target === cy && !oe.ctrlKey && !oe.metaKey && !oe.shiftKey && picked.size) clearPicks();
+    });
+    // a long-press on a touch screen opens the same menu as a right-click (SFM-183)
+    cy.on('tapstart', () => { held = false; });                             // a new touch
+    cy.on('taphold', evt => {
+        const oe = evt.originalEvent || {};
+        if (!(oe.type || '').startsWith('touch') && oe.pointerType !== 'touch') return;
+        held = true;
+        contextMenuFor(evt);
+    });
+    cy.on('cxttap', contextMenuFor);
+    function contextMenuFor(evt) {
+        if (evt.target === cy) showMenu(evt.renderedPosition, 'Manual FTA', [{ label: '+ Add top event', run: newTree },
+                                                                             { label: 'Fit to window', run: () => cy.fit(undefined, 30) }]);
+        else if (evt.target.isNode() && evt.target.data('type') === 'manual_event') {
+            if (picked.has(evt.target.id()) && picked.size > 1) {
+                showMenu(evt.renderedPosition, `${picked.size} events selected`, bulkMenuItems());
+            } else {
+                const t = evt.target, again = t.data('occurrences') > 1 ? ` — appears ${t.data('occurrences')}×` : '';
+                showMenu(evt.renderedPosition, `${t.data('code')}: ${t.data('label')}${again}`, eventMenuItems(t));
+            }
+        }
+    }
+    showPicks();
+    paintChosen();
+}
+
+// ---- XML import (SFM-169): check and show first, then write ---------------------------------------
+document.getElementById('import-xml').addEventListener('click', () => document.getElementById('import-xml-file').click());
+document.getElementById('export-jpg').addEventListener('click', () => exportGraphJpgIdentified(cy, 'fta_manual_' + analysisId, 'Fault trees of the Manual FTA, analysis ' + analysisId + ', JPG'));
+document.getElementById('help-tricks').addEventListener('click', () => document.getElementById('help-dialog').showModal());
+
+// ---- guided tour (SFM-178, SFM-182): every function and shortcut, shown on an example tree ---------
+// The tour draws a small example fault tree in place of the analysis (only drawn -- nothing is saved; your
+// trees come back when it ends) and points at its parts: a step has `el` (a page element), `nodes` (event
+// codes of the example: the spotlight frames them) or neither (shown in the middle); `enter` / `leave` show
+// things on the example (the right-click menu, a selection, search hits). Clicks on the page are blocked
+// meanwhile. → / Enter next, ← back, Esc ends. Opened from Help > Guided tour and the help dialog (no toolbar button, user 2026-10-24).
+const K = k => `<kbd>${k}</kbd>`;
+const tourNodes = (...codes) => () => cy.nodes('[type = "manual_event"]').filter(n => codes.includes(n.data('code')));
+function tourMenu(code) {                           // the real right-click menu of an example event
+    const n = tourNodes(code)().first(), p = n.renderedPosition();
+    showMenu({ x: p.x + 40, y: p.y - 30 }, `${n.data('code')}: ${n.data('label')}`, eventMenuItems(n));
+}
+const TOUR = [
+    { title: 'Welcome', text: `<p>Integrity Workbench &ndash; <b>Fault Tree</b> draws fault trees by hand.</p>
+        <p>This tour explains every function on a small <b>example tree</b> (only shown &ndash; nothing is saved; your own
+        trees come back afterwards). ${K('→')} / ${K('Enter')} next, ${K('←')} back, ${K('Esc')} ends.</p>` },
+    { el: '#manual-fta-graph', title: 'The example', text: `<p>Both headlamps of a car go dark at night. The <b>top event</b>
+        is on top; below it, what has to happen for it to occur, down to the <b>basic events</b> (circles; a diamond: an <b>undeveloped event</b>, right-click switches).</p>
+        <p>Each event is a box with its title, a symbol and its <b>ID</b> below (TP- top event, GT- gate, EV- basic event).</p>` },
+    { nodes: tourNodes('TP-1'), title: 'Top event and AND gate', text: `<p>The top event uses an <b>AND</b> gate: it happens only
+        when <b>both</b> headlamps are dark. The square next to the box is its <b>safety criticality</b> (here ASIL B);
+        &ldquo;Hazard&rdquo; at the right is its <b>label</b>.</p>` },
+    { nodes: tourNodes('GT-1', 'GT-2'), title: 'OR gates', text: `<p>A headlamp is dark if its bulb burns out <b>OR</b> the fuse
+        blows. A gate with two or more inputs shows its OR / AND symbol; right-click switches it.</p>` },
+    { nodes: tourNodes('EV-1', 'EV-2'), title: 'Basic events', text: `<p>Basic events (circles) end a branch &ndash; nothing goes
+        below them. EV-2 has a <b>colour</b> (yellow) and the criticality <b>QM</b>; EV-1 has none, so no square is drawn.</p>
+        <p>Criticalities: H1&ndash;H4+, ANY, QM, ASIL A&ndash;D (in the Integrity Workbench: those of the project's profile).</p>` },
+    { nodes: tourNodes('EV-3'), title: 'Repeated event', text: `<p>The <b>same fuse</b> feeds both lamps, so EV-3 appears twice
+        &ndash; with the same ID it is the same event, drawn with a <b>dashed</b> box.</p><p>When you change one, you are
+        asked: change <b>all occurrences</b>, or <b>only this one</b> (it then gets a new ID and becomes independent).</p>` },
+    { nodes: tourNodes('EV-1'), enter: () => choose(tourNodes('EV-1')().first()), leave: unchoose, title: 'Select, rename, edit',
+        text: `<p>A <b>click</b> (tap) selects an event &ndash; red with a dashed frame. A <b>second click</b> on its title (or ${K('F2')})
+        renames the title right in the box, like a file in Windows; a second click on the <b>ID box</b> (EV-1) renames the ID.
+        ${K('Enter')} saves, ${K('Esc')} cancels.</p>
+        <p>A <b>double-click</b> opens everything: title, description, ID, label and safety criticality.</p>` },
+    { el: '#manual-fta-menu', enter: () => tourMenu('GT-1'), leave: hideMenu, title: 'Right-click menu',
+        text: `<p><b>Right-click</b> an event for this menu &ndash; on a phone or tablet: <b>long-press</b>. Add a gate / basic
+        event below, edit, select, move / copy, AND / OR, make it a gate or a basic event, move it left / right, safety
+        criticality, colour, label, delete. Right-click the empty background to add a top event or fit the view to the window.</p>` },
+    { nodes: tourNodes('EV-1', 'EV-2'), enter: () => tourNodes('EV-1', 'EV-2')().addClass('picked'),
+        leave: () => cy.nodes('.picked').removeClass('picked'), title: 'Select several',
+        text: `<p>${K('Ctrl')} + <b>click</b> selects events (blue, here the two bulbs) &ndash; or <b>Select</b> in the menu.
+        Right-click (long-press) one of them to set the
+        criticality, colour, AND / OR or to delete them all at once. A plain click anywhere or ${K('Esc')} clears it.</p>` },
+    { nodes: tourNodes('EV-1', 'GT-2'), title: 'Move and copy branches', text: `<p>Hold ${K('Ctrl')} and <b>drag</b> an event
+        (with everything below it) onto a gate &ndash; e.g. EV-1 onto GT-2. A menu offers <b>Move here</b>, <b>Copy</b>
+        (same IDs: the same event, like the fuse) and <b>Copy with new IDs</b> (an independent copy).</p>
+        <p>Without a Ctrl key: <b>Move / copy to&hellip;</b> in the event's menu, then tap the gate.</p>` },
+    { nodes: tourNodes('GT-2'), title: 'Pages for big trees', text: `<p>Right-click a gate &gt; <b>Continue on a new page</b>
+        (a check box): its branch moves onto a page of its own with the gate on top, and here a <b>triangle with
+        &ldquo;&hellip;&rdquo;</b> stands for it &ndash; <b>click the triangle</b> to jump to that page. The <b>Page</b> list
+        switches pages too; the LaTeX / PDF export prints one page each (there the triangle shows the page number).</p>` },
+    { el: '#add-top', title: 'New top event', text: `<p>Starts a new tree. You are asked whether it goes into this analysis
+        or onto a new analysis page.</p>` },
+    { el: '#add-gate', title: 'New gate', text: `<p>Click the icon, then click gates or top events: a new gate is added below
+        each one you click. ${K('Esc')}, the <b>arrow</b> icon left of it or the icon again ends it.</p>` },
+    { el: '#add-basic', title: 'New basic event', text: `<p>The same for basic events.</p>` },
+    { el: '#fit-window', title: 'Fit to window', text: `<p>Shows the whole analysis. ${K('Mouse wheel')} zooms, dragging the
+        background moves the view.</p>` },
+    { el: '#find-basic', enter: () => tourNodes('EV-1', 'EV-2')().addClass('found'),
+        leave: () => cy.nodes('.found').removeClass('found'), title: 'Find gates / basic events',
+        text: `<p>The two binocular icons search gates (with top events) or basic events by <b>ID</b>, words of the
+        <b>title / description / label</b>, a <b>criticality</b> (<code>ASIL B</code>, <code>H3+</code> &ndash; exact) or a
+        <b>colour</b> (<code>yellow</code>; <code>blue</code> = standard). Here: &ldquo;bulb&rdquo; finds the two bulbs.</p>
+        <p>They search <b>all pages and analyses</b>: ${K('Enter')} / ${K('Shift')}+${K('Enter')} goes to the next / previous
+        match and opens its page; ${K('Esc')} closes.</p>` },
+    { el: '#fta-explorer', title: 'Analyses', text: `<p>An <b>analysis</b> is a separate set of fault trees (like pages);
+        choose it here. <b>File</b> creates, renames, duplicates (new IDs) and deletes analyses. IDs are unique across
+        all of them.</p>` },
+    { el: '#menubar .menu:nth-child(2)', title: 'Import / Export', text: `<p><b>Export JPG</b>: a sharp image of the diagram.
+        <b>Export LaTeX</b>: a LaTeX document, each tree a TikZ picture to copy into your own document (<b>Export PDF</b>
+        compiles it, where available). <b>Export XML</b>: readable text &ndash; good for git and AI tools, and to import
+        again with <b>Import XML</b>.</p>` },
+    { title: 'All shortcuts', text: `<table>
+        <tr><td>Click</td><td>edit an event</td></tr>
+        <tr><td>Right-click</td><td>event menu</td></tr>
+        <tr><td>${K('Ctrl')} + click</td><td>select several</td></tr>
+        <tr><td>${K('Ctrl')} + drag</td><td>move / copy a branch</td></tr>
+        <tr><td>${K('Enter')}</td><td>save the edit / next match</td></tr>
+        <tr><td>${K('Shift')}+${K('Enter')}</td><td>new line / previous match</td></tr>
+        <tr><td>${K('Esc')}</td><td>cancel, end adding, clear the selection, close the search</td></tr>
+        <tr><td>Wheel / drag</td><td>zoom / move the view</td></tr></table>
+        <p style="margin-top:8px;">Help &gt; Keyboard and mouse shows this table any time. When the tour ends, your
+        own trees are shown again.</p>` },
+];
+let tourAt = -1, tourDemo = false;
+const tourSpot = Object.assign(document.createElement('div'), { id: 'tour-spot', hidden: true });
+const tourPop = Object.assign(document.createElement('div'), { id: 'tour-pop', hidden: true });
+const tourBlock = Object.assign(document.createElement('div'), { id: 'tour-block', hidden: true });
+tourPop.setAttribute('role', 'dialog');
+document.body.append(tourBlock, tourSpot, tourPop);
+['click', 'mousedown', 'contextmenu', 'wheel', 'dblclick'].forEach(type =>
+    tourBlock.addEventListener(type, e => { e.preventDefault(); e.stopPropagation(); }, { passive: false }));
+
+function tourRect(step) {                           // the spotlight's rectangle on the screen, or null
+    if (step.nodes && cy) {
+        const nodes = step.nodes();
+        if (!nodes.length) return null;
+        const box = nodes.renderedBoundingBox({ includeLabels: false }), c = cy.container().getBoundingClientRect();
+        return { left: c.left + box.x1, top: c.top + box.y1, right: c.left + box.x2, bottom: c.top + box.y2,
+                 width: box.w, height: box.h };
+    }
+    const target = step.el && document.querySelector(step.el);
+    return target && !target.hidden ? target.getBoundingClientRect() : null;
+}
+
+function showTourStep(i) {
+    if (tourAt >= 0 && TOUR[tourAt].leave) TOUR[tourAt].leave();
+    tourAt = i;
+    const step = TOUR[i];
+    if (step.enter) step.enter();
+    tourPop.innerHTML = `<h4>${step.title}</h4><div class="tour-text">${step.text}</div><div class="tour-nav">
+        <span class="tour-step">${i + 1} / ${TOUR.length}</span>
+        <button type="button" class="secondary" data-tour="end">End</button>
+        <button type="button" class="secondary" data-tour="back" ${i ? '' : 'disabled'}>Back</button>
+        <button type="button" data-tour="next">${i === TOUR.length - 1 ? 'Done' : 'Next'}</button></div>`;
+    tourPop.hidden = false;
+    // the visible screen (on a phone innerWidth can be wider than what is shown)
+    const vw = Math.min(innerWidth, document.documentElement.clientWidth || innerWidth);
+    const vh = Math.min(innerHeight, document.documentElement.clientHeight || innerHeight);
+    const pw = tourPop.offsetWidth, ph = tourPop.offsetHeight;
+    const r = tourRect(step);
+    if (!r) {
+        tourSpot.hidden = true;
+        Object.assign(tourPop.style, { left: `${(vw - pw) / 2}px`, top: `${Math.max(16, (vh - ph) / 2)}px` });
+    } else {
+        const pad = step.nodes ? 8 : 4;
+        tourSpot.hidden = false;
+        Object.assign(tourSpot.style, { left: `${r.left - pad}px`, top: `${r.top - pad}px`,
+                                        width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
+        // below the target if there is room, else above, else beside it, else inside it (the big graph area)
+        let top = r.bottom + pad + 10, left = Math.min(Math.max(8, r.left), vw - pw - 8);
+        if (top + ph > vh - 8) {
+            if (r.top - pad - ph - 10 >= 8) top = r.top - pad - ph - 10;
+            else if (r.right + pad + 10 + pw <= vw - 8) { top = Math.max(8, Math.min(r.top, vh - ph - 8)); left = r.right + pad + 10; }
+            else if (r.left - pad - 10 - pw >= 8) { top = Math.max(8, Math.min(r.top, vh - ph - 8)); left = r.left - pad - 10 - pw; }
+            else top = Math.max(8, r.top + 16);
+        }
+        Object.assign(tourPop.style, { left: `${Math.max(8, Math.min(left, vw - pw - 8))}px`,
+                                       top: `${Math.max(8, Math.min(top, vh - ph - 8))}px` });
+    }
+    tourPop.querySelector('[data-tour="next"]').focus({ preventScroll: true });
+}
+async function startTour() {
+    const help = document.getElementById('help-dialog');
+    if (help.open) help.close();
+    closeMenus(); hideMenu(); setAddMode(null); closeSearch(); clearPicks();
+    if (!tourDemo) {
+        try {
+            const example = await api('GET', '/api/manual-fta/example-graph');
+            await loadGraph({ data: example, keepViewport: false });
+            cy.fit(undefined, 50);
+            if (cy.zoom() > 1.1) { cy.zoom(1.1); cy.center(); }
+            tourDemo = true;
+        } catch (e) { /* the tour still explains, without the example */ }
+    }
+    tourBlock.hidden = false;
+    showTourStep(0);
+}
+async function endTour() {
+    if (tourAt >= 0 && TOUR[tourAt].leave) TOUR[tourAt].leave();
+    tourAt = -1; tourSpot.hidden = true; tourPop.hidden = true; tourBlock.hidden = true;
+    try { localStorage.setItem('faultTreeTourSeen', '1'); } catch (e) { /* private window */ }
+    if (tourDemo) { tourDemo = false; await loadGraph({ keepViewport: false }); }   // your own trees again
+}
+tourPop.addEventListener('click', e => {
+    const b = e.target.closest('[data-tour]');
+    if (!b) return;
+    if (b.dataset.tour === 'end') endTour();
+    else if (b.dataset.tour === 'back' && tourAt > 0) showTourStep(tourAt - 1);
+    else if (b.dataset.tour === 'next') { if (tourAt < TOUR.length - 1) showTourStep(tourAt + 1); else endTour(); }
+});
+document.addEventListener('keydown', e => {
+    if (tourAt < 0) return;
+    if (e.key === 'Escape') endTour();
+    else if (e.key === 'ArrowRight' || e.key === 'Enter') { if (tourAt < TOUR.length - 1) showTourStep(tourAt + 1); else endTour(); }
+    else if (e.key === 'ArrowLeft') { if (tourAt > 0) showTourStep(tourAt - 1); }
+    else if (e.key !== 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); return; }   // no editing meanwhile
+    else return;
+    e.preventDefault(); e.stopImmediatePropagation();
+}, true);
+addEventListener('resize', () => { if (tourAt >= 0) showTourStep(tourAt); });
+document.getElementById('help-tour').addEventListener('click', startTour);
+document.getElementById('help-tour-start').addEventListener('click', startTour);
+
+// ---- guided hints (SFM-211, user 2026-10-26): at once (no delay, user), an empty page points at the new top event
+// icon, a page with only top events at the gate / basic event icons. Hidden while the tour, a dialog, a menu, an add
+// mode or another view is open, back afterwards. "OK" hides that hint until the page's state changes; Help > Guided
+// hints (or "Turn hints off") switches them off for this browser.
+const GUIDE_KEY = 'faultTreeGuide';
+const GUIDE_STEPS = {
+    top: { els: ['#add-top'], text: `<b>Start here:</b> click this icon to create a <b>top event</b> &ndash; the
+        undesired event your fault tree explains.` },
+    below: { els: ['#add-gate', '#add-basic'], text: `<b>Next:</b> add a <b>gate</b> or a <b>basic event</b> &ndash; select
+        one of these icons, then click the top event; it is added below it.` },
+};
+let guideOn = true, guideTimer = 0, guideShown = '', guideDismissed = '', guideLast = '';
+try { guideOn = localStorage.getItem(GUIDE_KEY) !== '0'; } catch (e) { /* private window */ }
+const guidePop = Object.assign(document.createElement('div'), { id: 'guide-pop', hidden: true });
+guidePop.setAttribute('role', 'status');
+document.body.append(guidePop);
+const guideItem = document.getElementById('help-guide');
+
+function guideState() {                             // which hint the page calls for: 'top', 'below' or ''
+    if (!cy || tourDemo) return '';
+    const events = cy.nodes('[type = "manual_event"]');
+    if (!events.length) return 'top';
+    return events.every(n => n.id() === n.data('top')) ? 'below' : '';
+}
+function guideBusy() {                              // the user is in the middle of something
+    return tourAt >= 0 || view !== 'diagram' || addMode || renaming || !menu.hidden
+        || document.querySelector('dialog[open]') || menuBar.querySelector('.menu-list:not([hidden])');
+}
+function hideGuide() {
+    guidePop.hidden = true; guideShown = '';
+    document.querySelectorAll('.guide-target').forEach(el => el.classList.remove('guide-target'));
+}
+function showGuide(key) {
+    const targets = GUIDE_STEPS[key].els.map(s => document.querySelector(s)).filter(el => el && el.offsetParent);
+    if (!targets.length) return;
+    hideGuide();
+    guideShown = key;
+    targets.forEach(el => el.classList.add('guide-target'));
+    guidePop.innerHTML = `<div>${GUIDE_STEPS[key].text}</div><div class="guide-nav">
+        <button type="button" class="secondary" data-guide="off">Turn hints off</button>
+        <button type="button" data-guide="ok">OK</button></div>`;
+    guidePop.hidden = false;
+    // below the icons, the arrow at their middle
+    const r = targets.map(el => el.getBoundingClientRect());
+    const mid = (Math.min(...r.map(b => b.left)) + Math.max(...r.map(b => b.right))) / 2;
+    const vw = document.documentElement.clientWidth || innerWidth, pw = guidePop.offsetWidth;
+    const x = Math.max(8, Math.min(mid - pw / 2, vw - pw - 8));
+    Object.assign(guidePop.style, { left: `${x}px`, top: `${Math.max(...r.map(b => b.bottom)) + 10}px` });
+    guidePop.style.setProperty('--arrow', `${Math.max(14, Math.min(mid - x, pw - 14))}px`);
+}
+// checked after every graph load and every input (a tick later, when the input's own handlers have run)
+function scheduleGuide() {
+    clearTimeout(guideTimer);
+    guideTimer = setTimeout(() => {
+        const state = guideState();
+        if (state !== guideLast) { guideLast = state; guideDismissed = ''; }     // a new state: its hint may show again
+        if (!guideOn || !state || state === guideDismissed || guideBusy()) { hideGuide(); return; }
+        if (guideShown !== state) showGuide(state);
+    }, 0);
+}
+function setGuide(on) {
+    guideOn = on;
+    try { localStorage.setItem(GUIDE_KEY, on ? '1' : '0'); } catch (e) { /* private window */ }
+    guideItem.setAttribute('aria-checked', String(on));
+    guideItem.querySelector('.check').textContent = on ? '✓' : '';
+    if (!on) { clearTimeout(guideTimer); hideGuide(); } else { guideDismissed = ''; scheduleGuide(); }
+}
+guideItem.addEventListener('click', () => setGuide(!guideOn));
+guideItem.querySelector('.check').textContent = guideOn ? '✓' : '';
+guideItem.setAttribute('aria-checked', String(guideOn));
+guidePop.addEventListener('click', e => {
+    const b = e.target.closest('[data-guide]');
+    if (!b) return;
+    if (b.dataset.guide === 'off') setGuide(false);
+    else { guideDismissed = guideShown; hideGuide(); }
+});
+// any input may open a dialog, a menu or an add mode (hint away) or close it (hint back)
+for (const type of ['click', 'keyup', 'contextmenu'])
+    document.addEventListener(type, e => { if (!guidePop.contains(e.target)) scheduleGuide(); }, true);
+addEventListener('resize', () => { if (guideShown) showGuide(guideShown); });
+
+// ---- menu bar (SFM-176): click a title to open its list; while one is open, pointing at another opens that;
+// a click on an item, outside the menus or Esc closes it
+const menuBar = document.getElementById('menubar');
+function closeMenus() { menuBar.querySelectorAll('.menu-list').forEach(l => { l.hidden = true; }); menuBar.classList.remove('open'); }
+menuBar.querySelectorAll('.menu').forEach(menuEl => {
+    const title = menuEl.querySelector('.menu-title'), list = menuEl.querySelector('.menu-list');
+    title.addEventListener('click', () => {
+        const wasOpen = !list.hidden;
+        closeMenus();
+        if (!wasOpen) { list.hidden = false; menuBar.classList.add('open'); }
+    });
+    title.addEventListener('mouseenter', () => {
+        if (menuBar.classList.contains('open') && list.hidden) { closeMenus(); list.hidden = false; menuBar.classList.add('open'); }
+    });
+    list.addEventListener('click', e => { if (e.target.closest('button, a')) closeMenus(); });
+});
+document.addEventListener('mousedown', e => { if (!menuBar.contains(e.target)) closeMenus(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
+document.getElementById('import-xml-file').addEventListener('change', async evt => {
+    const file = evt.target.files[0];
+    evt.target.value = '';                          // the same file can be chosen again
+    if (!file) return;
+    const body = await file.arrayBuffer();
+    const call = apply => fetch(`/api/manual-fta/import?apply=${apply}&analysis=${encodeURIComponent(analysisId)}`, { method: 'POST', body,
+        headers: { 'Content-Type': 'application/xml' } }).then(r => r.json());
+    const check = await call(false);
+    const from = check.model && check.model.revision
+        ? `Exported from: ${check.model.project}, model revision ${check.model.revision} (${check.model.exported}).\n`
+          + `This model is now at ${check.current_revision}.\n\n` : '';
+    if (check.errors && check.errors.length) {
+        alert(`${file.name} cannot be imported:\n\n` + check.errors.map(e => '• ' + e).join('\n'));
+        return;
+    }
+    const list = check.trees.map(t => `• ${t.top}${t.title ? ' "' + t.title + '"' : ''}: ${t.events} event(s), ${t.action}`).join('\n');
+    const notes = (check.notes || []).length ? '\n\nNotes:\n' + check.notes.map(n => '• ' + n).join('\n') : '';
+    if (!confirm(`${from}Import from ${file.name} into the analysis "${analysisName()}":\n${list}${notes}\n\nImport these trees?`)) return;
+    const done = await call(true);
+    if (done.errors && done.errors.length) { alert('Import failed:\n\n' + done.errors.join('\n')); return; }
+    pageId = done.trees && done.trees.length ? done.trees[0].top : pageId;   // show the first imported tree (SFM-192: maybe on a page of its own; not a page -> the first page)
+    await loadGraph({ keepViewport: false });
+});
+
+// ---- analyses: separate Manual FTAs in one model (SFM-171) --------------------------------------
+// The chosen analysis: ?analysis= in the address first (so each Structure View window keeps its own),
+// else the last one chosen in this browser, else the first. Event IDs are unique in the whole model.
+let analysisId = '', analyses = [];
+const ANALYSIS_KEY = 'manualFtaAnalysis:' + "standalone";
+const analysisSelect = document.getElementById('analysis-select');
+const analysisName = () => (analyses.find(a => a.id === analysisId) || {}).name || '';
+
+async function loadAnalyses(preferred) {
+    analyses = await api('GET', '/api/manual-fta/analyses');
+    let stored = '';
+    try { stored = localStorage.getItem(ANALYSIS_KEY) || ''; } catch (e) { /* private window */ }
+    const wanted = [preferred, new URLSearchParams(location.search).get('analysis'), analysisId, stored]
+        .find(id => id && analyses.some(a => a.id === id));
+    analysisId = wanted || analyses[0].id;
+    analysisSelect.replaceChildren(...analyses.map(a =>
+        new Option(`${a.name} (${a.trees} tree${a.trees === 1 ? '' : 's'})`, a.id, false, a.id === analysisId)));
+    document.getElementById('analysis-delete').disabled = analyses.length < 2;
+    rememberAnalysis();
+}
+
+function rememberAnalysis() {
+    try { localStorage.setItem(ANALYSIS_KEY, analysisId); } catch (e) { /* private window */ }
+    const url = new URL(location.href);
+    url.searchParams.set('analysis', analysisId);
+    if (pageId) url.searchParams.set('page', pageId); else url.searchParams.delete('page');
+    url.searchParams.delete('flash'); url.searchParams.delete('flash_kind');
+    history.replaceState(null, '', url);
+    if (window.parent !== window) window.parent.postMessage({ type: 'tile-url', url: url.pathname + url.search }, location.origin);
+    for (const kind of ['xml', 'tex', 'pdf'])
+        document.getElementById('export-' + kind).href = `/fta-export/manual.${kind}?analysis=` + encodeURIComponent(analysisId);
+    const rwb = document.getElementById('export-rwb');            // absent while the RWB plugin is off (SFM-220)
+    if (rwb) rwb.href = '/fta-export/rwb/manual.xml?analysis=' + encodeURIComponent(analysisId);
+    for (const kind of ['tex', 'pdf']) if (compactOn) document.getElementById('export-' + kind).href += '&compact=' + compactOn;   // SFM-200/201
+}
+
+async function switchAnalysis(id, fit = true) {
+    setAddMode(null);
+    picked.clear();
+    if (id !== analysisId) pageId = '';                // another analysis starts on its page 1
+    await loadAnalyses(id);
+    await loadGraph({ keepViewport: !fit });
+}
+
+analysisSelect.addEventListener('change', () => switchAnalysis(analysisSelect.value));
+document.getElementById('analysis-new').addEventListener('click', async () => {
+    const name = prompt('Name of the new analysis:', '');
+    if (!name || !name.trim()) return;
+    try { const created = await api('POST', '/api/manual-fta/analyses', { name }); await switchAnalysis(created.id); }
+    catch (e) { alert(e.message); }
+});
+document.getElementById('analysis-rename').addEventListener('click', async () => {
+    const name = prompt('New name of the analysis:', analysisName());
+    if (!name || !name.trim() || name === analysisName()) return;
+    try { await api('PUT', '/api/manual-fta/analyses/' + encodeURIComponent(analysisId), { name }); await loadAnalyses(analysisId); }
+    catch (e) { alert(e.message); }
+});
+document.getElementById('analysis-copy').addEventListener('click', async () => {
+    const name = prompt('Name of the copy:', `${analysisName()} (copy)`);
+    if (!name || !name.trim()) return;
+    try { const copy = await api('POST', '/api/manual-fta/analyses', { name, copy_of: analysisId }); await switchAnalysis(copy.id); }
+    catch (e) { alert(e.message); }
+});
+document.getElementById('analysis-delete').addEventListener('click', async () => {
+    const current = analyses.find(a => a.id === analysisId);
+    if (!confirm(`Delete the analysis "${current.name}" with its ${current.trees} fault tree(s)?`)) return;
+    try { await api('DELETE', '/api/manual-fta/analyses/' + encodeURIComponent(analysisId)); analysisId = ''; await switchAnalysis(''); }
+    catch (e) { alert(e.message); }
+});
+
+// ---- search gates / basic events (SFM-174): by ID, text, H category or colour -----------------------
+// Plain text matches the ID, title, description and label (case-insensitive, anywhere); an H category
+// (H1 ... H4+, ANY) matches the category exactly; a colour name matches the colour ("blue" = standard).
+const searchBar = document.getElementById('search-bar'), searchInput = document.getElementById('search-input');
+const CRITICALITY_QUERY = /^(h[1-4]\+?|any|qm|asil\s*[a-d])$/i;
+const norm = v => (v || '').toLowerCase().replace(/\s+/g, '');
+// global (user, 2026-10-24: "the search buttons shall be global (not only on the current page)", SFM-203): every
+// event of every analysis (the Grid's rows, GET /api/manual-fta/table, loaded when the search opens and after changes),
+// the current analysis first, then page and tree order; the next match opens its page (and analysis) and is selected
+let searchKind = '', matches = [], matchAt = -1, searchRows = null, searchToken = 0, searchJumping = false;
+let searchHome = '';                               // the analysis the search was opened in: its matches first, a fixed order
+
+function rowMatches(r, q) {
+    if (CRITICALITY_QUERY.test(q)) return norm(r.criticality) === norm(q);    // "asil b" = "ASIL B"
+    const colour = r.color || 'blue';
+    if (q === colour || (q === 'standard' && !r.color)) return true;
+    return [r.id, r.title, r.description, r.label].some(v => (v || '').toLowerCase().includes(q));
+}
+
+async function loadSearchRows() {
+    const token = ++searchToken;
+    try {
+        const t = await api('GET', '/api/manual-fta/table');
+        if (token === searchToken) searchRows = t;
+    } catch (e) { if (token === searchToken) searchRows = { gates: [], events: [] }; }
+}
+
+function markSearchOnPage() {
+    if (!cy) return;
+    cy.nodes().removeClass('found found-current search-dim');
+    if (!matches.length) return;
+    const ids = new Set(matches.map(r => r.id));
+    const all = cy.nodes('[type = "manual_event"]');
+    all.filter(n => !ids.has(n.data('code'))).addClass('search-dim');
+    all.filter(n => ids.has(n.data('code'))).addClass('found');
+}
+
+async function runSearch(keepAt = false, reload = false) {
+    if (searchBar.hidden) return;
+    if (reload || !searchRows) await loadSearchRows();
+    const q = searchInput.value.trim().toLowerCase();
+    const count = document.getElementById('search-count');
+    if (!q || !searchRows) { matches = []; matchAt = -1; count.textContent = ''; markSearchOnPage(); return; }
+    const order = new Map(analyses.map((a, i) => [a.id, a.id === searchHome ? -1 : i]));
+    const current = keepAt && matchAt >= 0 && matches[matchAt] ? matches[matchAt].id : null;   // stay on this event
+    const pool = searchKind === 'gate' ? searchRows.gates : searchRows.events;
+    matches = pool.filter(r => rowMatches(r, q)).map((r, i) => ({ ...r, _i: i }))
+        .sort((a, b) => (order.get(a.analysis) ?? 99) - (order.get(b.analysis) ?? 99)
+                        || (a.page_number || 0) - (b.page_number || 0) || a._i - b._i);
+    markSearchOnPage();
+    if (!matches.length) { matchAt = -1; count.textContent = 'no match'; return; }
+    const again = current === null ? -1 : matches.findIndex(r => r.id === current);
+    await showMatch(again >= 0 ? again : keepAt ? Math.min(Math.max(matchAt, 0), matches.length - 1) : 0, !keepAt);
+}
+
+// the match's place for the counter: its page, and its analysis when it is another one
+function matchPlace(r) {
+    const page = r.page ? `page ${r.page_number} ${r.page}` : `page ${r.page_number || 1}`;
+    return r.analysis !== analysisId ? `${r.analysis_name}, ${page}` : page;
+}
+
+async function showMatch(i, go = true) {
+    if (!matches.length) return;
+    matchAt = (i + matches.length) % matches.length;
+    const r = matches[matchAt];
+    document.getElementById('search-count').textContent = `${matchAt + 1} of ${matches.length} \u00b7 ${matchPlace(r)}`;
+    if (go && (r.analysis !== analysisId || r.page !== pageId)) {         // on another page: open it there
+        setView('diagram');
+        searchJumping = true;
+        try {
+            if (r.analysis !== analysisId) await switchAnalysis(r.analysis);   // the reloads mark the matches again
+            if (r.page !== pageId) await goToPage(r.page);
+        } finally { searchJumping = false; }
+    }
+    if (!cy) return;
+    cy.nodes('.found-current').removeClass('found-current');
+    let n = cy.$id(r.at);
+    if (!n.length) n = cy.nodes(`[type = "manual_event"]`).filter(x => x.data('code') === r.id).first();
+    if (!n.length) return;
+    n.addClass('found-current');
+    cy.animate({ center: { eles: n } }, { duration: 200 });
+}
+
+function openSearch(kind) {
+    searchKind = kind;
+    searchHome = analysisId;
+    document.getElementById('search-what').textContent = kind === 'gate' ? 'Find gates (all pages)' : 'Find basic events (all pages)';
+    searchBar.hidden = false;
+    searchInput.focus();
+    searchInput.select();
+    runSearch(false, true);
+}
+
+function closeSearch() {
+    searchBar.hidden = true;
+    if (cy) cy.nodes().removeClass('found found-current search-dim');
+    matches = []; matchAt = -1; searchRows = null;
+}
+
+document.getElementById('find-gate').addEventListener('click', () => openSearch('gate'));
+document.getElementById('find-basic').addEventListener('click', () => openSearch('basic'));
+document.getElementById('search-next').addEventListener('click', () => showMatch(matchAt + 1));
+document.getElementById('search-prev').addEventListener('click', () => showMatch(matchAt - 1));
+document.getElementById('search-close').addEventListener('click', closeSearch);
+searchInput.addEventListener('input', () => runSearch());
+searchInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); showMatch(matchAt + (e.shiftKey ? -1 : 1)); }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSearch(); }
+});
+
+// counts in the selector stay right after adding / deleting trees; an open search is run again
+const _loadGraph = loadGraph;
+loadGraph = async function (options = {}) {
+    await _loadGraph(options);
+    if (!searchBar.hidden) runSearch(true, !searchJumping);      // after an edit: fresh rows; after a jump: the same
+    const count = cy ? cy.nodes('[type = "manual_event"]').filter(n => n.id() === n.data('top')).length : 0;
+    const current = analyses.find(a => a.id === analysisId);
+    if (current && current.trees !== count) {
+        current.trees = count;
+        const option = [...analysisSelect.options].find(o => o.value === analysisId);
+        if (option) option.textContent = `${current.name} (${count} tree${count === 1 ? '' : 's'})`;
+    }
+    scheduleGuide();                                // SFM-211: an empty page / only top events -> a hint after a while
+};
+
+// the explorer: shown on wide screens (not in a Structure View window), the choice remembered per browser (SFM-194)
+{
+    let show = window.innerWidth > 900 && window.parent === window;
+    try { const v = localStorage.getItem(XP_KEY); if (v !== null) show = v === '1'; } catch (e) { /* private window */ }
+    setExplorer(show);
+}
+loadAnalyses().then(() => loadGraph()).then(() => {
+    let seen = true;
+    try { seen = !!localStorage.getItem('faultTreeTourSeen'); } catch (e) { /* private window */ }
+    if (window.FTA_STANDALONE && !seen) startTour();      // the shared standalone: first visit starts the tour
+});
+</script>
+
+        <div class="standalone-note">Your fault trees are stored in this browser (nothing is uploaded) &mdash;
+        File &gt; Keep on this computer saves them and their revisions in a folder of yours (Chrome, Edge);
+        Import / Export &gt; Export XML keeps a copy or moves them to another computer.
+        &copy; TEGRITY &middot; <a href="https://tegrity.eu" target="_blank" rel="noopener">tegrity.eu</a>
+        &middot; <span id="app-version"></span>
+        <button type="button" id="new-version" hidden title="A newer version is published -- load it">New version: reload</button>
+        <button type="button" class="secondary" id="install-app" hidden title="Install as an app: own window, Start menu / taskbar icon, works offline">Install as app</button></div>
+    </main>
+    <script>
+    // Progressive Web App (SFM-181): the service worker keeps every file for offline use; where the browser
+    // can install the page as an app (Edge / Chrome over HTTPS), the "Install as app" button offers it.
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+    (function () {
+        const button = document.getElementById('install-app');
+        let offer = null;
+        addEventListener('beforeinstallprompt', e => { e.preventDefault(); offer = e; button.hidden = false; });
+        addEventListener('appinstalled', () => { offer = null; button.hidden = true; });
+        button.addEventListener('click', async () => {
+            if (!offer) return;
+            offer.prompt();
+            await offer.userChoice;
+            offer = null; button.hidden = true;
+        });
+    })();
+    // Version and About (SFM-214, user 2026-10-27: "how i know i use the right software version?"): js/version.js
+    // is the running build (cached with the app), version.json the published one (never cached, fetched fresh).
+    (function () {
+        const mine = window.FTA_VERSION || { version: '?', build: '?' };
+        const label = v => `${v.version} (build ${v.build})`;
+        document.getElementById('app-version').textContent = `Version ${mine.version}`;
+        document.getElementById('app-version').title = `Build ${mine.build}`;
+        let published = null, checked = false;
+        async function check() {
+            try {
+                const r = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+                published = r.ok ? await r.json() : null;
+            } catch (e) { published = null; }
+            checked = true;
+            document.getElementById('new-version').hidden = !(published && published.build && published.build !== mine.build);
+            return published;
+        }
+        async function reloadNew() {          // drop the offline copy, so the reload loads the published files
+            try {
+                for (const k of await caches.keys()) if (k.startsWith('fault-tree-pro-max-')) await caches.delete(k);
+                const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+                if (reg) await reg.update();
+            } catch (e) { /* no cache / service worker: a plain reload */ }
+            location.reload();
+        }
+        document.getElementById('new-version').addEventListener('click', reloadNew);
+        if (location.protocol !== 'file:') check();
+        function browserName() {
+            const ua = navigator.userAgent;
+            for (const [name, re] of [['Microsoft Edge', 'Edg/([0-9.]+)'], ['Firefox', 'Firefox/([0-9.]+)'],
+                                      ['Chrome', 'Chrome/([0-9.]+)'], ['Safari', 'Version/([0-9.]+).*Safari']]) {
+                const m = ua.match(new RegExp(re));
+                if (m) return `${name} ${m[1]}`;
+            }
+            return ua;
+        }
+        const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+        const dialog = document.createElement('dialog');
+        dialog.id = 'about-dialog'; dialog.className = 'help-dialog';
+        document.body.appendChild(dialog);
+        async function showAbout() {
+            const folder = typeof window.showDirectoryPicker === 'function';
+            const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
+            const render = () => {
+                let update;
+                if (location.protocol === 'file:') update = 'not checked (opened from a file on this computer)';
+                else if (!checked) update = 'checking&hellip;';
+                else if (!published) update = '<span class="warn">could not check (offline?)</span>';
+                else if (published.build === mine.build) update = '<span class="ok">this is the latest published version</span>';
+                else update = `<span class="warn">a newer version is published: ${esc(label(published))}</span> `
+                    + '<button type="button" id="about-reload">Reload to use it</button>';
+                dialog.innerHTML = '<form method="dialog"><h3 style="margin-top:0;">About Fault Tree</h3><table>'
+                    + row('Version', `<b id="about-version">${esc(label(mine))}</b>`)
+                    + row('Update', `<span id="about-update">${update}</span>`)
+                    + row('Opened from', esc(location.href.split('?')[0]))
+                    + row('Browser', esc(browserName()))
+                    + row('Folder on this computer', folder
+                        ? '<span class="ok">offered by this browser</span> &mdash; if File &gt; Keep on this computer still '
+                          + 'opens nothing, a company policy blocks it (the message there names the reason)'
+                        : '<span class="warn">not offered by this browser</span> &mdash; needs Chrome or Edge; use '
+                          + 'Import / Export &gt; Export XML')
+                    + '</table><p style="margin-bottom:0; text-align:right;"><button value="close">Close</button></p></form>';
+                const b = dialog.querySelector('#about-reload');
+                if (b) b.addEventListener('click', reloadNew);
+            };
+            render();
+            if (!dialog.open) dialog.showModal();
+            if (location.protocol !== 'file:') { await check(); render(); }
+        }
+        const tricks = document.getElementById('help-tricks');
+        if (tricks) {
+            const item = document.createElement('button');
+            item.type = 'button'; item.setAttribute('role', 'menuitem'); item.id = 'help-about';
+            item.textContent = 'About Fault Tree…';
+            item.addEventListener('click', showAbout);
+            tricks.parentElement.append(document.createElement('hr'), item);
+        }
+        window.FaultTreeAbout = { show: showAbout, check };
+    })();
+    </script>
+</body>
+</html>

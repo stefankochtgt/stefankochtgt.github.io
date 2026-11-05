@@ -1,17 +1,9 @@
-// Drawing PRO max -- offline cache (SFM-218), written by scripts/build_standalone_drawing.py.
-// Every file of the app is kept; a new build has a new CACHE name, so the next start loads it and drops the old.
-const CACHE = 'drawing-pro-max-c8e4905495fe';
-const FILES = ["./", "css/drawing.css", "css/style.css", "favicon.svg", "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "index.html", "js/drawing.js", "js/drawing_local.js", "js/version.js", "manifest.json"];
-self.addEventListener('install', e => {
-    e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
-});
-self.addEventListener('activate', e => {
-    e.waitUntil(caches.keys()
-        .then(keys => Promise.all(keys.filter(k => k.startsWith('drawing-pro-max-') && k !== CACHE).map(k => caches.delete(k))))
-        .then(() => self.clients.claim()));
-});
-self.addEventListener('fetch', e => {
-    if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
-    if (new URL(e.request.url).pathname.endsWith('/version.json')) return;   // the published version: always fresh
-    e.respondWith(caches.match(e.request, { ignoreSearch: true }).then(hit => hit || fetch(e.request)));
-});
+// Drawing moved to ../Drawing/ (2026-11-05). This replaces the old offline copy: it takes over the open
+// pages, sends them to the new address and removes itself. Saved fault trees / drawings stay (same browser storage).
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', e => e.waitUntil((async () => {
+    await self.clients.claim();
+    const pages = await self.clients.matchAll({ type: 'window' });
+    await self.registration.unregister();
+    for (const p of pages) p.navigate('../Drawing/').catch(() => {});
+})()));

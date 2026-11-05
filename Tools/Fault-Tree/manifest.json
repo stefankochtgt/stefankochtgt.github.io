@@ -1,6 +1,6 @@
 {
-  "name": "Fault Tree PRO max — Integrity Workbench",
-  "short_name": "Fault Tree PRO max",
+  "name": "Fault Tree — Integrity Workbench",
+  "short_name": "Fault Tree",
   "description": "Draw fault trees: top events, AND / OR gates, basic events, H categories / ASIL, JPG, LaTeX and XML export. Works offline; your data stays on your computer.",
   "id": "./",
   "start_url": "./",

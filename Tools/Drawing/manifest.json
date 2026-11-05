@@ -1,6 +1,6 @@
 {
-  "name": "Drawing PRO max — Integrity Workbench",
-  "short_name": "Drawing PRO max",
+  "name": "Drawing — Integrity Workbench",
+  "short_name": "Drawing",
   "description": "Draw diagrams like Visio: shapes, text, connectors, styles; PNG, SVG and XML export. Works offline; your data stays on your computer.",
   "id": "./",
   "start_url": "./",

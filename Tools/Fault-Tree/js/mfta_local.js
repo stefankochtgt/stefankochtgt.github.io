@@ -1,4 +1,4 @@
-// Integrity Workbench - Fault Tree PRO max, standalone (user, 2026-10-21: "a standalone fault tree pro max
+// Integrity Workbench - Fault Tree, standalone (user, 2026-10-21: "a standalone fault tree pro max
 // that I can share with my friends"). The page is the app's Manual FTA page (app/templates/manual_fta.html,
 // built by scripts/build_standalone_fta.py); this file answers its server calls in the browser instead:
 // window.fetch is wrapped, so /api/manual-fta/... and /api/model-identity never leave the browser. The data
@@ -21,7 +21,7 @@
     const TIKZ_COLORS = { yellow: 'yellow!35', green: 'green!25', red: 'red!25', orange: 'orange!30', grey: 'gray!20', purple: 'violet!20' };
     const MOVE_MODES = ['move', 'copy', 'copy_new'];
     const UNIT = 1.5, LEAF_W = 75.2 * UNIT, H_GAP = (18.4 + 16) * UNIT, ROW_PITCH = 128 * UNIT;   // graph.py
-    const TOOL = 'Integrity Workbench Fault Tree PRO max (standalone)';
+    const TOOL = 'Integrity Workbench Fault Tree (standalone)';
     const FORMAT = 'safety-model-fta', VERSION = '1';
 
     class FtaError extends Error {

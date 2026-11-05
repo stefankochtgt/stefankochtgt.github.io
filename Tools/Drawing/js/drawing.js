@@ -1,4 +1,4 @@
-// Drawing tab (SFM-218) -- also the whole of the standalone "Drawing PRO max" (scripts/build_standalone_drawing.py).
+// Drawing tab (SFM-218) -- also the whole of the standalone "Drawing" (scripts/build_standalone_drawing.py).
 // A small Visio: rectangles, ellipses, lines, text boxes and connectors glued to shapes (they follow when a
 // shape moves), connection points, text formatting and shape styles from a ribbon, several pages, undo,
 // copy / paste, PNG / SVG / XML export. In the workbench a shape can be linked to a model object.

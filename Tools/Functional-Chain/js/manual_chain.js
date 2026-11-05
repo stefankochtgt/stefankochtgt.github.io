@@ -1,4 +1,4 @@
-// Manual Functional Chain (SFM-217) -- also the whole of the standalone "Functional Chain PRO max"
+// Manual Functional Chain (SFM-217) -- also the whole of the standalone "Functional Chain"
 // (scripts/build_standalone_chain.py): every function, sub-function, system and flow is drawn by hand.
 // The drawing is the workbench's Functional Chain view (IDEF0 boxes, flow arrows, red dashed system
 // borders): the same Cytoscape styles, and the automatic layout is a port of
