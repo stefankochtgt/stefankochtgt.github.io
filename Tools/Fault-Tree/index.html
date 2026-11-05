@@ -2203,7 +2203,10 @@ loadAnalyses().then(() => loadGraph()).then(() => {
         const showState = () => {
             upd.disabled = false;
             upd.classList.toggle('newer', isNewer());
-            upd.textContent = isNewer() ? `Update to ${published.version}` : 'Check for update';
+            // same build date as the running one (two builds in one day): the build ID says which is newer
+            const name = isNewer() && published.version === mine.version ? `${published.version} (build ${published.build.slice(0, 6)})`
+                                                                          : isNewer() ? published.version : '';
+            upd.textContent = isNewer() ? `Update to ${name}` : 'Check for update';
             upd.title = isNewer() ? `Load the published version ${label(published)} -- yours is ${label(mine)}`
                                   : `Your version: ${label(mine)} -- look for a newer one`;
         };
