@@ -333,7 +333,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <tr><td><kbd>Ctrl</kbd> + drag onto a gate</td><td>menu: move here, copy (same IDs = the same event, dashed box), copy with new IDs</td></tr>
                 <tr><td>Change a repeated (dashed) event</td><td>asks: change all occurrences, or only this one (it gets a new ID)</td></tr>
                 <tr><th colspan="2">Selecting several</th></tr>
-                <tr><td><kbd>Ctrl</kbd> + click</td><td>select / unselect events (blue)</td></tr>
+                <tr><td><kbd>Ctrl</kbd> or <kbd>Shift</kbd> + click</td><td>select / unselect events (blue); an event selected by a plain click before joins them</td></tr>
                 <tr><td>Right-click a selected event</td><td>H category, colour, AND / OR gates or delete for all of them</td></tr>
                 <tr><td>Plain click anywhere, <kbd>Esc</kbd></td><td>clear the selection</td></tr>
                 <tr><th colspan="2">Finding and viewing</th></tr>
@@ -836,6 +836,14 @@ function togglePick(node) {
 }
 
 function clearPicks() { picked.clear(); showPicks(); }
+
+// Ctrl / Shift+click (user, 2026-11-05: "when one element is already selected then shift selecting shall lead to
+// multiple selection"): the event selected by a plain click joins the selection, then the clicked one toggles
+function addPick(node) {
+    if (!picked.size && chosen && chosen !== node.id() && cy.$id(chosen).length) picked.add(chosen);
+    unchoose();
+    togglePick(node);
+}
 
 function bulkMenuItems() {
     const nodes = [...picked].map(id => cy.$id(id));
@@ -1551,7 +1559,7 @@ async function loadGraph(options = {}) {
         const oe = evt.originalEvent || {};
         if (held) return;                                                      // the release of a long-press
         if (moveSource) { moveToTapped(evt.target); return; }                  // "Move / copy to…" (SFM-183)
-        if (oe.ctrlKey || oe.metaKey) { togglePick(evt.target); return; }      // Ctrl+click: pick several
+        if (oe.ctrlKey || oe.metaKey || oe.shiftKey) { addPick(evt.target); return; }   // Ctrl / Shift+click: pick several
         if (addMode) { placeOn(evt.target); return; }
         if (picked.size) { clearPicks(); return; }                             // a plain click first just unselects
         if (onTransfer(evt.target, evt.position)) { goToPage(evt.target.data('code')); return; }   // "…": its page
@@ -1566,7 +1574,7 @@ async function loadGraph(options = {}) {
     });
     cy.on('dbltap', 'node[type = "manual_event"]', evt => {
         const oe = evt.originalEvent || {};
-        if (addMode || moveSource || held || oe.ctrlKey || oe.metaKey) return;
+        if (addMode || moveSource || held || oe.ctrlKey || oe.metaKey || oe.shiftKey) return;
         clearTimeout(renameTimer);
         choose(evt.target);
         editEvent(evt.target);
@@ -1584,7 +1592,7 @@ async function loadGraph(options = {}) {
     cy.on('tap', evt => {                                                      // a plain click on the empty canvas
         const oe = evt.originalEvent || {};
         if (evt.target === cy) { endMoveTo(); unchoose(); }
-        if (evt.target === cy && !oe.ctrlKey && !oe.metaKey && picked.size) clearPicks();
+        if (evt.target === cy && !oe.ctrlKey && !oe.metaKey && !oe.shiftKey && picked.size) clearPicks();
     });
     // a long-press on a touch screen opens the same menu as a right-click (SFM-183)
     cy.on('tapstart', () => { held = false; });                             // a new touch
