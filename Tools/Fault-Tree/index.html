@@ -21,6 +21,8 @@
     #install-app[hidden] { display: none; }
     #new-version { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
     #new-version[hidden] { display: none; }
+    #update-app { margin-left: auto; font-size: 13px; padding: 3px 12px; align-self: center; font-weight: 600; }
+    #update-app.newer { background: #ea580c; border-color: #ea580c; color: #fff; }
     #about-dialog table { border-collapse: collapse; font-size: 13px; margin: 8px 0; }
     #about-dialog td { padding: 3px 12px 3px 0; vertical-align: top; }
     #about-dialog td:first-child { color: var(--muted, #6b7280); white-space: nowrap; }
@@ -2171,7 +2173,7 @@ loadAnalyses().then(() => loadGraph()).then(() => {
         const label = v => `${v.version} (build ${v.build})`;
         document.getElementById('app-version').textContent = `Version ${mine.version}`;
         document.getElementById('app-version').title = `Build ${mine.build}`;
-        let published = null, checked = false;
+        let published = null, checked = false, onChecked = () => {};
         async function check() {
             try {
                 const r = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
@@ -2179,6 +2181,7 @@ loadAnalyses().then(() => loadGraph()).then(() => {
             } catch (e) { published = null; }
             checked = true;
             document.getElementById('new-version').hidden = !(published && published.build && published.build !== mine.build);
+            onChecked();
             return published;
         }
         async function reloadNew() {          // drop the offline copy, so the reload loads the published files
@@ -2190,7 +2193,36 @@ loadAnalyses().then(() => loadGraph()).then(() => {
             location.reload();
         }
         document.getElementById('new-version').addEventListener('click', reloadNew);
-        if (location.protocol !== 'file:') check();
+        // SFM-249 (user, 2026-11-05: "when i install the apps ... can u make an update button to update it to latest
+        // version?"): an Update button in the heading, always there -- an installed app has no browser reload button.
+        // It turns orange when a newer build is published (checked at the start, every 30 min and on coming back).
+        const heading = document.querySelector('h1.app-heading');
+        const upd = document.createElement('button');
+        upd.type = 'button'; upd.id = 'update-app'; upd.className = 'secondary';
+        const isNewer = () => !!(published && published.build && published.build !== mine.build);
+        const showState = () => {
+            upd.disabled = false;
+            upd.classList.toggle('newer', isNewer());
+            upd.textContent = isNewer() ? `Update to ${published.version}` : 'Check for update';
+            upd.title = isNewer() ? `Load the published version ${label(published)} -- yours is ${label(mine)}`
+                                  : `Your version: ${label(mine)} -- look for a newer one`;
+        };
+        upd.addEventListener('click', async () => {
+            upd.disabled = true; upd.textContent = 'Checking…';
+            await check();
+            if (isNewer()) { upd.textContent = 'Updating…'; return reloadNew(); }
+            upd.textContent = published ? 'Up to date ✓' : 'No connection';
+            onChecked = () => {};
+            setTimeout(() => { onChecked = showState; showState(); }, 2500);
+        });
+        if (location.protocol !== 'file:') {
+            if (heading) { heading.appendChild(upd); showState(); onChecked = showState; }
+            check();
+            let last = Date.now();
+            const again = () => { if (Date.now() - last > 60000) { last = Date.now(); check(); } };
+            setInterval(again, 30 * 60000);
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) again(); });
+        }
         function browserName() {
             const ua = navigator.userAgent;
             for (const [name, re] of [['Microsoft Edge', 'Edg/([0-9.]+)'], ['Firefox', 'Firefox/([0-9.]+)'],

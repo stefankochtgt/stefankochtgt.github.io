@@ -252,6 +252,7 @@ const STYLE = [
         'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b', 'source-arrow-color': '#f59e0b',
     }},
     { selector: '.dimmed', style: { 'opacity': 0.2 } },
+    { selector: '.regroup-target', style: { 'border-color': '#f59e0b', 'border-width': 4, 'background-color': '#fffbeb' } },
 ];
 
 // ---- the page --------------------------------------------------------------------------------
@@ -277,7 +278,7 @@ const serverStore = {
 };
 
 const S = { store: null, doc: null, diagramId: null, cy: null, eh: null, undo: [], redo: [], linkMode: false,
-            shift: false, hovered: null, saveTimer: null, saving: Promise.resolve() };
+            shift: false, hovered: null, ctrl: false, drag: null, offer: false, saveTimer: null, saving: Promise.resolve() };
 
 const diagram = () => S.doc.diagrams.find(d => d.id === S.diagramId) || S.doc.diagrams[0];
 const fn = id => diagram().functions.find(f => f.id === id);
@@ -386,7 +387,18 @@ function wireGraph() {
     });
     cy.on('mouseover', 'node', evt => { S.hovered = evt.target.id(); focusMode(); });
     cy.on('mouseout', 'node', () => { S.hovered = null; focusMode(); });
-    cy.on('dragfree', 'node', evt => movedNodes(evt.target));
+    cy.on('grabon', 'node', evt => startDrag(evt.target));
+    cy.on('tapdrag', evt => { if (S.drag && !S.drag.released) { S.drag.pos = { ...evt.position }; regroupTarget(); } });
+    cy.on('freeon', 'node', () => {
+        if (S.drag) S.drag.released = true;
+        if (S.boxSelection !== undefined) { cy.boxSelectionEnabled(S.boxSelection); S.boxSelection = undefined; }
+    });
+    cy.on('dragfree', 'node', evt => {
+        const d = S.drag;
+        if (d && evt.target.id() === d.id) return endDrag(evt.target);
+        if (d && descendants(diagram(), d.id).has(evt.target.id())) return;   // moved with its box: endDrag() keeps it
+        movedNodes(evt.target);
+    });
     cy.on('dbltap', 'node', evt => { if (evt.target.data('real_id')) editFunction(evt.target.data('real_id')); });
     cy.on('cxttap', evt => contextMenu(evt));
     cy.on('tap', evt => { if (evt.target === cy) hideMenu(); });
@@ -394,18 +406,95 @@ function wireGraph() {
 }
 
 // A dragged box (and everything in it) keeps the place it was dropped at.
-function movedNodes(node) {
+function leafMoves(node, dx = 0, dy = 0) {
     const leaves = node.isParent() ? node.descendants().filter(n => n.data('type') === 'function_ref') : node.collection();
     const moves = [];
     leaves.forEach(n => {
         const f = fn(n.id());
         if (!f) return;
-        const p = n.position();
+        const p = { x: n.position('x') + dx, y: n.position('y') + dy };
         if (Math.abs((f.x ?? NaN) - p.x) > 0.5 || Math.abs((f.y ?? NaN) - p.y) > 0.5 || f.x === null || f.x === undefined)
             moves.push([f.id, p.x, p.y]);
     });
-    if (!moves.length) return;
-    change(() => { for (const [id, x, y] of moves) { const f = fn(id); f.x = x; f.y = y; } }, { redraw: false });
+    return moves;
+}
+
+const applyMoves = moves => { for (const [id, x, y] of moves) { const f = fn(id); f.x = x; f.y = y; } };
+
+function movedNodes(node) {
+    const moves = leafMoves(node);
+    if (moves.length) change(() => applyMoves(moves), { redraw: false });
+}
+
+// ---- dragging into / out of a function (SFM-248) ------------------------------------------------
+// While a function is dragged: Ctrl held over another function -> on release, offer to make it a
+// sub-function of that one; a sub-function dropped outside the box it was in -> offer to take it out.
+
+function startDrag(node) {
+    S.cy.nodes('.regroup-target').removeClass('regroup-target');
+    S.drag = null;
+    const f = node.data('real_id') && fn(node.id());
+    if (!f) return;
+    const box = f.parent && S.cy.$id(f.parent).length ? S.cy.$id(f.parent).boundingBox({ includeLabels: false }) : null;
+    S.drag = { id: f.id, parentBox: box, pos: null, target: null, released: false };
+    // Cytoscape ends a node drag when Ctrl is pressed during it and starts a box selection instead
+    S.boxSelection = S.cy.boxSelectionEnabled();
+    S.cy.boxSelectionEnabled(false);
+}
+
+const inside = (p, b) => p.x >= b.x1 && p.x <= b.x2 && p.y >= b.y1 && p.y <= b.y2;
+
+// The innermost function under the pointer the dragged one may go into (not itself, nothing inside
+// it, not the function it is already in).
+function regroupTarget() {
+    const d = S.drag;
+    if (!d || !d.pos) return;
+    let target = null;
+    if (S.ctrl) {
+        const skip = descendants(diagram(), d.id).add(d.id);
+        let area = Infinity;
+        S.cy.nodes().forEach(n => {
+            if (!n.data('real_id') || skip.has(n.id())) return;
+            const b = n.boundingBox({ includeLabels: false });
+            if (inside(d.pos, b) && b.w * b.h < area) { target = n.id(); area = b.w * b.h; }
+        });
+        if (target && target === (fn(d.id).parent || '')) target = null;
+    }
+    if (target === d.target) return;
+    d.target = target;
+    S.cy.nodes('.regroup-target').removeClass('regroup-target');
+    if (target) {
+        S.cy.$id(target).addClass('regroup-target');
+        status(`Release to choose: make ${d.id} a sub-function of ${target}`);
+    } else status('');
+}
+
+function endDrag(node) {
+    const d = S.drag;
+    d.released = true;
+    S.cy.nodes('.regroup-target').removeClass('regroup-target');
+    const f = fn(d.id), pos = d.pos || node.position();
+    const items = [];
+    if (d.target) {
+        const target = d.target, into = S.cy.$id(target);
+        // into a function without sub-functions: it becomes a box where it stands, the dragged one inside it
+        const moves = into.isParent() ? leafMoves(node)
+            : leafMoves(node, into.position('x') - node.position('x'), into.position('y') - node.position('y'));
+        items.push([`Make ${f.id} a sub-function of ${target}`, () => change(() => { applyMoves(moves); fn(f.id).parent = target; })]);
+    } else if (f.parent && d.parentBox && !inside(pos, d.parentBox)) {
+        const up = fn(f.parent) ? (fn(f.parent).parent || '') : '';
+        const moves = leafMoves(node);
+        items.push([up ? `Move ${f.id} out of ${f.parent} (into ${up})` : `Make ${f.id} a top-level function (not inside ${f.parent})`,
+                    () => change(() => { applyMoves(moves); fn(f.id).parent = up; })]);
+    }
+    status('');
+    if (!items.length) return movedNodes(node);
+    const moves = leafMoves(node);
+    items.push(['Only move it', () => { if (moves.length) change(() => applyMoves(moves)); else render(); }],
+               ['Put it back', () => render()]);
+    S.offer = true;
+    S.dropClick = true;          // the click that ends this drag must not close the offer at once
+    showMenu(items, f.id, S.cy.$id(f.id).renderedPosition());
 }
 
 function focusMode() {
@@ -555,7 +644,10 @@ function relayout() {
 
 // ---- right-click menu ------------------------------------------------------------------------
 
-function hideMenu() { $('chain-menu').hidden = true; }
+function hideMenu() {
+    $('chain-menu').hidden = true;
+    if (S.offer) { S.offer = false; render(); }        // a drag offer closed without a choice: put it back
+}
 
 function contextMenu(evt) {
     const cy = S.cy, target = evt.target;
@@ -576,12 +668,15 @@ function contextMenu(evt) {
         if (f.parent) items.push([`Move out of ${f.parent}`, () => change(() => { f.parent = fn(f.parent) ? (fn(f.parent).parent || '') : ''; })]);
         items.push(['Delete…', () => deleteFunctions([id]), 'danger']);
     }
+    showMenu(items, target === cy ? '' : (target.isEdge() ? 'Flow' : (target.data('real_id') || target.data('label'))), evt.renderedPosition);
+}
+
+function showMenu(items, title, p) {
     const menu = $('chain-menu');
-    const header = target === cy ? '' : `<div class="context-menu-header">${esc(target.isEdge() ? 'Flow' : (target.data('real_id') || target.data('label')))}</div>`;
+    const header = title ? `<div class="context-menu-header">${esc(title)}</div>` : '';
     menu.innerHTML = header + items.map(([label, , cls], i) =>
         `<button type="button" class="context-menu-item ${cls || ''}" data-i="${i}">${esc(label)}</button>`).join('');
-    menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { hideMenu(); items[+b.dataset.i][1](); }));
-    const p = evt.renderedPosition;
+    menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { S.offer = false; hideMenu(); items[+b.dataset.i][1](); }));
     menu.style.left = Math.min(p.x, $('chain-graph').clientWidth - 200) + 'px';
     menu.style.top = p.y + 'px';
     menu.hidden = false;
@@ -737,7 +832,7 @@ function wireMenus() {
     bar.querySelectorAll('.menu-title').forEach(t => t.addEventListener('mouseenter', () => {
         if (bar.classList.contains('open') && t.nextElementSibling.hidden) { close(); t.nextElementSibling.hidden = false; bar.classList.add('open'); }
     }));
-    document.addEventListener('click', e => { if (!bar.contains(e.target)) close(); if (!$('chain-menu').contains(e.target)) hideMenu(); });
+    document.addEventListener('click', e => { if (!bar.contains(e.target)) close(); if (!$('chain-menu').contains(e.target) && !S.dropClick) hideMenu(); S.dropClick = false; });
     for (const [id, action] of Object.entries(MENU_ACTIONS)) {
         const el = $(id);
         if (el) el.addEventListener('click', () => { close(); action(); });
@@ -765,7 +860,11 @@ function wireMenus() {
     });
 
     document.addEventListener('keydown', e => {
-        if (e.key === 'Control') setLinkMode(true);
+        if (e.key === 'Control') {
+            S.ctrl = true;
+            // during a drag Ctrl means "into this function" (SFM-248), not a flow -- draw mode would end the drag
+            if (S.drag && !S.drag.released) regroupTarget(); else setLinkMode(true);
+        }
         if (e.key === 'Shift') { S.shift = true; focusMode(); }
         if (document.querySelector('dialog[open]') || e.target.closest('input, textarea, select')) return;
         const k = e.key.toLowerCase();
@@ -779,10 +878,10 @@ function wireMenus() {
         else if (k === 'n' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); newFunction(); }
     });
     document.addEventListener('keyup', e => {
-        if (e.key === 'Control') setLinkMode(false);
+        if (e.key === 'Control') { S.ctrl = false; setLinkMode(false); if (S.drag && !S.drag.released) regroupTarget(); }
         if (e.key === 'Shift') { S.shift = false; focusMode(); }
     });
-    window.addEventListener('blur', () => { setLinkMode(false); S.shift = false; S.hovered = null; focusMode(); });
+    window.addEventListener('blur', () => { S.ctrl = false; setLinkMode(false); S.shift = false; S.hovered = null; focusMode(); });
 }
 
 async function init(chainStore) {
