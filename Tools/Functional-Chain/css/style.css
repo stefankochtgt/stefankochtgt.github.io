@@ -21,6 +21,11 @@ body {
     font-size: 14px;
 }
 
+/* pdf.js's TextLayer appends this canvas to <body> to measure fonts (pdf_viewer.css hides it). Without the rule it is a
+   300 x 150 canvas in the flex body of the fill pages: it stretches to the window height, squeezes <main> to nothing
+   and is drawn black -- the "black Document Desk" (SFM-258). Needed on every page that uses pdf.js text layers. */
+.hiddenCanvasElement { position: absolute; top: 0; left: 0; width: 0; height: 0; display: none; }
+
 .topbar {
     display: flex;
     align-items: center;
