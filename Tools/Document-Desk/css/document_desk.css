@@ -1,0 +1,183 @@
+/* Document Desk (SFM-254, Mini Tools): windows of PDFs / sheets / images on one stage, for screen sharing. */
+main.content.fill.dd-main { padding: 8px 12px 10px; }
+main.content.fill.dd-main > h1 { font-size: 16px; }
+main.content.fill.dd-main > h1 .muted { font-weight: normal; font-size: 13px; color: var(--muted); }
+body.dd-clean > header.topbar, body.dd-clean main.dd-main > h1 { display: none; }
+
+.dd-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; }
+.dd-bar button { padding: 4px 10px; font-size: 13px; }
+.dd-bar button.on { background: #dbeafe; border-color: #60a5fa; color: #1d4ed8; }
+.dd-bar select { width: auto; padding: 4px 6px; font-size: 13px; max-width: 220px; }
+.dd-sep { width: 1px; height: 22px; background: var(--border); }
+.dd-label { font-size: 12px; color: var(--muted); }
+.dd-status { font-size: 12px; color: var(--muted); }
+.dd-status.warn { color: var(--error); }
+
+.dd-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #dfe3e9;
+    border: 1px solid var(--border); border-radius: 6px; }
+.dd-stage:fullscreen { border: 0; border-radius: 0; background: #2f343c; }
+.dd-stage.moving { user-select: none; }
+.dd-stage.moving .dd-body { pointer-events: none; }
+/* Ctrl + drag: the dragged window follows the mouse, the window it would swap with is outlined (SFM-260) */
+.dd-stage.swapping, .dd-stage.swapping .dd-head { cursor: grabbing; }
+.dd-win.dd-swap-src { opacity: .8; z-index: 250000 !important; }
+.dd-win.dd-swap-target { outline: 3px solid #16a34a; outline-offset: -3px; }
+.dd-win.dd-swap-target::before { content: ""; position: absolute; inset: 28px 0 0; background: rgba(22, 163, 74, .16);
+    pointer-events: none; z-index: 5; }
+.dd-win.dd-swap-target::after { content: "Swap places"; position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+    padding: 6px 14px; border-radius: 999px; background: #16a34a; color: #fff; font-weight: 700; font-size: 14px;
+    white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); pointer-events: none; z-index: 6; }
+.dd-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; color: var(--muted); font-size: 14px; line-height: 1.7; pointer-events: none; }
+.dd-empty[hidden], .dd-tabs[hidden] { display: none; }
+.dd-empty b { font-size: 18px; color: #475569; }
+.dd-stage:fullscreen .dd-empty { color: #cbd5e1; }
+
+/* a window */
+.dd-win { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; min-height: 0;
+    background: #fff; border: 1px solid #9aa3af; border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+.dd-win.active { border-color: #2563eb; box-shadow: 0 6px 18px rgba(37, 99, 235, .28); }
+.dd-head { flex: none; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 4px 0 8px; cursor: move;
+    background: #f1f3f6; border-bottom: 1px solid #d9dce1; border-radius: 6px 6px 0 0; user-select: none; font-size: 12px; }
+.dd-win.locked .dd-head { cursor: default; background: #eef2f7; }
+.dd-kind { flex: none; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; color: #fff; background: #64748b; }
+.dd-win[data-kind="pdf"] .dd-kind { background: #b91c1c; }
+.dd-win[data-kind="sheet"] .dd-kind, .dd-win[data-kind="csv"] .dd-kind { background: #217346; }
+.dd-win[data-kind="image"] .dd-kind { background: #7c3aed; }
+.dd-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.dd-info { flex: none; color: var(--muted); white-space: nowrap; }
+.dd-tools { flex: none; display: flex; gap: 1px; }
+.dd-tools button { height: 22px; min-width: 22px; padding: 0 5px; font-size: 12px; line-height: 1; cursor: pointer;
+    background: transparent; color: #374151; border: 1px solid transparent; border-radius: 4px; }
+.dd-tools button:hover { background: #e2e6ec; }
+.dd-tools button.on { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
+.dd-tools .dd-zoom { min-width: 44px; font-variant-numeric: tabular-nums; }
+.dd-win.locked .dd-tools [data-act="max"] { opacity: .35; }
+.dd-body { position: relative; flex: 1; min-height: 0; overflow: auto; background: #e9ecf0; border-radius: 0 0 6px 6px; }
+.dd-win[data-kind="sheet"] .dd-body, .dd-win[data-kind="csv"] .dd-body { background: #fff; }
+.dd-win:has(.dd-tabs:not([hidden])) .dd-body { border-radius: 0; }
+.dd-msg { padding: 24px; color: var(--muted); font-size: 13px; }
+
+/* slim frames: the title bar only on mouse-over, laid over the document */
+.dd-stage.slim .dd-head { position: absolute; top: 0; left: 0; right: 0; z-index: 3; opacity: 0; transition: opacity .12s;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .15); }
+.dd-stage.slim .dd-win:hover .dd-head, .dd-stage.slim.moving .dd-win.active .dd-head { opacity: 1; }
+.dd-stage.slim .dd-body { border-radius: 6px; }
+
+/* resize handles */
+.dd-rs { position: absolute; z-index: 4; }
+.dd-rs[data-dir="n"] { top: -4px; left: 8px; right: 8px; height: 8px; cursor: ns-resize; }
+.dd-rs[data-dir="s"] { bottom: -4px; left: 8px; right: 8px; height: 8px; cursor: ns-resize; }
+.dd-rs[data-dir="e"] { right: -4px; top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; }
+.dd-rs[data-dir="w"] { left: -4px; top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; }
+.dd-rs[data-dir="nw"] { left: -4px; top: -4px; width: 12px; height: 12px; cursor: nwse-resize; }
+.dd-rs[data-dir="se"] { right: -4px; bottom: -4px; width: 12px; height: 12px; cursor: nwse-resize; }
+.dd-rs[data-dir="ne"] { right: -4px; top: -4px; width: 12px; height: 12px; cursor: nesw-resize; }
+.dd-rs[data-dir="sw"] { left: -4px; bottom: -4px; width: 12px; height: 12px; cursor: nesw-resize; }
+.dd-win.locked .dd-rs { display: none; }
+
+/* drop targets while files are dragged over the page */
+.dd-drop { position: absolute; inset: 0; z-index: 300000; background: rgba(15, 23, 42, .35); }
+.dd-drop-add { position: absolute; left: 0; right: 0; top: 0; height: 44px; display: flex; align-items: center;
+    justify-content: center; background: rgba(37, 99, 235, .85); color: #fff; font-weight: 600; font-size: 14px; }
+.dd-target { position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+    padding: 8px; text-align: center; border: 2px dashed #fff; border-radius: 6px; color: #fff; font-weight: 600;
+    background: rgba(30, 41, 59, .55); }
+.dd-drop .over { background: rgba(22, 163, 74, .85); border-style: solid; }
+
+/* PDF */
+.dd-pages { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px; width: max-content;
+    min-width: 100%; box-sizing: border-box; }
+.dd-page { position: relative; flex: none; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); }
+.dd-page canvas { display: block; }
+
+/* image */
+.dd-imgbox { padding: 10px; width: max-content; min-width: 100%; box-sizing: border-box; text-align: center; }
+.dd-imgbox img { display: inline-block; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); }
+
+/* sheet: an Excel-like grid. Explicit thin cell borders are written as 1px "double" (drawn solid at 1px) so they win
+   over the grid lines of the neighbour cells in the collapsed border model. */
+.dd-sheet { border-collapse: collapse; table-layout: fixed; background: #fff; color: #000;
+    font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; font-size: 14.67px; }
+.dd-sheet td { box-sizing: border-box; border: 1px solid #e1e1e1; padding: 0 2px; white-space: nowrap; overflow: hidden;
+    vertical-align: bottom; line-height: 1.15; }
+.dd-sheet.nogrid td { border-color: transparent; }
+.dd-sheet td.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.dd-sheet td.wrap > div { overflow: hidden; }
+.dd-sheet td.ov { overflow: visible; }
+.dd-sheet td.ov > span { display: block; overflow: hidden; position: relative; }
+.dd-sheet th { position: sticky; z-index: 2; box-sizing: border-box; padding: 0 3px; height: 20px; background: #f3f3f3;
+    color: #555; border: 1px solid #d0d0d0; font: 12px "Segoe UI", Arial, sans-serif; text-transform: none;
+    letter-spacing: 0; text-align: center; vertical-align: middle; }
+.dd-sheet thead th { top: 0; z-index: 3; }
+.dd-sheet tbody th { left: 0; }
+.dd-sheet thead th.dd-corner { left: 0; z-index: 5; }
+.dd-sheet thead th.fzc { z-index: 4; }
+.dd-sheet td.fz { position: sticky; z-index: 1; background: #fff; }
+.dd-tabs { flex: none; display: flex; gap: 2px; overflow-x: auto; padding: 2px 6px 3px; background: #f1f3f6;
+    border-top: 1px solid #d9dce1; border-radius: 0 0 6px 6px; }
+.dd-tabs button { flex: none; padding: 2px 10px; font-size: 12px; cursor: pointer; background: transparent; color: #374151;
+    border: 1px solid transparent; border-radius: 0 0 4px 4px; }
+.dd-tabs button:hover { background: #e2e6ec; }
+.dd-tabs button.on { background: #fff; color: #217346; font-weight: 600; border-color: #d9dce1; border-top-color: #fff;
+    box-shadow: inset 0 2px 0 #217346; }
+
+/* PDF.js text layer (selectable text over the canvas) -- from pdfjs-dist 4.10.38 web/pdf_viewer.css (Apache-2.0) */
+.dd-page .textLayer { position: absolute; text-align: initial; inset: 0; overflow: clip; opacity: 1; line-height: 1;
+    text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText; z-index: 1; }
+.dd-page .textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+.dd-page .textLayer > :not(.markedContent), .dd-page .textLayer .markedContent span:not(.markedContent) { z-index: 1; }
+.dd-page .textLayer span.markedContent { top: 0; height: 0; }
+.dd-page .textLayer span[role="img"] { user-select: none; cursor: default; }
+.dd-page .textLayer ::selection { background: rgba(0 0 255 / 0.25); background: color-mix(in srgb, AccentColor, transparent 75%); }
+.dd-page .textLayer br::selection { background: transparent; }
+
+/* editing a sheet (SFM-255) */
+.dd-sheet td { cursor: cell; }
+.dd-sheet { user-select: none; }
+.dd-sheet td.sel { outline: 2px solid #217346; outline-offset: -2px; }
+.dd-sheet td.editing { padding: 0; overflow: visible; position: relative; z-index: 3; }
+.dd-edit { display: block; box-sizing: border-box; width: 100%; min-width: 140px; margin: 0; padding: 0 2px; border: 0;
+    outline: 2px solid #217346; background: #fff; color: inherit; font: inherit; line-height: inherit; }
+.dd-sheet td.fx { color: #6b7280; font-style: italic; }
+.dd-win.dirty .dd-name::before { content: "● "; color: #d97706; }
+.dd-tools button[hidden] { display: none; }
+.dd-tools [data-act="save"].on { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+
+/* zoom menu */
+.dd-menu { position: absolute; top: 28px; z-index: 20; display: flex; flex-direction: column; min-width: 110px; padding: 4px;
+    background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, .2); }
+.dd-menu button { padding: 4px 10px; text-align: left; font-size: 12px; color: #1f2937; background: transparent; border: 0;
+    border-radius: 4px; cursor: pointer; }
+.dd-menu button:hover { background: #eef2f7; }
+
+/* documents from the Library (SFM-259) */
+.dd-lib { width: min(760px, calc(100vw - 32px)); padding: 0; overflow: hidden;
+    border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, .25); }
+.dd-lib::backdrop { background: rgba(15, 23, 42, .35); }
+.dd-lib-form { display: flex; flex-direction: column; margin: 0; }
+.dd-lib-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.dd-lib-head b { flex: none; }
+.dd-lib-head input { flex: 1; min-width: 0; width: auto; padding: 5px 8px; font-size: 13px; }
+.dd-lib-list { height: min(480px, calc(100vh - 190px)); overflow-y: auto; overflow-x: hidden; }
+/* the app's general label / input rules (block labels, full-width inputs) undone for the list rows */
+.dd-lib-item { display: flex; align-items: center; gap: 8px; margin: 0; padding: 5px 12px; cursor: pointer;
+    font-size: 13px; color: var(--text); border-bottom: 1px solid #f0f1f3; }
+.dd-lib-item:hover { background: #f3f6fb; }
+.dd-lib-item.on { background: #e8f0fe; }
+.dd-lib-item input { flex: none; width: auto; margin: 0; padding: 0; }
+.dd-lib-item .dd-kind { flex: none; }
+.dd-lib-item[data-kind="pdf"] .dd-kind { background: #b91c1c; }
+.dd-lib-item[data-kind="sheet"] .dd-kind, .dd-lib-item[data-kind="csv"] .dd-kind { background: #217346; }
+.dd-lib-item[data-kind="image"] .dd-kind { background: #7c3aed; }
+.dd-lib-text { flex: 1; min-width: 0; }
+.dd-lib-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-lib-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.dd-lib-id { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dd-lib-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border); }
+.dd-lib-foot button:disabled { opacity: .45; cursor: default; }
+.dd-lib-note { flex: 1; font-size: 12px; color: var(--muted); }
+.dd-lib-note.warn { color: var(--error); }
+
+/* rows not drawn (only the rows near the view are) */
+.dd-sheet tr.dd-pad td { border: 0; padding: 0; background: transparent; }

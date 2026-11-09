@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Document Desk — Integrity Workbench</title>
+    <meta name="description" content="Arrange PDFs, Excel sheets, CSV files and images as windows on one desk for screen sharing; edit and save Excel and CSV. Free, no login, your files never leave your browser.">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="theme-color" content="#3c5486">
+    <link rel="stylesheet" href="css/style.css">
+    <script>window.FTA_STANDALONE = true;</script>
+    <script src="js/version.js"></script>
+    <style>
+    .dd-main > .standalone-note { margin-top: 6px; }
+    main.dd-main > h1.app-heading { display: flex; align-items: center; gap: 8px; }
+    main.dd-main > h1.app-heading #update-app { font-size: 12px; padding: 2px 10px; }
+    .standalone-note { flex: none; font-size: 11px; color: var(--muted, #6b7280); margin-top: 4px; }
+    .standalone-note a { color: inherit; }
+    #install-app { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+    #install-app[hidden] { display: none; }
+    #new-version { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+    #new-version[hidden] { display: none; }
+    #update-app { margin-left: auto; font-size: 13px; padding: 3px 12px; align-self: center; font-weight: 600; }
+    #update-app.newer { background: #ea580c; border-color: #ea580c; color: #fff; }
+    #about-dialog table { border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+    #about-dialog td { padding: 3px 12px 3px 0; vertical-align: top; }
+    #about-dialog td:first-child { color: var(--muted, #6b7280); white-space: nowrap; }
+    #about-dialog .ok { color: #166534; } #about-dialog .warn { color: #9a3412; }
+    </style>
+    
+<link rel="stylesheet" href="css/document_desk.css">
+
+</head>
+<body>
+    <main class="content fill dd-main">
+        
+<h1 class="app-heading">Document Desk <span class="muted">— PDFs, Excel sheets, CSV files and images arranged for screen sharing</span></h1>
+<div class="dd-bar" id="dd-bar">
+    <input type="file" id="dd-file" multiple hidden
+           accept=".pdf,.xlsx,.xlsm,.xltx,.xltm,.csv,.tsv,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg">
+    <button type="button" id="dd-add" title="Or drop files anywhere on the page">Add files…</button>
+    
+    <span class="dd-sep"></span>
+    <span class="dd-label">Arrange</span>
+    <button type="button" class="secondary" data-arrange="columns" title="All windows side by side (locked windows stay where they are)">Side by side</button>
+    <button type="button" class="secondary" data-arrange="rows" title="All windows one below the other">Stacked</button>
+    <button type="button" class="secondary" data-arrange="grid" title="All windows in a grid">Grid</button>
+    <button type="button" class="secondary" data-arrange="main" title="The active window large on the left, the others stacked on the right">Main + side</button>
+    <span class="dd-sep"></span>
+    <select id="dd-layouts" title="Saved layouts: choose one to put the windows back in its places"><option value="">Saved layouts…</option></select>
+    <button type="button" class="secondary" id="dd-save-layout" title="Remember places, sizes and zoom of all windows under a name">Save layout…</button>
+    <button type="button" class="secondary" id="dd-delete-layout" title="Delete the chosen saved layout">Delete</button>
+    <span class="dd-sep"></span>
+    <button type="button" class="secondary" id="dd-slim" title="Title bars only on mouse-over: more room for the documents">Slim frames</button>
+    <button type="button" class="secondary" id="dd-clean" title="Hide the heading: more room for the desk">Hide title</button>
+    <button type="button" id="dd-present" title="The desk alone in full screen -- Esc to leave">Present</button>
+    <button type="button" class="danger" id="dd-clear" title="Close all windows and forget their files">Clear desk</button>
+    <span class="dd-status" id="dd-status"></span>
+</div>
+<div class="dd-stage" id="dd-stage">
+    <div class="dd-empty" id="dd-empty"><div>
+        <b>Drop PDFs and Excel files here</b><br>
+        or <i>Add files…</i> -- also CSV and images. Shown in this browser; nothing is uploaded.<br>
+        Drag a window by its title bar (Ctrl + drag onto another window swaps the two), resize it at its edges;
+        Ctrl + mouse wheel zooms the window under the mouse.
+    </div></div>
+    <div class="dd-drop" id="dd-drop" hidden></div>
+</div>
+
+<script type="module" src="js/document_desk.js"></script>
+
+        <div class="standalone-note">Your documents are opened in this browser and kept there with the desk (nothing is uploaded); Save writes an edited sheet back into its file (Chrome, Edge).
+        &copy; TEGRITY &middot; <a href="https://tegrity.eu" target="_blank" rel="noopener">tegrity.eu</a>
+        &middot; <span id="app-version"></span>
+        <button type="button" id="new-version" hidden title="A newer version is published -- load it">New version: reload</button>
+        <button type="button" class="secondary" id="install-app" hidden title="Install as an app: own window, Start menu / taskbar icon, works offline">Install as app</button></div>
+    </main>
+    <script>
+    // Progressive Web App (SFM-181): the service worker keeps every file for offline use; where the browser
+    // can install the page as an app (Edge / Chrome over HTTPS), the "Install as app" button offers it.
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+    (function () {
+        const button = document.getElementById('install-app');
+        let offer = null;
+        addEventListener('beforeinstallprompt', e => { e.preventDefault(); offer = e; button.hidden = false; });
+        addEventListener('appinstalled', () => { offer = null; button.hidden = true; });
+        button.addEventListener('click', async () => {
+            if (!offer) return;
+            offer.prompt();
+            await offer.userChoice;
+            offer = null; button.hidden = true;
+        });
+    })();
+    // Version and About (SFM-214, user 2026-10-27: "how i know i use the right software version?"): js/version.js
+    // is the running build (cached with the app), version.json the published one (never cached, fetched fresh).
+    (function () {
+        const mine = window.FTA_VERSION || { version: '?', build: '?' };
+        const label = v => `${v.version} (build ${v.build})`;
+        document.getElementById('app-version').textContent = `Version ${mine.version}`;
+        document.getElementById('app-version').title = `Build ${mine.build}`;
+        let published = null, checked = false, onChecked = () => {};
+        async function check() {
+            try {
+                const r = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+                published = r.ok ? await r.json() : null;
+            } catch (e) { published = null; }
+            checked = true;
+            document.getElementById('new-version').hidden = !(published && published.build && published.build !== mine.build);
+            onChecked();
+            return published;
+        }
+        async function reloadNew() {          // drop the offline copy, so the reload loads the published files
+            try {
+                for (const k of await caches.keys()) if (k.startsWith('document-desk-')) await caches.delete(k);
+                const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+                if (reg) await reg.update();
+            } catch (e) { /* no cache / service worker: a plain reload */ }
+            location.reload();
+        }
+        document.getElementById('new-version').addEventListener('click', reloadNew);
+        // SFM-249 (user, 2026-11-05: "when i install the apps ... can u make an update button to update it to latest
+        // version?"): an Update button in the heading, always there -- an installed app has no browser reload button.
+        // It turns orange when a newer build is published (checked at the start, every 30 min and on coming back).
+        const heading = document.querySelector('h1.app-heading');
+        const upd = document.createElement('button');
+        upd.type = 'button'; upd.id = 'update-app'; upd.className = 'secondary';
+        const isNewer = () => !!(published && published.build && published.build !== mine.build);
+        const showState = () => {
+            upd.disabled = false;
+            upd.classList.toggle('newer', isNewer());
+            // same build date as the running one (two builds in one day): the build ID says which is newer
+            const name = isNewer() && published.version === mine.version ? `${published.version} (build ${published.build.slice(0, 6)})`
+                                                                          : isNewer() ? published.version : '';
+            upd.textContent = isNewer() ? `Update to ${name}` : 'Check for update';
+            upd.title = isNewer() ? `Load the published version ${label(published)} -- yours is ${label(mine)}`
+                                  : `Your version: ${label(mine)} -- look for a newer one`;
+        };
+        upd.addEventListener('click', async () => {
+            upd.disabled = true; upd.textContent = 'Checking…';
+            await check();
+            if (isNewer()) { upd.textContent = 'Updating…'; return reloadNew(); }
+            upd.textContent = published ? 'Up to date ✓' : 'No connection';
+            onChecked = () => {};
+            setTimeout(() => { onChecked = showState; showState(); }, 2500);
+        });
+        if (location.protocol !== 'file:') {
+            if (heading) { heading.appendChild(upd); showState(); onChecked = showState; }
+            check();
+            let last = Date.now();
+            const again = () => { if (Date.now() - last > 60000) { last = Date.now(); check(); } };
+            setInterval(again, 30 * 60000);
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) again(); });
+        }
+        function browserName() {
+            const ua = navigator.userAgent;
+            for (const [name, re] of [['Microsoft Edge', 'Edg/([0-9.]+)'], ['Firefox', 'Firefox/([0-9.]+)'],
+                                      ['Chrome', 'Chrome/([0-9.]+)'], ['Safari', 'Version/([0-9.]+).*Safari']]) {
+                const m = ua.match(new RegExp(re));
+                if (m) return `${name} ${m[1]}`;
+            }
+            return ua;
+        }
+        const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+        const dialog = document.createElement('dialog');
+        dialog.id = 'about-dialog'; dialog.className = 'help-dialog';
+        document.body.appendChild(dialog);
+        async function showAbout() {
+            const folder = typeof window.showDirectoryPicker === 'function';
+            const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
+            const render = () => {
+                let update;
+                if (location.protocol === 'file:') update = 'not checked (opened from a file on this computer)';
+                else if (!checked) update = 'checking&hellip;';
+                else if (!published) update = '<span class="warn">could not check (offline?)</span>';
+                else if (published.build === mine.build) update = '<span class="ok">this is the latest published version</span>';
+                else update = `<span class="warn">a newer version is published: ${esc(label(published))}</span> `
+                    + '<button type="button" id="about-reload">Reload to use it</button>';
+                dialog.innerHTML = '<form method="dialog"><h3 style="margin-top:0;">About Document Desk</h3><table>'
+                    + row('Version', `<b id="about-version">${esc(label(mine))}</b>`)
+                    + row('Update', `<span id="about-update">${update}</span>`)
+                    + row('Opened from', esc(location.href.split('?')[0]))
+                    + row('Browser', esc(browserName()))
+                    + '</table><p style="margin-bottom:0; text-align:right;"><button value="close">Close</button></p></form>';
+                const b = dialog.querySelector('#about-reload');
+                if (b) b.addEventListener('click', reloadNew);
+            };
+            render();
+            if (!dialog.open) dialog.showModal();
+            if (location.protocol !== 'file:') { await check(); render(); }
+        }
+        const tricks = document.getElementById('help-tricks');
+        if (tricks) {
+            const item = document.createElement('button');
+            item.type = 'button'; item.setAttribute('role', 'menuitem'); item.id = 'help-about';
+            item.textContent = 'About Document Desk…';
+            item.addEventListener('click', showAbout);
+            tricks.parentElement.append(document.createElement('hr'), item);
+        }
+        window.FaultTreeAbout = { show: showAbout, check };
+    })();
+    </script>
+</body>
+</html>
