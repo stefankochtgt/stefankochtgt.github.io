@@ -22,13 +22,17 @@ const SNAP = 8, GAP = 6, MIN_W = 180, MIN_H = 110;
 const MAX_CANVAS_PIXELS = 8e6;
 const ON_TOP = 100000;                 // z-index offset of "always on top" windows
 const DIRS = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
-const KIND_LABEL = {pdf: 'PDF', sheet: 'XLSX', csv: 'CSV', image: 'IMG'};
+const KIND_LABEL = {pdf: 'PDF', sheet: 'XLSX', csv: 'CSV', image: 'IMG', app: 'TOOL'};
 
 const stage = $('dd-stage');
 // Notes in PDFs (SFM-271): shown everywhere (read from the PDF by pdf.js); written only in the workbench, which has the
 // app to write PDF annotations (data-notes on the stage); the standalone Desk shows them read-only
 const NOTES_ON = stage.dataset.notes === '1';
 const NOTE_COLORS = {yellow: '#ffdb33', green: '#8ce673', blue: '#80bfff', pink: '#ff99cc', red: '#ff7366'};
+// Tools as windows (SFM-272): a page of the workbench in a frame -- only in the workbench, the tools its plugins allow
+// (data-apps on the stage); the standalone Desk has none
+const APPS = {ocr: {name: 'Text from screenshot', url: '/mini-tools?tool=ocr'}, 'manual-fta': {name: 'Manual FTA', url: '/manual-fta'}};
+const APP_IDS = (stage.dataset.apps || '').split(/\s+/).filter(id => APPS[id]);
 const MARKUP = new Set(['Text', 'FreeText', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Square', 'Circle', 'Ink',
     'Line', 'Polygon', 'PolyLine', 'Stamp', 'Caret', 'FileAttachment']);
 const desk = {windows: [], arrange: '', layouts: {}, slim: false, clean: false, nextId: 1, z: 1};
@@ -108,7 +112,7 @@ const putRecord = rec => db.putFile(rec)
     .catch(storageFailed);
 
 function forgetFileIfUnused(id) {
-    if (desk.windows.some(w => w.fileId === id)) return;
+    if (!id || desk.windows.some(w => w.fileId === id)) return;
     files.delete(id);
     db.deleteFile(id).catch(() => {});
 }
@@ -188,6 +192,7 @@ function mount(w) {
     el.innerHTML = `<div class="dd-head"><span class="dd-kind"></span><span class="dd-name"></span><span class="dd-info"></span>
         <span class="dd-tools">
         <button type="button" data-act="lib" title="Show a document of the Library in this window instead">📚</button>
+        <button type="button" data-act="app" title="Show a tool in this window instead: Text from screenshot, Manual FTA">🧰</button>
         <button type="button" data-act="save" title="Save the changes into the file (Ctrl+S)">💾</button>
         <button type="button" data-act="hl" title="Highlight: select text on the page (a comment is optional) -- written into the PDF">🖍</button><button type="button" data-act="note" title="Note: click on the page where it goes -- written into the PDF">📝</button><button type="button" data-act="notes" title="The notes and highlights of this PDF: list, edit, delete">💬</button>
         <button type="button" data-act="out" title="Zoom out (Ctrl + mouse wheel, Ctrl + −)">−</button><button type="button" data-act="zoom" class="dd-zoom" title="Zoom: a level, fit width or fit page"></button><button type="button" data-act="in" title="Zoom in (Ctrl + mouse wheel, Ctrl + +)">+</button>
@@ -205,6 +210,10 @@ function mount(w) {
     live.set(w.id, rt);
     wireNotes(w, rt);
     rt.head.querySelector('[data-act="lib"]').hidden = !$('dd-lib');
+    rt.head.querySelector('[data-act="app"]').hidden = !APP_IDS.length;
+    const shield = document.createElement('div');  // a tool's frame takes the clicks: the first one brings the window up
+    shield.className = 'dd-shield';
+    el.appendChild(shield);
     rt.head.title = 'Drag to move -- Ctrl + drag onto another window to swap the two';
     labelWindow(w);
 
@@ -326,6 +335,7 @@ const ACTIONS = {
     note: w => setNoteTool(w, 'note'),
     notes: w => { w.notesOpen = !w.notesOpen; paint(w); renderNotes(w, live.get(w.id)); saveSoon(); },
     lib: w => openLibrary(w),
+    app: w => appMenu(w),
     out: w => stepZoom(w, -1),
     in: w => stepZoom(w, 1),
     zoom: w => zoomMenu(w),
@@ -371,7 +381,7 @@ function stepZoom(w, dir) {
 }
 
 function closeMenus() { document.querySelectorAll('.dd-menu').forEach(m => m.remove()); }
-document.addEventListener('pointerdown', e => { if (!e.target.closest('.dd-menu, [data-act="zoom"]')) closeMenus(); }, true);
+document.addEventListener('pointerdown', e => { if (!e.target.closest('.dd-menu, [data-act="zoom"], [data-act="app"], #dd-app-add')) closeMenus(); }, true);
 
 function zoomMenu(w) {
     const rt = live.get(w.id), viewer = VIEWERS[w.kind];
@@ -709,6 +719,12 @@ async function openDocument(w) {
     const gen = ++rt.gen;
     rt.el.dataset.state = 'opening';
     rt.body.innerHTML = '<div class="dd-msg">Opening …</div>';
+    if (w.kind === 'app') {                       // a tool (SFM-272): no file
+        appViewer.open(w, rt);
+        rt.el.dataset.state = 'ready';
+        paint(w);
+        return;
+    }
     try {
         let rec = files.get(w.fileId);
         if (!rec) {
@@ -879,6 +895,99 @@ const pdfViewer = {
         rt.pdf = rt.pages = rt.sizes = rt.textCache = null;
     },
 };
+
+// ---------------------------------------------------------------- tool (SFM-272)
+// A page of the workbench in a frame: Text from screenshot (the Mini Tools page showing only that tool) or the Manual
+// FTA. The page sees it is in a frame (base.html: "embedded") and leaves its menu out. Zoom scales the frame.
+
+const appViewer = {
+    open(w, rt) {
+        const app = APPS[w.app];
+        if (!app || !APP_IDS.includes(w.app)) {
+            rt.frame = null;
+            rt.body.innerHTML = `<div class="dd-msg">${esc(app ? app.name : 'This tool')} is not available here`
+                + ' (switched off in this project, or the Desk runs without the workbench). Drop a file on this window to use it again.</div>';
+            return;
+        }
+        const frame = document.createElement('iframe');
+        frame.className = 'dd-app';
+        frame.title = app.name;
+        frame.src = app.url;
+        rt.frame = frame;
+        rt.body.replaceChildren(frame);
+        rt.info.textContent = '';
+        this.rezoom(w, rt);
+    },
+    ready: rt => !!rt.frame,
+    fit: () => 1,
+    fitPage: () => 1,
+    rezoom(w, rt) {
+        const z = w.zoom || 1;
+        Object.assign(rt.frame.style, {transform: z === 1 ? '' : `scale(${z})`, width: 100 / z + '%', height: 100 / z + '%'});
+    },
+    track() {},
+    close(rt) {
+        if (rt.frame) rt.frame.src = 'about:blank';
+        rt.frame = null;
+    },
+};
+
+function toolMenu(anchor, parent, pick) {
+    closeMenus();
+    const menu = document.createElement('div');
+    menu.className = 'dd-menu';
+    menu.innerHTML = APP_IDS.map(id => `<button type="button" data-app="${id}">${esc(APPS[id].name)}</button>`).join('');
+    menu.addEventListener('click', e => {
+        const b = e.target.closest('[data-app]');
+        if (!b) return;
+        closeMenus();
+        pick(b.dataset.app);
+    });
+    menu.style.left = Math.max(0, anchor.offsetLeft - 20) + 'px';
+    parent.appendChild(menu);
+}
+
+function appMenu(w) {
+    const rt = live.get(w.id);
+    if (rt.el.querySelector('.dd-menu')) { closeMenus(); return; }
+    toolMenu(rt.head.querySelector('[data-act="app"]'), rt.el, id => setApp(w, id));
+}
+
+// The window shows a tool instead of its document: place, size, lock and on-top stay
+function setApp(w, id) {
+    if (w.dirty && !confirm(`"${w.name}" has changes that are not saved into its file. Show ${APPS[id].name} instead anyway?`)) return;
+    const rt = live.get(w.id);
+    VIEWERS[w.kind].close(rt);
+    const old = w.fileId;
+    Object.assign(w, {kind: 'app', app: id, name: APPS[id].name, fileId: null, libId: null, view: null, dirty: false, zoom: 1,
+                      notesOpen: false});
+    Object.assign(rt, {notes: [], noteTool: null, activeNote: null});
+    labelWindow(w);
+    forgetFileIfUnused(old);
+    openDocument(w);
+    activate(w);
+    saveSoon();
+    findDocsChanged();
+}
+
+function addApp(id) {
+    const win = {id: desk.nextId++, fileId: null, app: id, name: APPS[id].name, kind: 'app', x: 0, y: 0, w: 0.5, h: 0.6,
+                 zoom: 1, locked: false, onTop: false, z: desk.z++, view: null, max: null, dirty: false, libId: null};
+    place([win]);
+    desk.windows.push(win);
+    mount(win);
+    if (desk.arrange) arrange(desk.arrange, [win]);
+    activate(win);
+    refreshEmpty();
+    saveSoon();
+}
+
+// A click into a tool's frame doesn't reach this page: when the page loses the focus to a frame, its window comes up
+window.addEventListener('blur', () => setTimeout(() => {
+    const el = document.activeElement && document.activeElement.tagName === 'IFRAME' && document.activeElement.closest('.dd-win');
+    const w = el && desk.windows.find(o => o.id === +el.dataset.id);
+    if (w && activeId !== w.id) activate(w);
+}, 0));
 
 // ---------------------------------------------------------------- image
 
@@ -1342,7 +1451,7 @@ async function saveFile(w) {
     status(handle ? `Saved into ${handle.name}.` : `Downloaded ${w.name}.`);
 }
 
-const VIEWERS = {pdf: pdfViewer, image: imageViewer, sheet: sheetViewer, csv: sheetViewer};
+const VIEWERS = {pdf: pdfViewer, image: imageViewer, sheet: sheetViewer, csv: sheetViewer, app: appViewer};
 
 // ---- reading .xlsx: a zip of XML parts (ECMA-376). Values, shared strings, number formats, fonts, fills, borders,
 // alignment, column widths / row heights, hidden rows / columns / sheets, merged cells, frozen panes. Formulas show
@@ -2734,6 +2843,12 @@ $('dd-add').addEventListener('click', async () => {
     addFiles(await Promise.all(handles.map(h => h.getFile())), null, handles);
 });
 $('dd-file').addEventListener('change', e => { addFiles(Array.from(e.target.files)); e.target.value = ''; });
+if ($('dd-app-add')) $('dd-app-add').addEventListener('click', e => {
+    const wrap = $('dd-app-add').parentElement;
+    if (wrap.querySelector('.dd-menu')) { closeMenus(); return; }
+    e.stopPropagation();
+    toolMenu($('dd-app-add'), wrap, addApp);
+});
 document.querySelectorAll('[data-arrange]').forEach(b => b.addEventListener('click', () => arrange(b.dataset.arrange)));
 $('dd-layouts').addEventListener('change', e => { if (e.target.value) applyLayout(e.target.value); });
 $('dd-save-layout').addEventListener('click', saveLayout);
