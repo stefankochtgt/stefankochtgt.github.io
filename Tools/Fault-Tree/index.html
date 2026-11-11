@@ -63,6 +63,15 @@
 /* the tabs and the icons sit together on the left; only the hint / badge / empty-note blocks take the rest (user, 2026-10-26) */
 .fta-toolbar > .view-tabs, .fta-toolbar > .icon-bar { flex: none; }
 .help-dialog { max-width: 760px; }
+/* Import XML from Library (SFM-270) */
+.lib-xml-dialog { width: 640px; max-width: 92vw; }
+.lib-xml-list { max-height: 50vh; overflow: auto; margin: 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.lib-xml-item { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; text-align: left; padding: 6px 8px;
+    background: var(--surface, #fff); color: inherit; border: 1px solid var(--border, #ddd); border-radius: 6px; }
+.lib-xml-item:hover { border-color: #60a5fa; background: #eff6ff; }
+.lib-xml-item span { grid-column: 1; font-size: 12px; color: var(--muted); word-break: break-all; }
+.lib-xml-item i { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-style: normal; font-size: 12px;
+    color: var(--muted); }
 .menubar .menu-list .check { display: inline-block; width: 1.2em; }
 /* guided hints (SFM-211): a bubble below the icons to click next; only its buttons take clicks */
 #guide-pop { position: fixed; z-index: 60; width: 310px; max-width: calc(100vw - 16px); box-sizing: border-box; background: #1e3a8a;
@@ -233,6 +242,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 
                 <hr>
                 <button type="button" role="menuitem" id="import-xml" title="Import Manual FTA trees from an XML export, or a fault tree from an Isograph Reliability Workbench XML export: checked and shown first; a tree replaces the one with the same top event ID">Import XML…</button>
+                
             </div>
         </div>
         <div class="menu">
@@ -400,6 +410,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
         </p>
     </form>
 </dialog>
+
 
 <!-- toolbar icons (SFM-174): drawn for this tool -- gate = rounded pointed shape, basic event = circle -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -1914,9 +1925,15 @@ document.getElementById('import-xml-file').addEventListener('change', async evt 
     const file = evt.target.files[0];
     evt.target.value = '';                          // the same file can be chosen again
     if (!file) return;
-    const body = await file.arrayBuffer();
-    const call = apply => fetch(`/api/manual-fta/import?apply=${apply}&analysis=${encodeURIComponent(analysisId)}`, { method: 'POST', body,
-        headers: { 'Content-Type': 'application/xml' } }).then(r => r.json());
+    importXml(file.name, await file.arrayBuffer());
+});
+
+// body: the file's bytes, or null with libraryId: the app reads the Library document itself (SFM-270)
+async function importXml(name, body, libraryId = '') {
+    const lib = libraryId ? `&library=${encodeURIComponent(libraryId)}` : '';
+    const call = apply => fetch(`/api/manual-fta/import?apply=${apply}&analysis=${encodeURIComponent(analysisId)}${lib}`,
+        libraryId ? { method: 'POST' } : { method: 'POST', body, headers: { 'Content-Type': 'application/xml' } }).then(r => r.json());
+    const file = { name };
     const check = await call(false);
     const from = check.model && check.model.revision
         ? `Exported from: ${check.model.project}, model revision ${check.model.revision} (${check.model.exported}).\n`
@@ -1932,7 +1949,55 @@ document.getElementById('import-xml-file').addEventListener('change', async evt 
     if (done.errors && done.errors.length) { alert('Import failed:\n\n' + done.errors.join('\n')); return; }
     pageId = done.trees && done.trees.length ? done.trees[0].top : pageId;   // show the first imported tree (SFM-192: maybe on a page of its own; not a page -> the first page)
     await loadGraph({ keepViewport: false });
-});
+}
+
+// ---- Import XML from Library (SFM-270): the Library's .xml documents in a dialog ---------------------
+const escapeHtml = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const libDialog = document.getElementById('lib-xml-dialog');
+if (libDialog) {
+    let libDocs = [];
+    const libQ = document.getElementById('lib-xml-q'), libList = document.getElementById('lib-xml-list');
+    // every word must occur; * = any characters, ? = one character (as in the Document Desk search)
+    const wild = w => new RegExp(w.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.'), 'i');
+    const renderLib = () => {
+        const words = libQ.value.split(/\s+/).filter(Boolean).map(wild);
+        const shown = libDocs.filter(d => words.every(re => re.test([d.id, d.title, d.name, d.path].join(' '))));
+        libList.innerHTML = shown.length ? shown.map(d => `<button type="button" class="lib-xml-item" data-id="${escapeHtml(d.id)}"
+                data-name="${escapeHtml(d.name)}" title="${escapeHtml(d.path || d.name)}"><b>${escapeHtml(d.title || d.name)}</b>
+                <span>${escapeHtml(d.path || d.name)}</span><i>${escapeHtml(d.id)}</i></button>`).join('')
+            : `<p class="muted">${libDocs.length ? 'No XML file matches.' : 'No XML file in the Library.'}</p>`;
+    };
+    document.getElementById('import-xml-lib').addEventListener('click', async () => {
+        libQ.value = '';
+        libList.innerHTML = '<p class="muted">Loading…</p>';
+        libDialog.showModal();
+        libQ.focus();
+        try {
+            const r = await fetch('/api/library', { cache: 'no-store' });
+            const data = await r.json();
+            if (!data.settings || !data.settings.folder) throw new Error('no Library folder set on this PC -- choose it on the Library page');
+            if (data.error) throw new Error(data.error);
+            libDocs = (data.documents || []).filter(d => d.name && !d.missing && !d.bib_only && /\.xml$/i.test(d.name))
+                .sort((a, b) => (a.title || a.name).localeCompare(b.title || b.name, undefined, { numeric: true }));
+            renderLib();
+        } catch (e) {
+            libDocs = [];
+            libList.innerHTML = `<p class="error">Library not read: ${escapeHtml(e.message)}.</p>`;
+        }
+    });
+    libQ.addEventListener('input', renderLib);
+    libQ.addEventListener('keydown', e => {
+        const items = libList.querySelectorAll('.lib-xml-item');
+        if (e.key === 'Enter' && items.length === 1) { e.preventDefault(); items[0].click(); }
+    });
+    libList.addEventListener('click', e => {
+        const b = e.target.closest('.lib-xml-item');
+        if (!b) return;
+        libDialog.close();
+        importXml(`${b.dataset.name} (${b.dataset.id})`, null, b.dataset.id);
+    });
+    document.getElementById('lib-xml-cancel').addEventListener('click', () => libDialog.close());
+}
 
 // ---- analyses: separate Manual FTAs in one model (SFM-171) --------------------------------------
 // The chosen analysis: ?analysis= in the address first (so each Structure View window keeps its own),
