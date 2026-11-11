@@ -339,11 +339,12 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <tr><td>Compact icon</td><td>first click: compact display &mdash; the same gates and events, closer together; the ASIL / H square is drawn inside the description box (the label stays beside it); second click: <b>compact 2</b> (&ldquo;2&rdquo; on the icon) &mdash; branches may also go below each other where the rows allow (lines stay separate); third click: normal display; also for the JPG, LaTeX and PDF export</td></tr>
                 <tr><td>Save (Ctrl+S) / Version control</td><td>every change is kept at once; <b>Save</b> also creates a numbered revision with what changed and when (the button is marked while there are unsaved changes); the <b>Version control</b> tab lists the revisions with their changes &mdash; <b>Restore</b> makes one current again (unsaved changes are saved first)</td></tr>
                 <tr><td>Small triangle on the side / &#9650; &#9660;</td><td>on its own page the continued gate has a small triangle with &ldquo;&hellip;&rdquo; &mdash; click it to go back to the page it continues from; &#9650; next to the Page list: the page above, &#9660;: the page of the selected transfer triangle, else the first page continued from here</td></tr>
+                <tr><td><kbd>Ctrl</kbd> + <kbd>&larr;</kbd> / <kbd>&rarr;</kbd></td><td>moves the selected event (with its branch) one place left / right among its neighbours</td></tr>
                 <tr><td>Right-click an event</td><td>add below, edit, add / edit / remove the label (the boxed text right of it), AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
                 <tr><th colspan="2">Moving and copying</th></tr>
                 <tr><td>Phone / tablet</td><td>tap = click, <strong>long-press</strong> = right-click; the event menu has <em>Select</em> and <em>Move / copy to…</em> (then tap the gate); pinch zooms</td></tr>
                 <tr><td><kbd>Ctrl</kbd> + drag onto a gate</td><td>menu: move here, copy (same IDs = the same event, dashed box), copy with new IDs</td></tr>
-                <tr><td>Change a repeated (dashed) event</td><td>asks: change all occurrences, or only this one (it gets a new ID)</td></tr>
+                <tr><td>Change a repeated (dashed) event</td><td>asks: change all occurrences, or only this one (it gets a new ID); <b>Delete…</b> asks: in all places, or only here</td></tr>
                 <tr><th colspan="2">Selecting several</th></tr>
                 <tr><td><kbd>Ctrl</kbd> or <kbd>Shift</kbd> + click</td><td>select / unselect events (blue); an event selected by a plain click before joins them</td></tr>
                 <tr><td>Right-click a selected event</td><td>H category, colour, AND / OR gates or delete for all of them</td></tr>
@@ -499,7 +500,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
     <form method="dialog">
         <h3 style="margin-top:0;">Repeated event</h3>
         <p id="scope-text"></p>
-        <p style="color:var(--muted); font-size:13px;">Change it everywhere, or only here -- then this occurrence gets a new ID and is
+        <p id="scope-note" style="color:var(--muted); font-size:13px;">Change it everywhere, or only here -- then this occurrence gets a new ID and is
         independent from the others.</p>
         <p style="margin-bottom:0; display:flex; gap:6px; flex-wrap:wrap;">
             <button value="all" id="scope-all">Change all occurrences</button>
@@ -534,10 +535,14 @@ async function api(method, path, body) {
 // answers 409 needs_scope when it needs to know; `call(scope)` is then repeated with the answer.
 const scopeDialog = document.getElementById('scope-dialog');
 
-function askScope(detail) {
+const SCOPE_NOTE = document.getElementById('scope-note').textContent;
+// texts (SFM-274, deleting): { note, all, this } instead of the change wording
+function askScope(detail, texts = {}) {
     document.getElementById('scope-text').textContent =
         `${detail.event} appears ${detail.occurrences} times -- it is the same event in each place.`;
-    document.getElementById('scope-all').textContent = `Change all ${detail.occurrences} occurrences`;
+    document.getElementById('scope-note').textContent = texts.note || SCOPE_NOTE;
+    document.getElementById('scope-all').textContent = texts.all || `Change all ${detail.occurrences} occurrences`;
+    document.getElementById('scope-this').textContent = texts.this || 'Only this one (new ID)';
     return new Promise(resolve => {
         scopeDialog.onclose = () => resolve(scopeDialog.returnValue === 'all' || scopeDialog.returnValue === 'this'
                                             ? scopeDialog.returnValue : null);
@@ -795,9 +800,21 @@ function eventMenuItems(node) {
     items.push({ label: d.id === d.top ? 'Delete fault tree…' : 'Delete…', className: 'danger', run: () => {
         const below = cy.nodes().filter(n => n.id() !== d.id && isBelow(n, node)).length;
         const what = d.id === d.top ? `the whole fault tree ${d.code} (${d.label})` : `${d.code} (${d.label})`;
-        const others = d.occurrences > 1 ? `\n\nOnly this occurrence goes -- ${d.code} stays in its ${d.occurrences - 1} other place(s).` : '';
-        if (!confirm(`Delete ${what}` + (below ? ` and the ${below} event(s) below it?` : '?') + others)) return;
-        run(() => withScope(scope => api('DELETE', `${path}?at=${encodeURIComponent(node.id())}` + (scope ? `&scope=${scope}` : ''))));
+        const del = (scope, everywhere) => api('DELETE', `${path}?at=${encodeURIComponent(node.id())}`
+            + (scope ? `&scope=${scope}` : '') + (everywhere ? '&everywhere=1' : ''));
+        if (d.occurrences > 1) {                 // a repeated event (SFM-274): everywhere, or only here
+            const branch = below ? ` with the ${below} event(s) below it` : '';
+            askScope({ event: d.code, occurrences: d.occurrences }, {
+                note: `Delete ${d.code}${branch} in all ${d.occurrences} places, or only here -- it then stays in its `
+                      + `${d.occurrences - 1} other place(s).`,
+                all: `Delete in all ${d.occurrences} places`, this: 'Only here' }).then(choice => {
+                if (choice === 'all') run(() => del(null, true));
+                else if (choice === 'this') run(() => withScope(scope => del(scope, false)));
+            });
+            return;
+        }
+        if (!confirm(`Delete ${what}` + (below ? ` and the ${below} event(s) below it?` : '?'))) return;
+        run(() => withScope(scope => del(scope, false)));
     } });
     return items;
 }
@@ -1373,7 +1390,23 @@ document.addEventListener('keydown', e => {
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName)) return;
     if (e.key === 'F2' && chosen && cy) { e.preventDefault(); startRename(cy.$id(chosen)); }
     else if (e.key === 'Escape' && chosen && menu.hidden) unchoose();
+    else if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        shiftChosen(e.key === 'ArrowLeft' ? 'left' : 'right');
+    }
 });
+// Ctrl + arrow left / right (SFM-273): the selected event one place left / right among its siblings -- the same as
+// right-click > Move left / right. Held down, it repeats only after the previous move has been drawn.
+let shifting = false;
+async function shiftChosen(direction) {
+    const id = chosen || (picked.size === 1 ? [...picked][0] : null);
+    const node = id && cy && cy.$id(id);
+    if (shifting || !node || !node.length || node.data('type') !== 'manual_event' || node.data('id') === node.data('top')) return;
+    shifting = true;
+    try {
+        await run(() => withScope(scope => api('POST', eventUrl(node) + '/move', { direction, at: node.id(), scope })));
+    } finally { shifting = false; }
+}
 // The graph area moves or changes size when a hint line wraps in (narrow screens) -- the graph then has to
 // measure itself again, or taps land beside the boxes (SFM-183).
 new ResizeObserver(() => { if (cy) cy.resize(); }).observe(document.getElementById('manual-fta-graph'));

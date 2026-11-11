@@ -249,7 +249,20 @@
             }
             return removed;
         },
-        deleteEvent(data, id, at, scope) { const r = ops.removeOccurrence(data, id, at, scope); save(data); return r; },
+        deleteEvent(data, id, at, scope, everywhere) {
+            if (everywhere) {                      // every occurrence with its branch (SFM-274)
+                const occ = occurrences(data.tops, id);
+                if (!occ.length) throw new FtaError(`There is no event ${id}.`);
+                const removed = [];
+                for (const [e, parent] of occ) {
+                    for (const x of walk([e])) if (!removed.includes(x.id)) removed.push(x.id);
+                    const siblings = parent ? parent.causes : data.tops;
+                    siblings.splice(siblings.indexOf(e), 1);
+                }
+                save(data); return removed;
+            }
+            const r = ops.removeOccurrence(data, id, at, scope); save(data); return r;
+        },
         deleteEvents(data, b) {
             const items = (b.ids || []).map(x => typeof x === 'string' ? [x, null] : [x.id, x.at]);
             const paths = items.map(([i, at]) => at || resolve(data.tops, i)[2]);
@@ -1022,7 +1035,8 @@
             if (m[2] === '/move') return ops.moveCause(data, id, body || {});
             if (m[2] === '/move-to') return ops.moveBranch(data, id, body || {});
             if (method === 'PUT') return ops.updateEvent(data, id, body || {});
-            if (method === 'DELETE') return { deleted: ops.deleteEvent(data, id, q.get('at') || null, q.get('scope') || null) };
+            if (method === 'DELETE') return { deleted: ops.deleteEvent(data, id, q.get('at') || null, q.get('scope') || null,
+                                                                       ['1', 'true'].includes(q.get('everywhere'))) };
         }
         throw new FtaError(`Not available in the standalone version: ${method} ${p}`, 404);
     }
