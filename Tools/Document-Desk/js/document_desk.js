@@ -3,7 +3,8 @@
 // holds when the browser window changes or goes full screen -- and its own zoom; nothing re-fits by itself. Arrange
 // leaves locked windows where they are and fills the largest free part of the stage. Files are read in this browser
 // (pdf.js for PDFs, readXlsx() below for workbooks) and kept with the desk in IndexedDB, so the desk comes back after
-// a reload; they are never uploaded.
+// a reload; they are never uploaded. Exception: a note or highlight put into a PDF (SFM-271) -- the app on this PC
+// writes it into the PDF (the desk's copy is sent to it and comes back; a Library document is written in its folder).
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.js';
 
 // pdf.js files relative to this script, so the same file works in the app (/static/js/) and in the standalone
@@ -24,6 +25,12 @@ const DIRS = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
 const KIND_LABEL = {pdf: 'PDF', sheet: 'XLSX', csv: 'CSV', image: 'IMG'};
 
 const stage = $('dd-stage');
+// Notes in PDFs (SFM-271): shown everywhere (read from the PDF by pdf.js); written only in the workbench, which has the
+// app to write PDF annotations (data-notes on the stage); the standalone Desk shows them read-only
+const NOTES_ON = stage.dataset.notes === '1';
+const NOTE_COLORS = {yellow: '#ffdb33', green: '#8ce673', blue: '#80bfff', pink: '#ff99cc', red: '#ff7366'};
+const MARKUP = new Set(['Text', 'FreeText', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Square', 'Circle', 'Ink',
+    'Line', 'Polygon', 'PolyLine', 'Stamp', 'Caret', 'FileAttachment']);
 const desk = {windows: [], arrange: '', layouts: {}, slim: false, clean: false, nextId: 1, z: 1};
 const live = new Map();                // window id -> runtime state (DOM, open document); never saved
 const files = new Map();               // file id -> {id, name, type, blob}
@@ -126,7 +133,8 @@ async function addFiles(list, replaceId = null, handles = []) {
     const added = [];
     for (const [f, kind] of accepted) {
         added.push({id: desk.nextId++, fileId: await keepFile(f, handleOf(f)), name: f.name, kind, x: 0, y: 0, w: 0.5, h: 0.6,
-                    zoom: 0, locked: false, onTop: false, z: desk.z++, view: null, max: null, dirty: false});
+                    zoom: 0, locked: false, onTop: false, z: desk.z++, view: null, max: null, dirty: false,
+                    libId: f.libId || null});
     }
     place(added);
     desk.windows.push(...added);
@@ -160,6 +168,8 @@ async function replaceDocument(w, file, kind, handle = null) {
     w.kind = kind;
     w.view = null;
     w.dirty = false;
+    w.libId = file.libId || null;                 // from the Library: its notes go into the Library's file (SFM-271)
+    Object.assign(rt, {notes: [], noteTool: null, activeNote: null});
     labelWindow(w);
     forgetFileIfUnused(old);
     paint(w);
@@ -169,7 +179,7 @@ async function replaceDocument(w, file, kind, handle = null) {
 
 // ---------------------------------------------------------------- windows
 
-const EDITABLE = {sheet: true, csv: true};
+const EDITABLE = {sheet: true, csv: true, pdf: NOTES_ON};
 
 function mount(w) {
     const el = document.createElement('div');
@@ -179,18 +189,21 @@ function mount(w) {
         <span class="dd-tools">
         <button type="button" data-act="lib" title="Show a document of the Library in this window instead">📚</button>
         <button type="button" data-act="save" title="Save the changes into the file (Ctrl+S)">💾</button>
+        <button type="button" data-act="hl" title="Highlight: select text on the page (a comment is optional) -- written into the PDF">🖍</button><button type="button" data-act="note" title="Note: click on the page where it goes -- written into the PDF">📝</button><button type="button" data-act="notes" title="The notes and highlights of this PDF: list, edit, delete">💬</button>
         <button type="button" data-act="out" title="Zoom out (Ctrl + mouse wheel, Ctrl + −)">−</button><button type="button" data-act="zoom" class="dd-zoom" title="Zoom: a level, fit width or fit page"></button><button type="button" data-act="in" title="Zoom in (Ctrl + mouse wheel, Ctrl + +)">+</button>
         <button type="button" data-act="fit" title="Fit the width once (the zoom then stays as it is)">↔</button>
         <button type="button" data-act="top" title="Always on top of the other windows">📌</button>
         <button type="button" data-act="lock" title="Lock place and size -- Arrange leaves the window where it is">🔓</button>
         <button type="button" data-act="max" title="Fill the desk / back (or double-click the title bar)">▢</button>
         <button type="button" data-act="close" title="Close">✕</button></span></div>
-        <div class="dd-body" tabindex="-1"></div><div class="dd-tabs" hidden></div>`
+        <div class="dd-body" tabindex="-1"></div><div class="dd-tabs" hidden></div><div class="dd-notes" hidden></div>`
         + DIRS.map(d => `<i class="dd-rs" data-dir="${d}"></i>`).join('');
     stage.appendChild(el);
     const rt = {el, head: el.querySelector('.dd-head'), body: el.querySelector('.dd-body'), info: el.querySelector('.dd-info'),
-                tabs: el.querySelector('.dd-tabs'), gen: 0};
+                tabs: el.querySelector('.dd-tabs'), notesBox: el.querySelector('.dd-notes'), gen: 0, notes: [],
+                noteTool: null, activeNote: null};
     live.set(w.id, rt);
+    wireNotes(w, rt);
     rt.head.querySelector('[data-act="lib"]').hidden = !$('dd-lib');
     rt.head.title = 'Drag to move -- Ctrl + drag onto another window to swap the two';
     labelWindow(w);
@@ -228,7 +241,12 @@ function labelWindow(w) {
     const rt = live.get(w.id);
     rt.el.dataset.kind = w.kind;
     rt.head.querySelector('.dd-kind').textContent = KIND_LABEL[w.kind];
-    rt.head.querySelector('[data-act="save"]').hidden = !EDITABLE[w.kind];
+    // a PDF's 💾 saves its notes into the file; a Library PDF's notes are already in the Library's file
+    rt.head.querySelector('[data-act="save"]').hidden = !EDITABLE[w.kind] || (w.kind === 'pdf' && !!w.libId);
+    rt.head.querySelector('[data-act="notes"]').hidden = w.kind !== 'pdf';
+    rt.head.querySelector('[data-act="hl"]').hidden = rt.head.querySelector('[data-act="note"]').hidden =
+        w.kind !== 'pdf' || !NOTES_ON;
+    if (w.kind !== 'pdf') { rt.notes = []; rt.noteTool = null; }
     rt.info.textContent = '';
     rt.tabs.hidden = true;
 }
@@ -255,6 +273,14 @@ function paint(w) {
     btn('lock').textContent = w.locked ? '🔒' : '🔓';
     btn('max').classList.toggle('on', !!w.max);
     btn('zoom').textContent = w.zoom ? Math.round(w.zoom * 100) + '%' : '…';
+    const notesOpen = w.kind === 'pdf' && !!w.notesOpen;
+    btn('notes').classList.toggle('on', notesOpen);
+    btn('notes').textContent = rt.notes.length ? `💬${rt.notes.length}` : '💬';
+    btn('hl').classList.toggle('on', rt.noteTool === 'highlight');
+    btn('note').classList.toggle('on', rt.noteTool === 'note');
+    rt.el.classList.toggle('notes-open', notesOpen);
+    rt.notesBox.hidden = !notesOpen;
+    rt.body.classList.toggle('tool-note', rt.noteTool === 'note');
 }
 
 function activate(w) {
@@ -296,6 +322,9 @@ function toggleMax(w) {
 
 const ACTIONS = {
     save: w => saveFile(w),
+    hl: w => setNoteTool(w, 'highlight'),
+    note: w => setNoteTool(w, 'note'),
+    notes: w => { w.notesOpen = !w.notesOpen; paint(w); renderNotes(w, live.get(w.id)); saveSoon(); },
     lib: w => openLibrary(w),
     out: w => stepZoom(w, -1),
     in: w => stepZoom(w, 1),
@@ -728,6 +757,7 @@ const pdfViewer = {
         if (gen !== rt.gen) return;
         if (!w.zoom) w.zoom = this.fit(w, rt);
         this.build(w, rt);
+        loadNotes(w, rt, pdf);
     },
     ready: rt => !!rt.pages,
     fit(w, rt) {
@@ -805,8 +835,13 @@ const pdfViewer = {
             canvas.style.height = Math.floor(viewport.height) + 'px';
             const text = document.createElement('div');
             text.className = 'textLayer';
+            const marks = document.createElement('div');   // the PDF's notes and highlights (SFM-271)
+            marks.className = 'dd-marks';
             p.div.style.setProperty('--scale-factor', viewport.scale);
-            p.div.replaceChildren(canvas, text);
+            p.div.replaceChildren(canvas, marks, text);
+            p.viewport = viewport;
+            p.marks = marks;
+            drawMarks(rt, n);
             p.task = page.render({canvasContext: canvas.getContext('2d'), viewport,
                                   transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
                                   annotationMode: pdfjsLib.AnnotationMode.DISABLE});
@@ -827,7 +862,7 @@ const pdfViewer = {
         const p = rt.pages[n];
         if (!p || !p.shown) return;
         p.shown = false;
-        p.layer = null;
+        p.layer = p.marks = null;
         if (p.task) { p.task.cancel(); p.task = null; }
         delete p.div.dataset.drawn;
         releaseCanvases(p.div);
@@ -1259,11 +1294,19 @@ async function keepEdits(w, rt) {
 
 async function saveFile(w) {
     const rt = live.get(w.id);
-    if (!EDITABLE[w.kind] || !rt || !rt.book) return;
-    commitEdit(w, rt);
-    clearTimeout(rt.storeTimer);
-    const rec = await keepEdits(w, rt);
-    if (!rec) return;
+    if (!EDITABLE[w.kind] || !rt) return;
+    let rec;
+    if (w.kind === 'pdf') {                       // the desk's copy with its notes (SFM-271)
+        if (w.libId) { status(`The notes are already in the Library's file (${w.libId}).`); return; }
+        rec = files.get(w.fileId);
+        if (!rec) return;
+    } else {
+        if (!rt.book) return;
+        commitEdit(w, rt);
+        clearTimeout(rt.storeTimer);
+        rec = await keepEdits(w, rt);
+        if (!rec) return;
+    }
     let handle = rec.handle;
     if (!handle && window.showSaveFilePicker) {
         try { handle = await window.showSaveFilePicker({suggestedName: w.name}); }
@@ -1288,7 +1331,7 @@ async function saveFile(w) {
         }
     } catch (e) {
         const busy = /NoModificationAllowed|InvalidState|InvalidModification|NotReadable/.test(e.name || '');
-        status(`Not saved into the file: ${busy ? 'it is open in Excel or read-only -- close it there and save again' : e.message}. `
+        status(`Not saved into the file: ${busy ? 'it is open in another program (Excel, Acrobat) or read-only -- close it there and save again' : e.message}. `
             + 'The changes stay on the desk.', true);
         return;
     }
@@ -2094,6 +2137,340 @@ const sheetTarget = () => {
 document.addEventListener('copy', e => { const rt = sheetTarget(); if (rt && rt.onCopy) rt.onCopy(e); });
 document.addEventListener('paste', e => { const rt = sheetTarget(); if (rt && rt.onPaste) rt.onPaste(e); });
 
+// ---------------------------------------------------------------- notes in PDFs (SFM-271)
+// As in the Library: sticky notes at a point and highlights of selected text with a comment, written into the PDF as
+// real annotations (Acrobat shows them). The notes are read by pdf.js from the desk's copy (every markup annotation,
+// also Acrobat's), drawn over the pages and listed in the window's 💬 panel. Writing is the app's (pdf_notes): a
+// window from the Library writes into the Library's file (its routes) and shows the new file; any other PDF goes to
+// /mini-tools/api/pdf-notes and comes back with the change -- the window is then "changed" and 💾 saves it into the
+// file. A note is named by pdf.js's object id ("12R"), which the app finds too.
+
+const NOTE_LABEL = {text: 'Note', highlight: 'Highlight', freetext: 'Text box', underline: 'Underline', strikeout: 'Strike-out',
+    squiggly: 'Squiggly', square: 'Rectangle', circle: 'Circle', ink: 'Drawing', stamp: 'Stamp', line: 'Line',
+    polygon: 'Polygon', polyline: 'Polyline', caret: 'Caret', fileattachment: 'Attachment'};
+const OBJECT_KEY = /^\d+R\d*$/;
+const pdfDate = s => {
+    const d = /^D:(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?/.exec(s || '');
+    return d ? `${d[1]}-${d[2]}-${d[3]}` + (d[4] ? ` ${d[4]}:${d[5] || '00'}` : '') : '';
+};
+const rgbHex = c => c && c.length >= 3 ? '#' + [...c].slice(0, 3).map(v => Math.round(v).toString(16).padStart(2, '0')).join('') : '#ffd633';
+const quadRect = q => [Math.min(q[0], q[2], q[4], q[6]), Math.min(q[1], q[3], q[5], q[7]),
+                       Math.max(q[0], q[2], q[4], q[6]), Math.max(q[1], q[3], q[5], q[7])];
+function viewRect(vp, rect) {
+    const [x1, y1, x2, y2] = vp.convertToViewportRectangle(rect);
+    return {left: Math.min(x1, x2), top: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1)};
+}
+
+function loadNotes(w, rt, pdf) {
+    rt.notesLoading = (async () => {
+        const notes = [];
+        try {
+            for (let i = 1; i <= Math.min(pdf.numPages, 3000); i++) {
+                const annots = await (await pdf.getPage(i)).getAnnotations();
+                if (rt.pdf !== pdf) return;                 // closed or replaced meanwhile
+                for (const a of annots) {
+                    if (!MARKUP.has(a.subtype)) continue;
+                    const q = a.quadPoints ? Array.from(a.quadPoints) : [];
+                    notes.push({key: a.id || '', page: i, kind: a.subtype.toLowerCase(), rect: a.rect ? Array.from(a.rect) : [],
+                        quads: Array.from({length: Math.floor(q.length / 8)}, (_, k) => q.slice(k * 8, k * 8 + 8)),
+                        text: (a.contentsObj && a.contentsObj.str) || '', author: (a.titleObj && a.titleObj.str) || '',
+                        date: pdfDate(a.modificationDate || a.creationDate), color: rgbHex(a.color), replyTo: a.inReplyTo || null});
+                }
+            }
+        } catch (e) { console.warn('Document Desk: notes', e); }
+        if (rt.pdf !== pdf) return;
+        rt.notes = notes;
+        if (rt.activeNote && !notes.some(n => n.key === rt.activeNote)) rt.activeNote = null;
+        redrawMarks(rt);
+        renderNotes(w, rt);
+        paint(w);
+    })();
+    return rt.notesLoading;
+}
+
+function drawMarks(rt, n) {
+    const p = rt.pages && rt.pages[n];
+    if (!p || !p.marks || !p.viewport) return;
+    const html = [], box = r => `left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;`;
+    for (const note of rt.notes) {
+        if (note.page !== n) continue;
+        const act = rt.activeNote && rt.activeNote === note.key ? ' active' : '';
+        const tip = esc(`${note.author ? note.author + ': ' : ''}${note.text || '(no comment)'}`);
+        const key = esc(note.key);
+        if (['highlight', 'underline', 'strikeout', 'squiggly'].includes(note.kind) && note.quads.length) {
+            const hl = note.kind === 'highlight';
+            for (const q of note.quads)
+                html.push(`<div class="dd-mark ${hl ? 'hl' : 'ul'}${act}" data-key="${key}" title="${tip}" style="${box(viewRect(p.viewport, quadRect(q)))}${hl ? 'background' : 'border-color'}:${note.color}"></div>`);
+        } else if (note.kind === 'text' && note.rect.length === 4) {
+            const r = viewRect(p.viewport, note.rect), size = Math.max(14, Math.min(r.width, r.height) || 20 * p.viewport.scale);
+            html.push(`<div class="dd-mark icon${act}" data-key="${key}" title="${tip}" style="left:${r.left}px;top:${r.top}px;width:${size}px;height:${size}px;background:${note.color}"></div>`);
+        } else if (note.rect.length === 4) {
+            html.push(`<div class="dd-mark box${act}" data-key="${key}" title="${tip}" style="${box(viewRect(p.viewport, note.rect))}border-color:${note.color}"></div>`);
+        }
+    }
+    p.marks.innerHTML = html.join('');
+}
+
+function redrawMarks(rt) { (rt.pages || []).forEach((p, n) => { if (p) drawMarks(rt, n); }); }
+
+function renderNotes(w, rt) {
+    const box = rt.notesBox;
+    if (!box || w.kind !== 'pdf' || !w.notesOpen) return;
+    const notes = [...rt.notes].sort((a, b) => a.page - b.page || (b.rect[3] || 0) - (a.rect[3] || 0));
+    const color = desk.noteColor || 'yellow';
+    const one = n => `<div class="dd-note${n.replyTo ? ' reply' : ''}${rt.activeNote && rt.activeNote === n.key ? ' active' : ''}" data-key="${esc(n.key)}" style="--c:${n.color}">
+        <div class="meta"><span>p. ${n.page}</span><span>${esc(n.replyTo ? 'Reply' : NOTE_LABEL[n.kind] || n.kind)}</span><span class="grow"></span><span>${esc(n.author)}</span><span>${esc(n.date)}</span></div>
+        <div class="text${n.text ? '' : ' empty'}">${n.text ? esc(n.text) : '(no comment)'}</div>`
+        + (NOTES_ON && OBJECT_KEY.test(n.key) ? '<div class="acts"><button type="button" class="secondary" data-note-act="edit">Edit</button><button type="button" class="secondary" data-note-act="delete">Delete</button></div>' : '')
+        + '</div>';
+    box.innerHTML = `<div class="dd-notes-head"><b>Notes (${notes.length})</b>`
+        + (NOTES_ON ? `<select class="dd-note-color" title="Colour of new notes and highlights">${Object.keys(NOTE_COLORS).map(c =>
+            `<option value="${c}"${c === color ? ' selected' : ''}>${c}</option>`).join('')}</select>` : '') + '</div>'
+        + (notes.length ? notes.map(one).join('') : `<div class="dd-notes-none">${NOTES_ON
+            ? 'No notes yet. 🖍 highlights text you select, 📝 puts a note where you click -- written into the PDF, so Acrobat shows them too.'
+            : 'No notes in this PDF.'}</div>`)
+        + (NOTES_ON ? (w.libId ? `<div class="dd-notes-none">Written into the Library's file (${esc(w.libId)}).</div>` : '')
+            : '<div class="dd-notes-none">Shown here; writing notes needs the Integrity Workbench app.</div>');
+}
+
+function setNoteTool(w, tool) {
+    const rt = live.get(w.id);
+    if (!rt || w.kind !== 'pdf' || !NOTES_ON) return;
+    rt.noteTool = rt.noteTool === tool ? null : tool;
+    paint(w);
+    status({note: 'Click on the page where the note goes (📝 again or Esc: off).',
+            highlight: 'Select text on the page: the highlight is made when you let go (🖍 again or Esc: off).'}[rt.noteTool] || '');
+}
+
+function showNote(w, rt, key, scrollPage) {
+    rt.activeNote = key;
+    if (!w.notesOpen) { w.notesOpen = true; paint(w); saveSoon(); }
+    renderNotes(w, rt);
+    redrawMarks(rt);
+    const item = rt.notesBox.querySelector(`.dd-note[data-key="${CSS.escape(key)}"]`);
+    if (item) rt.notesBox.scrollTop = item.offsetTop - rt.notesBox.clientHeight / 3;
+    const note = rt.notes.find(n => n.key === key), p = note && rt.pages && rt.pages[note.page];
+    if (!scrollPage || !p) return;
+    const r = note.rect.length === 4 ? note.rect : note.quads.length ? quadRect(note.quads[0]) : null;
+    const y = !r ? 0 : p.viewport ? viewRect(p.viewport, r).top : (1 - r[3] / rt.sizes[note.page][1]) * p.div.offsetHeight;
+    rt.body.scrollTop = p.div.offsetTop + y - rt.body.clientHeight / 3;
+}
+
+// A small editor on page p at (left, top); resolves with the text, or null (cancel)
+function noteEditor(parent, left, top, title, initial = '') {
+    document.querySelectorAll('.dd-editor').forEach(e => e.remove());
+    const ed = document.createElement('div');
+    ed.className = 'dd-editor';
+    ed.style.left = Math.max(0, Math.min(left, parent.clientWidth - 250)) + 'px';
+    ed.style.top = Math.max(0, top) + 'px';
+    ed.innerHTML = `<div class="ttl">${esc(title)}</div><textarea></textarea>
+        <div class="row"><span class="hint">Ctrl+Enter saves</span><button type="button" class="secondary" data-ed="cancel">Cancel</button><button type="button" data-ed="save">Save</button></div>`;
+    ed.addEventListener('pointerdown', e => e.stopPropagation());
+    ed.addEventListener('mouseup', e => e.stopPropagation());
+    ed.addEventListener('click', e => e.stopPropagation());
+    parent.appendChild(ed);
+    const ta = ed.querySelector('textarea');
+    ta.value = initial;
+    ta.focus();
+    return new Promise(resolve => {
+        const done = v => { ed.remove(); resolve(v); };
+        ed.querySelector('[data-ed=save]').onclick = () => done(ta.value);
+        ed.querySelector('[data-ed=cancel]').onclick = () => done(null);
+        ta.addEventListener('keydown', e => {
+            e.stopPropagation();
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(ta.value); }
+            else if (e.key === 'Escape') { e.preventDefault(); done(null); }
+        });
+    });
+}
+
+async function addNoteAt(w, rt, n, e) {
+    const p = rt.pages[n];
+    if (!p || !p.viewport) return;
+    const r = p.div.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    const [px, py] = p.viewport.convertToPdfPoint(x, y);
+    const text = await noteEditor(p.div, x + 6, y + 6, 'New note');
+    if (text === null) return;
+    if (!text.trim()) { status('A note needs a text.', true); return; }
+    await writeNote(w, rt, {action: 'add', page: n, kind: 'note', text, color: desk.noteColor || 'yellow', point: [px, py]});
+}
+
+// The selected text of this window as quad points per page (PDF coordinates), the pieces of one line merged
+function selectionQuads(rt) {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !rt.body.contains(sel.getRangeAt(0).commonAncestorContainer)) return {};
+    const byPage = {};
+    for (const rect of sel.getRangeAt(0).getClientRects()) {
+        if (rect.width < 1 || rect.height < 1) continue;
+        const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+        const n = rt.pages.findIndex(p => {
+            if (!p || !p.viewport) return false;
+            const b = p.div.getBoundingClientRect();
+            return cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom;
+        });
+        if (n > 0) (byPage[n] ||= []).push(rect);
+    }
+    const out = {};
+    for (const [n, rects] of Object.entries(byPage)) {
+        const p = rt.pages[n], b = p.div.getBoundingClientRect(), lines = [];
+        for (const r of rects.map(r => ({l: r.left - b.left, t: r.top - b.top, r: r.right - b.left, b: r.bottom - b.top}))
+                              .sort((a, c) => a.t - c.t || a.l - c.l)) {
+            const last = lines[lines.length - 1];
+            if (last && Math.abs(last.t - r.t) < 3 && Math.abs(last.b - r.b) < 3 && r.l <= last.r + 4) {
+                last.r = Math.max(last.r, r.r); last.l = Math.min(last.l, r.l);
+            } else if (!lines.some(x => r.l >= x.l - 1 && r.r <= x.r + 1 && r.t >= x.t - 1 && r.b <= x.b + 1)) lines.push({...r});
+        }
+        out[n] = lines.map(r => [...p.viewport.convertToPdfPoint(r.l, r.t), ...p.viewport.convertToPdfPoint(r.r, r.t),
+                                 ...p.viewport.convertToPdfPoint(r.l, r.b), ...p.viewport.convertToPdfPoint(r.r, r.b)]);
+    }
+    return out;
+}
+
+async function highlightSelection(w, rt) {
+    const quads = selectionQuads(rt), pages = Object.keys(quads).map(Number).filter(n => quads[n].length);
+    if (!pages.length) return;
+    const marked = window.getSelection().toString().trim();
+    const last = pages[pages.length - 1], p = rt.pages[last];
+    const v = viewRect(p.viewport, quadRect(quads[last][quads[last].length - 1]));
+    const preview = [];                               // the coming highlight while the comment is typed
+    for (const n of pages) for (const q of quads[n]) {
+        const r = viewRect(rt.pages[n].viewport, quadRect(q)), m = document.createElement('div');
+        m.className = 'dd-mark hl';
+        Object.assign(m.style, {left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px',
+                                background: NOTE_COLORS[desk.noteColor || 'yellow']});
+        rt.pages[n].marks.appendChild(m);
+        preview.push(m);
+    }
+    window.getSelection().removeAllRanges();
+    const text = await noteEditor(p.div, v.left + v.width - 240, v.top + v.height + 6,
+        `Highlight${marked ? ': “' + (marked.length > 40 ? marked.slice(0, 40) + '…' : marked) + '”' : ''} -- comment (optional)`);
+    preview.forEach(m => m.remove());
+    if (text === null) return;
+    for (const n of pages)
+        if (!await writeNote(w, rt, {action: 'add', page: n, kind: 'highlight', text, color: desk.noteColor || 'yellow', quads: quads[n]})) return;
+}
+
+function hitNote(rt, n, e) {
+    const p = rt.pages[n];
+    if (!p || !p.viewport) return null;
+    const b = p.div.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
+    for (const note of rt.notes) {
+        if (note.page !== n || !note.key) continue;
+        const rects = note.quads.length ? note.quads.map(quadRect) : note.rect.length === 4 ? [note.rect] : [];
+        if (rects.some(r => { const v = viewRect(p.viewport, r); return x >= v.left && x <= v.left + v.width && y >= v.top && y <= v.top + v.height; }))
+            return note.key;
+    }
+    return null;
+}
+
+function editInList(w, rt, item, key) {
+    const note = rt.notes.find(n => n.key === key);
+    if (!note || item.querySelector('.dd-note-edit')) return;
+    const box = document.createElement('div');
+    box.className = 'dd-note-edit';
+    box.innerHTML = '<textarea></textarea><div class="row"><button type="button" class="secondary" data-ed="cancel">Cancel</button><button type="button" data-ed="save">Save</button></div>';
+    item.querySelector('.text').replaceWith(box);
+    const ta = box.querySelector('textarea');
+    ta.value = note.text;
+    ta.focus();
+    const save = () => writeNote(w, rt, {action: 'update', key, text: ta.value});
+    box.querySelector('[data-ed=save]').onclick = e => { e.stopPropagation(); save(); };
+    box.querySelector('[data-ed=cancel]').onclick = e => { e.stopPropagation(); renderNotes(w, rt); };
+    ta.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); }
+        else if (e.key === 'Escape') { e.preventDefault(); renderNotes(w, rt); }
+    });
+}
+
+// One change written into the PDF; true when done. The window then shows the new PDF at the same place.
+async function writeNote(w, rt, op) {
+    const rec = files.get(w.fileId);
+    if (!rec) return false;
+    status('Writing into the PDF …');
+    const before = new Set(rt.notes.map(n => n.key));
+    const failed = async r => { let m = `HTTP ${r.status}`; try { const j = await r.json(); m = j.error || j.detail || m; } catch { /* not JSON */ } return m; };
+    try {
+        let blob;
+        if (w.libId) {                                // into the Library's file, then the desk shows that file
+            const url = `/api/library/documents/${encodeURIComponent(w.libId)}/notes` + (op.key ? '/' + encodeURIComponent(op.key) : '');
+            const body = op.action === 'add' ? {page: op.page, kind: op.kind, text: op.text, color: op.color, point: op.point, quads: op.quads}
+                : op.action === 'update' ? {text: op.text} : null;
+            const r = await fetch(url, {method: {add: 'POST', update: 'PUT', delete: 'DELETE'}[op.action],
+                headers: body ? {'Content-Type': 'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
+            if (!r.ok) throw new Error(await failed(r));
+            const f = await fetch(`/library/file/${encodeURIComponent(w.libId)}`, {cache: 'no-store'});
+            if (!f.ok) throw new Error(await failed(f));
+            blob = await f.blob();
+        } else {                                      // the desk's copy, sent to the app and back with the change
+            const form = new FormData();
+            form.append('file', rec.blob, w.name);
+            form.append('op', JSON.stringify(op));
+            const r = await fetch('/mini-tools/api/pdf-notes', {method: 'POST', body: form});
+            if (!r.ok) throw new Error(await failed(r));
+            blob = await r.blob();
+            w.dirty = true;
+        }
+        rec.blob = new Blob([await blob.arrayBuffer()], {type: 'application/pdf'});
+        await putRecord(rec);
+        await reloadPdf(w, rt);
+        const added = op.action === 'add' ? rt.notes.find(n => !before.has(n.key)) : null;
+        if (added) showNote(w, rt, added.key, false);
+        else if (op.action === 'update') showNote(w, rt, op.key, false);
+        saveSoon();
+        status(w.libId ? `Written into the Library's file (${w.libId}).` : 'Written into the desk\'s copy -- 💾 saves it into the file.');
+        return true;
+    } catch (e) {
+        status(`Not written into the PDF: ${e.message}`, true);
+        return false;
+    }
+}
+
+// The window's PDF opened again from the desk's copy: same place, zoom and page
+async function reloadPdf(w, rt) {
+    if (pdfViewer.ready(rt)) pdfViewer.track(w, rt, false);
+    const gen = ++rt.gen;
+    pdfViewer.close(rt);
+    await pdfViewer.open(w, rt, files.get(w.fileId).blob, gen);
+    if (rt.notesLoading) await rt.notesLoading;
+    paint(w);
+    findDocsChanged();
+}
+
+function wireNotes(w, rt) {
+    rt.body.addEventListener('mouseup', e => {
+        if (w.kind === 'pdf' && rt.noteTool === 'highlight' && !e.target.closest('.dd-editor')) setTimeout(() => highlightSelection(w, rt), 0);
+    });
+    rt.body.addEventListener('click', e => {
+        if (w.kind !== 'pdf' || !rt.pages || e.target.closest('.dd-editor')) return;
+        const div = e.target.closest('.dd-page');
+        if (!div) return;
+        const n = +div.dataset.page;
+        if (rt.noteTool === 'note') { addNoteAt(w, rt, n, e); return; }
+        const icon = e.target.closest('.dd-mark.icon'), sel = window.getSelection();
+        const key = icon ? icon.dataset.key : sel && !sel.isCollapsed ? null : hitNote(rt, n, e);
+        if (key) showNote(w, rt, key, false);
+        else if (rt.activeNote) { rt.activeNote = null; redrawMarks(rt); renderNotes(w, rt); }
+    });
+    rt.notesBox.addEventListener('change', e => {
+        if (e.target.matches('.dd-note-color')) { desk.noteColor = e.target.value; saveSoon(); }
+    });
+    rt.notesBox.addEventListener('click', async e => {
+        const item = e.target.closest('.dd-note');
+        if (!item || e.target.closest('.dd-note-edit')) return;
+        const key = item.dataset.key, act = e.target.closest('[data-note-act]');
+        if (!act) { if (key) showNote(w, rt, key, true); return; }
+        if (act.dataset.noteAct === 'edit') editInList(w, rt, item, key);
+        else if (act.dataset.noteAct === 'delete' && confirm('Delete this note from the PDF?')) await writeNote(w, rt, {action: 'delete', key});
+    });
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || (e.target.closest && e.target.closest('input, textarea, select'))) return;
+    const w = activeWindow(), rt = w && live.get(w.id);
+    if (rt && rt.noteTool) { rt.noteTool = null; paint(w); status(''); }
+});
+
 // ---------------------------------------------------------------- search (SFM-267)
 // One search over every window on the desk: the text of every PDF page (pdf.js text content, read once per document
 // and kept while it is open) and the shown text of every sheet / CSV cell; images have no text. Case does not matter.
@@ -2459,7 +2836,9 @@ async function addFromLibrary(ids) {
             const r = await fetch(`/library/file/${encodeURIComponent(d.id)}`, {cache: 'no-store'});
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             const blob = await r.blob();
-            got.push(new File([blob], d.name, {type: blob.type}));
+            const file = new File([blob], d.name, {type: blob.type});
+            file.libId = d.id;                        // notes on it are written into the Library's file (SFM-271)
+            got.push(file);
         } catch (e) { failed.push(`${d.name} (${e.message})`); }
     }
     const done = got.length ? await addFiles(got, replaceId) : true;
