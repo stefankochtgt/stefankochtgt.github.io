@@ -43,6 +43,13 @@
     <button type="button" id="dd-add" title="Or drop files anywhere on the page">Add files…</button>
     
     <span class="dd-sep"></span>
+    <span class="dd-find">
+        <input type="search" id="dd-find" placeholder="Search the documents (Ctrl+F)" autocomplete="off" spellcheck="false"
+               title="Searches the text of every window: PDFs and sheet cells. * = any characters (at the start or end: the rest of the word), ? = one character, ~* = a real *. Case does not matter. Enter = next, Shift+Enter = previous, Esc = clear.">
+        <button type="button" class="secondary" id="dd-find-prev" title="Previous match (Shift+Enter, Shift+F3)">‹</button><button type="button" class="secondary" id="dd-find-next" title="Next match (Enter, F3)">›</button>
+        <span class="dd-find-info" id="dd-find-info"></span>
+    </span>
+    <span class="dd-sep"></span>
     <span class="dd-label">Arrange</span>
     <button type="button" class="secondary" data-arrange="columns" title="All windows side by side (locked windows stay where they are)">Side by side</button>
     <button type="button" class="secondary" data-arrange="rows" title="All windows one below the other">Stacked</button>

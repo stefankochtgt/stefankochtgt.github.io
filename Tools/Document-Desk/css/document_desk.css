@@ -10,8 +10,21 @@ body.dd-clean > header.topbar, body.dd-clean main.dd-main > h1 { display: none; 
 .dd-bar select { width: auto; padding: 4px 6px; font-size: 13px; max-width: 220px; }
 .dd-sep { width: 1px; height: 22px; background: var(--border); }
 .dd-label { font-size: 12px; color: var(--muted); }
-.dd-status { font-size: 12px; color: var(--muted); }
+/* the status takes the rest of the line and never wraps it: a changing text must not move the desk */
+.dd-status { font-size: 12px; color: var(--muted); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
 .dd-status.warn { color: var(--error); }
+/* search (SFM-267) */
+.dd-find { display: inline-flex; align-items: center; gap: 4px; }
+.dd-find input { width: 230px; padding: 4px 8px; font-size: 13px; }
+.dd-find button { padding: 4px 8px; }
+.dd-find-info { font-size: 12px; color: var(--muted); width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-find-info.warn { color: var(--error); }
+.dd-page .textLayer mark.dd-hit { position: static; color: transparent; background: rgba(250 204 21 / 0.45); border-radius: 2px;
+    padding: 0; margin: 0; }
+.dd-page .textLayer mark.dd-hit.cur { background: rgba(234 88 12 / 0.5); box-shadow: 0 0 0 2px #ea580c; }
+.dd-sheet td.dd-hit { background-color: #fef08a !important; }
+.dd-sheet td.dd-hit.cur { background-color: #fdba74 !important; outline: 2px solid #ea580c; outline-offset: -2px; }
 
 .dd-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #dfe3e9;
     border: 1px solid var(--border); border-radius: 6px; }

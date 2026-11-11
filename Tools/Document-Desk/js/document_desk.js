@@ -281,6 +281,7 @@ function closeWindow(w, force = false) {
     if (activeId === w.id) activeId = null;
     refreshEmpty();
     saveSoon();
+    findDocsChanged();
 }
 
 function toggleMax(w) {
@@ -695,6 +696,7 @@ async function openDocument(w) {
         if (gen !== rt.gen) return;
         rt.el.dataset.state = 'ready';
         paint(w);
+        findDocsChanged();
     } catch (e) {
         if (gen !== rt.gen) return;
         rt.body.innerHTML = `<div class="dd-msg">This file can't be shown: ${esc(e.message || e)}</div>`;
@@ -811,8 +813,12 @@ const pdfViewer = {
             await p.task.promise;
             p.task = null;
             if (gen !== rt.renderGen || !p.shown) return;
-            await new pdfjsLib.TextLayer({textContentSource: page.streamTextContent(), container: text, viewport}).render();
+            const layer = new pdfjsLib.TextLayer({textContentSource: page.streamTextContent(), container: text, viewport});
+            await layer.render();
+            if (gen !== rt.renderGen || !p.shown) return;
+            p.layer = layer;
             p.div.dataset.drawn = '1';
+            markPdfPage(w, rt, n);
         } catch (e) {
             if (!e || e.name !== 'RenderingCancelledException') console.warn('Document Desk: page', n, e);
         }
@@ -821,6 +827,7 @@ const pdfViewer = {
         const p = rt.pages[n];
         if (!p || !p.shown) return;
         p.shown = false;
+        p.layer = null;
         if (p.task) { p.task.cancel(); p.task = null; }
         delete p.div.dataset.drawn;
         releaseCanvases(p.div);
@@ -834,7 +841,7 @@ const pdfViewer = {
     close(rt) {
         this.stopAll(rt);
         if (rt.pdf) rt.pdf.destroy();
-        rt.pdf = rt.pages = rt.sizes = null;
+        rt.pdf = rt.pages = rt.sizes = rt.textCache = null;
     },
 };
 
@@ -964,16 +971,18 @@ const sheetViewer = {
 const cellTd = (rt, k) => rt.body.querySelector(`td[data-k="${k}"]`);
 const sheetOf = rt => rt.book.sheets[rt.sheet];
 
-function selectCell(w, rt, k, scroll = false) {
+// focus false: the search box keeps the keyboard (Enter = next match)
+function selectCell(w, rt, k, scroll = false, focus = true) {
     rt.body.querySelectorAll('td.sel').forEach(td => td.classList.remove('sel'));
     showRow(w, rt, Math.floor(k / KEY));
     const td = cellTd(rt, k);
     if (!td) return;
     td.classList.add('sel');
     rt.sel = {k, r: Math.floor(k / KEY), c: k % KEY};
-    if (scroll) td.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    if (scroll === 'center') bringIntoView(rt, td);
+    else if (scroll) td.scrollIntoView({block: 'nearest', inline: 'nearest'});
     showCellInfo(rt);
-    rt.body.focus({preventScroll: true});
+    if (focus) rt.body.focus({preventScroll: true});
 }
 
 function showCellInfo(rt) {
@@ -1229,6 +1238,7 @@ function afterEdit(w, rt, rows) {
     w.dirty = true;
     paint(w);
     saveSoon();
+    findDocsChanged();
     clearTimeout(rt.storeTimer);
     rt.storeTimer = setTimeout(() => keepEdits(w, rt), 800);
 }
@@ -1942,6 +1952,7 @@ function drawSheet(w, rt, top) {
     rt.range = {a, b};
     rt.body.innerHTML = `<div class="dd-sheetbox" style="zoom:${w.zoom}">${sheetHtml(sh, rt.book, a, b)}</div>`;
     if (rt.sel) cellTd(rt, rt.sel.k)?.classList.add('sel');
+    markSheet(w, rt);
 }
 
 function sheetHtml(sh, book, a, b) {
@@ -2083,6 +2094,254 @@ const sheetTarget = () => {
 document.addEventListener('copy', e => { const rt = sheetTarget(); if (rt && rt.onCopy) rt.onCopy(e); });
 document.addEventListener('paste', e => { const rt = sheetTarget(); if (rt && rt.onPaste) rt.onPaste(e); });
 
+// ---------------------------------------------------------------- search (SFM-267)
+// One search over every window on the desk: the text of every PDF page (pdf.js text content, read once per document
+// and kept while it is open) and the shown text of every sheet / CSV cell; images have no text. Case does not matter.
+// * = any characters within one line of a PDF or one cell -- at the start or the end of the search: the rest of the
+// word --, ? = one character, ~* ~? ~~ = the character itself. Matches are marked (PDF: in the text layer of the drawn
+// pages, sheets: the cell, one match per cell as in Excel), the current one stronger; Enter / › / F3 goes to the next
+// one: its window comes to the front and scrolls there. Everything stays in this browser.
+
+const find = {q: '', re: null, hits: [], cur: -1, gen: 0, timer: 0, byPlace: new Map(), scrollTo: null};
+
+// The search as a regular expression; null when there is nothing to look for (empty, or only * and ?)
+function findPattern(q, flags = 'gi') {
+    q = q.trim();
+    if (!/[^*?\s]/.test(q.replace(/~[*?~]/g, 'x'))) return null;
+    let src = '';
+    for (let i = 0; i < q.length; i++) {
+        const ch = q[i];
+        if (ch === '~' && '*?~'.includes(q[i + 1] || '-')) { src += '\\' + q[++i]; continue; }
+        if (ch === '*') {
+            while (q[i + 1] === '*') i++;
+            src += src === '' || i === q.length - 1 ? '\\S*' : '[^\\n]*?';
+        } else if (ch === '?') src += '[^\\n]';
+        else if (/\s/.test(ch)) { while (/\s/.test(q[i + 1] || '')) i++; src += '\\s+'; }
+        else src += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    }
+    return new RegExp(src, flags);
+}
+
+const upperBound = (arr, x) => { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] <= x) lo = m + 1; else hi = m; } return lo; };
+const placeKey = h => h.page != null ? `${h.wid}:p${h.page}` : `${h.wid}:s${h.sheet}`;
+const readingOrder = () => [...desk.windows].sort((a, b) => Math.round(a.y * 20) - Math.round(b.y * 20) || a.x - b.x);
+
+// The text of every page: the items' strings in text-layer order (item i = the text layer's span i), \n after an item
+// that ends a line; per item its start in the page text and its place on the page (fractions, for scrolling there)
+async function pdfText(rt, progress) {
+    if (!rt.textCache) rt.textCache = {pdf: rt.pdf, pages: []};
+    const cache = rt.textCache, pdf = cache.pdf, n = pdf.numPages;
+    for (let i = 1; i <= n; i++) {
+        if (cache.pages[i]) continue;
+        if (progress(i, n) === false) return null;
+        const page = await pdf.getPage(i);
+        const vp = page.getViewport({scale: 1}), tc = await page.getTextContent();
+        if (rt.textCache !== cache) return null;          // closed or replaced meanwhile
+        let text = '';
+        const starts = [], xs = [], ys = [];
+        for (const it of tc.items) {
+            if (it.str === undefined) continue;
+            const [x, y] = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
+            starts.push(text.length);
+            xs.push(x / vp.width);
+            ys.push(y / vp.height);
+            text += it.str + (it.hasEOL ? '\n' : '');
+        }
+        cache.pages[i] = {text, starts, xs, ys};
+    }
+    return cache.pages;
+}
+
+function shownText(cell, book) {
+    if (cell.v === null) return cell.f ? '=' + cell.f : '';
+    return cellText(cell, cellStyle(book, cell.s), book)[0];
+}
+
+function scheduleFind(delay = 250, jump = true) {
+    clearTimeout(find.timer);
+    find.timer = setTimeout(() => runFind(jump), delay);
+}
+// a document opened, closed or edited: the matches again, without jumping
+function findDocsChanged() { if (find.re) scheduleFind(400, false); }
+
+async function runFind(jump = true) {
+    clearTimeout(find.timer);
+    find.timer = 0;
+    const gen = ++find.gen, q = $('dd-find').value, before = find.hits[find.cur];
+    let re = null;
+    try { re = findPattern(q); } catch { re = null; }
+    Object.assign(find, {q, re, hits: [], cur: -1, byPlace: new Map(), scrollTo: null});
+    markAll();
+    if (!re) { findInfo(q.trim() ? 'Type more than * and ?' : '', !!q.trim()); return; }
+    const hits = [];
+    for (const w of readingOrder()) {
+        const rt = live.get(w.id);
+        if (!rt) continue;
+        if (w.kind === 'pdf' && rt.pdf) {
+            let pages = null;
+            try {
+                pages = await pdfText(rt, (i, n) => {
+                    if (gen !== find.gen) return false;
+                    if (i % 10 === 1) findInfo(`Searching ${w.name} … p. ${i} / ${n}`);
+                });
+            } catch (e) { console.warn('Document Desk search', w.name, e); }
+            if (gen !== find.gen) return;
+            (pages || []).forEach((pg, page) => {
+                if (pg) for (const m of pg.text.matchAll(re)) if (m[0]) hits.push({wid: w.id, page, start: m.index, end: m.index + m[0].length});
+            });
+        } else if (rt.book) {
+            rt.book.sheets.forEach((sh, sheet) => {
+                const L = sh.layout && !sh.stale ? sh.layout : sheetLayout(sh);
+                for (const k of [...sh.cells.keys()].sort((a, b) => a - b)) {
+                    const r = Math.floor(k / KEY), c = k % KEY;
+                    if (r > L.lastR || c > L.lastC || !L.rowH(r) || !L.colW(c) || L.covered.has(k)) continue;
+                    re.lastIndex = 0;
+                    const m = re.exec(shownText(sh.cells.get(k), rt.book));
+                    if (m && m[0]) hits.push({wid: w.id, sheet, k});
+                }
+            });
+        }
+    }
+    if (gen !== find.gen) return;
+    find.hits = hits;
+    hits.forEach((h, i) => { const key = placeKey(h); if (!find.byPlace.has(key)) find.byPlace.set(key, []); find.byPlace.get(key).push(i); });
+    if (!hits.length) { markAll(); findInfo('No match', true); return; }
+    if (jump) { goFind(0); return; }
+    find.cur = before ? hits.findIndex(h => h.wid === before.wid && h.page === before.page && h.start === before.start
+                                             && h.sheet === before.sheet && h.k === before.k) : -1;
+    markAll();
+    findInfo();
+}
+
+function findStep(dir) {
+    if (find.timer || $('dd-find').value !== find.q) { runFind(true); return; }
+    if (find.hits.length) goFind(find.cur < 0 ? (dir > 0 ? 0 : -1) : find.cur + dir);
+}
+
+function goFind(i) {
+    const n = find.hits.length;
+    if (!n) return;
+    find.cur = ((i % n) + n) % n;
+    const h = find.hits[find.cur], w = byId(h.wid), rt = w && live.get(w.id);
+    if (!rt) { scheduleFind(0, false); return; }
+    activate(w);
+    if (h.page != null) {
+        find.scrollTo = {wid: w.id, page: h.page};
+        markAll();                                     // a drawn page: marked and scrolled to the match at once
+        const p = rt.pages && rt.pages[h.page], pg = rt.textCache && rt.textCache.pages[h.page];
+        if (find.scrollTo && p && pg) {                // not drawn yet: scroll near it, marked when the page is drawn
+            const item = Math.max(0, upperBound(pg.starts, h.start) - 1);
+            rt.body.scrollTop = p.div.offsetTop + (pg.ys[item] || 0) * p.div.offsetHeight - rt.body.clientHeight / 2;
+            const x = p.div.offsetLeft + (pg.xs[item] || 0) * p.div.offsetWidth;
+            if (x < rt.body.scrollLeft || x > rt.body.scrollLeft + rt.body.clientWidth - 40) rt.body.scrollLeft = x - rt.body.clientWidth / 3;
+        }
+    } else if (rt.book) {
+        if (rt.editor) commitEdit(w, rt);
+        if (rt.sheet !== h.sheet) { w.view = {sheet: h.sheet, top: 0, left: 0}; rt.sel = null; sheetViewer.show(w, rt); }
+        selectCell(w, rt, h.k, 'center', false);
+        markAll();
+    }
+    findInfo();
+}
+
+function findInfo(msg = null, warn = false) {
+    if (msg === null) {
+        const n = find.hits.length, h = find.hits[find.cur], w = h && byId(h.wid), rt = w && live.get(w.id);
+        let where = '';
+        if (h && h.page != null) where = ` p. ${h.page}`;
+        else if (h && rt && rt.book) {
+            const sh = rt.book.sheets[h.sheet];
+            where = ` ${rt.book.sheets.length > 1 ? sh.name + '!' : ''}${colName(h.k % KEY)}${Math.floor(h.k / KEY)}`;
+        }
+        msg = !n ? '' : h ? `${find.cur + 1} / ${n} · ${w.name}${where}` : `${n} match${n === 1 ? '' : 'es'}`;
+    }
+    const el = $('dd-find-info');
+    el.textContent = msg;
+    el.title = msg;
+    el.classList.toggle('warn', warn);
+}
+
+function markAll() {
+    for (const w of desk.windows) {
+        const rt = live.get(w.id);
+        if (!rt) continue;
+        if (w.kind === 'pdf' && rt.pages) rt.pages.forEach((p, n) => { if (p) markPdfPage(w, rt, n); });
+        else if (rt.book && rt.body.querySelector('.dd-sheet')) markSheet(w, rt);
+    }
+}
+
+// The matches on one drawn page: <mark>s inside the text layer's spans (the text stays transparent over the canvas)
+function markPdfPage(w, rt, n) {
+    const p = rt.pages && rt.pages[n];
+    if (!p || !p.layer) return;
+    const divs = p.layer.textDivs, strs = p.layer.textContentItemsStr;
+    for (const i of p.marked || []) if (divs[i]) divs[i].textContent = strs[i];
+    p.marked = [];
+    const list = find.byPlace.get(`${w.id}:p${n}`), pg = rt.textCache && rt.textCache.pages[n];
+    if (!list || !pg) return;
+    const parts = new Map();                           // item -> [[from, to, current]]
+    for (const hi of list) {
+        const h = find.hits[hi];
+        for (let i = Math.max(0, upperBound(pg.starts, h.start) - 1); i < pg.starts.length && pg.starts[i] < h.end; i++) {
+            const s = pg.starts[i], a = Math.max(h.start - s, 0), b = Math.min(h.end - s, (strs[i] || '').length);
+            if (b > a) { if (!parts.has(i)) parts.set(i, []); parts.get(i).push([a, b, hi === find.cur]); }
+        }
+    }
+    for (const [i, segs] of parts) {
+        const div = divs[i], str = strs[i];
+        if (!div) continue;
+        const frag = document.createDocumentFragment();
+        let at = 0;
+        for (const [a, b, cur] of segs.sort((x, y) => x[0] - y[0])) {
+            if (a < at) continue;
+            if (a > at) frag.append(str.slice(at, a));
+            const m = document.createElement('mark');
+            m.className = cur ? 'dd-hit cur' : 'dd-hit';
+            m.textContent = str.slice(a, b);
+            frag.append(m);
+            at = b;
+        }
+        if (at < str.length) frag.append(str.slice(at));
+        div.replaceChildren(frag);
+        p.marked.push(i);
+    }
+    const s = find.scrollTo;
+    if (s && s.wid === w.id && s.page === n) {
+        const m = p.div.querySelector('mark.cur');
+        if (m) { find.scrollTo = null; bringIntoView(rt, m); }
+    }
+}
+
+function markSheet(w, rt) {
+    const list = find.byPlace.get(`${w.id}:s${rt.sheet}`) || [];
+    const keys = new Map(list.map(hi => [find.hits[hi].k, hi === find.cur]));
+    rt.body.querySelectorAll('td.dd-hit').forEach(td => td.classList.remove('dd-hit', 'cur'));
+    if (!keys.size) return;
+    rt.body.querySelectorAll('td[data-k]').forEach(td => {
+        const k = +td.dataset.k;
+        if (keys.has(k)) td.classList.add('dd-hit', ...(keys.get(k) ? ['cur'] : []));
+    });
+}
+
+// Scrolls the window's body (never the desk or the page) so that el sits about in the middle
+function bringIntoView(rt, el) {
+    const box = rt.body.getBoundingClientRect(), r = el.getBoundingClientRect();
+    if (r.top < box.top + 30 || r.bottom > box.bottom - 10) rt.body.scrollTop += r.top - box.top - rt.body.clientHeight / 2 + r.height / 2;
+    if (r.left < box.left || r.right > box.right) rt.body.scrollLeft += r.left - box.left - rt.body.clientWidth / 2 + r.width / 2;
+}
+
+$('dd-find').addEventListener('input', () => scheduleFind());
+$('dd-find').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); findStep(e.shiftKey ? -1 : 1); }
+    else if (e.key === 'Escape') { e.preventDefault(); $('dd-find').value = ''; runFind(); }
+});
+$('dd-find-prev').addEventListener('click', () => findStep(-1));
+$('dd-find-next').addEventListener('click', () => findStep(1));
+document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f') { e.preventDefault(); $('dd-find').focus(); $('dd-find').select(); }
+    else if (e.key === 'F3') { e.preventDefault(); findStep(e.shiftKey ? -1 : 1); }
+});
+
 // ---------------------------------------------------------------- toolbar
 
 function refreshEmpty() { $('dd-empty').hidden = desk.windows.length > 0; }
@@ -2163,9 +2422,10 @@ function libNote(msg, warn = false) {
 }
 
 function renderLibrary() {
-    const words = $('dd-lib-q').value.toLowerCase().split(/\s+/).filter(Boolean);
-    const hay = d => [d.id, d.title, d.name, d.path, d.folder, ...(d.aliases || [])].join(' ').toLowerCase();
-    const shown = (lib.docs || []).filter(d => words.every(w => hay(d).includes(w)));
+    // every word must occur; * and ? as in the desk's search (SFM-267)
+    const words = $('dd-lib-q').value.split(/\s+/).filter(Boolean).map(w => { try { return findPattern(w, 'i'); } catch { return null; } });
+    const hay = d => [d.id, d.title, d.name, d.path, d.folder, ...(d.aliases || [])].join(' ');
+    const shown = (lib.docs || []).filter(d => words.every(re => !re || re.test(hay(d))));
     $('dd-lib-list').innerHTML = shown.length ? shown.map(d => `
         <label class="dd-lib-item${lib.chosen.has(d.id) ? ' on' : ''}" data-id="${esc(d.id)}" data-kind="${d.kind}" title="${esc(d.path || d.name)}">
             <input type="checkbox" value="${esc(d.id)}"${lib.chosen.has(d.id) ? ' checked' : ''}>
