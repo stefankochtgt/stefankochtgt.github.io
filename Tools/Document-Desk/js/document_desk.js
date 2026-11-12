@@ -2185,6 +2185,11 @@ function rowHtml(sh, book, r, upto) {
 
 let dragDepth = 0;
 const hasFiles = e => !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+// Files from this PC (SFM-284): a setting of this PC, off by default in the workbench (data-local-files="0"); the
+// standalone page has no setting and takes them. Off, a dropped file is not read -- and not left to the browser either
+// (it would open the file in the tab, the same reading).
+const LOCAL_FILES = stage.dataset.localFiles !== '0';
+const LOCAL_OFF = 'Files from this PC are switched off on this PC (Projects > This PC) -- use "From Library…".';
 
 function showDrop() {
     const drop = $('dd-drop');
@@ -2200,6 +2205,7 @@ document.addEventListener('mousemove', () => { if (!$('dd-drop').hidden) hideDro
 document.addEventListener('dragenter', e => {
     if (!hasFiles(e)) return;
     e.preventDefault();
+    if (!LOCAL_FILES) return;
     if (dragDepth++ === 0) showDrop();
 });
 document.addEventListener('dragleave', e => {
@@ -2209,7 +2215,8 @@ document.addEventListener('dragleave', e => {
 document.addEventListener('dragover', e => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    e.dataTransfer.dropEffect = LOCAL_FILES ? 'copy' : 'none';
+    if (!LOCAL_FILES) return;
     const target = e.target.closest && e.target.closest('[data-replace], [data-add]');
     $('dd-drop').querySelectorAll('.over').forEach(el => { if (el !== target) el.classList.remove('over'); });
     if (target) target.classList.add('over');
@@ -2217,6 +2224,7 @@ document.addEventListener('dragover', e => {
 document.addEventListener('drop', e => {
     if (!hasFiles(e)) return;
     e.preventDefault();
+    if (!LOCAL_FILES) { hideDrop(); status(LOCAL_OFF); return; }        // not read (SFM-284)
     const target = e.target.closest && e.target.closest('[data-replace]');
     const list = Array.from(e.dataTransfer.files);
     // the files' handles (Edge / Chrome), taken while the drop event lasts: Save can then write into the dropped file
@@ -2835,14 +2843,14 @@ function refreshEmpty() { $('dd-empty').hidden = desk.windows.length > 0; }
 function setSlim(on) { desk.slim = on; stage.classList.toggle('slim', on); $('dd-slim').classList.toggle('on', on); }
 function setClean(on) { desk.clean = on; document.body.classList.toggle('dd-clean', on); $('dd-clean').classList.toggle('on', on); }
 
-$('dd-add').addEventListener('click', async () => {
+if ($('dd-add')) $('dd-add').addEventListener('click', async () => {
     if (!window.showOpenFilePicker) { $('dd-file').click(); return; }
     let handles;                              // with handles, Save writes the changes into the chosen files
     try { handles = await window.showOpenFilePicker({multiple: true}); }
     catch (e) { if (e.name !== 'AbortError') $('dd-file').click(); return; }
     addFiles(await Promise.all(handles.map(h => h.getFile())), null, handles);
 });
-$('dd-file').addEventListener('change', e => { addFiles(Array.from(e.target.files)); e.target.value = ''; });
+if ($('dd-file')) $('dd-file').addEventListener('change', e => { addFiles(Array.from(e.target.files)); e.target.value = ''; });
 if ($('dd-app-add')) $('dd-app-add').addEventListener('click', e => {
     const wrap = $('dd-app-add').parentElement;
     if (wrap.querySelector('.dd-menu')) { closeMenus(); return; }
