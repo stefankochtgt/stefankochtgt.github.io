@@ -1,6 +1,6 @@
 // Drawing -- offline cache (SFM-218), written by scripts/build_standalone_drawing.py.
 // Every file of the app is kept; a new build has a new CACHE name, so the next start loads it and drops the old.
-const CACHE = 'drawing-pro-max-e1f6177f2f9e';
+const CACHE = 'drawing-pro-max-ba67c7a116ca';
 const FILES = ["./", "css/drawing.css", "css/style.css", "favicon.svg", "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "index.html", "js/drawing.js", "js/drawing_local.js", "js/version.js", "manifest.json"];
 self.addEventListener('install', e => {
     e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

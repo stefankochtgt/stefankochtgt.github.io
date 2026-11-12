@@ -1181,7 +1181,7 @@ function insertPicture(src, w, h, name) {
     if (S.tool !== 'pointer') setTool('pointer');
 }
 
-// ---- Insert > Fault tree (workbench): a page of the Manual FTA or the FTA tab as a picture ----------------------
+// ---- Insert > Fault tree (workbench): a page of the Manual FTA, the FTA tab or the Semi-manual FTA as a picture ----------------------
 // The page itself draws it: opened in a hidden frame with ?picture=1, it answers with the PNG of its diagram
 // (graph_export.js :: sendPicture) -- exactly what the tab shows (compact display, system in scope as chosen there),
 // with the model revision above each top event.
@@ -1234,6 +1234,14 @@ async function ftaDialog() {
         if (pages.length) {
             out.push('<div class="dw-dd-title">FTA (derived from the model)</div>');
             for (const p of pages) out.push(item(`/fta?page=${enc(p.id)}`, `FTA, ${pageLabel(p)}`, pageLabel(p)));
+        }
+    } catch (e) { /* none */ }
+    try {
+        const r = await fetch('/api/semi-manual-fta/graph', { cache: 'no-store' });     // 404 while the plugin is off
+        const pages = r.ok ? (await r.json()).pages || [] : [];
+        if (pages.length) {
+            out.push('<div class="dw-dd-title">Semi-manual FTA</div>');
+            for (const p of pages) out.push(item(`/semi-manual-fta?page=${enc(p.id)}`, `Semi-manual FTA, ${pageLabel(p)}`, pageLabel(p)));
         }
     } catch (e) { /* none */ }
     list.innerHTML = out.join('') || '<div class="dw-muted" style="padding:6px;">This project has no fault trees.</div>';
