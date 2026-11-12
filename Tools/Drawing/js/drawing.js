@@ -343,6 +343,8 @@ function markerDefs() {
 // A picture's address: the data URI itself in an export (`embed`); in the editor a blob: URL made from it once --
 // a data URI of megabytes in every redraw would make dragging slow.
 const IMG_URLS = new Map();
+const HIT_PX = 16;           // screen px: width of the invisible grab band along lines and outlines (SFM-293)
+const HANDLE_HIT_PX = 20;    // screen px: grab area of a resize / end handle
 function imageHref(id, embed) {
     const im = S.doc.images[id];
     if (!im) return '';
@@ -384,6 +386,15 @@ function shapeSvg(page, s, embed) {
         const d = pts.map((p, i) => `${i ? 'L' : 'M'}${r1(p.x)},${r1(p.y)}`).join(' ');
         const markers = (st.arrowEnd ? ' marker-end="url(#dw-arrow-end)"' : '') + (st.arrowStart ? ' marker-start="url(#dw-arrow-start)"' : '');
         geo = `<path d="${d}" fill="none" stroke="${esc(stroke === 'none' ? '#000000' : stroke)}" stroke-width="${sw}"${dash}${markers} stroke-linejoin="round"/>`;
+    }
+    // in the editor only: an invisible band of HIT_PX screen pixels along the line / outline, so a thin arrow or
+    // border need not be hit exactly to select, drag or resize the shape (SFM-293)
+    if (!embed) {
+        const hw = Math.max(sw, HIT_PX / S.zoom);
+        const band = `fill="none" stroke="transparent" stroke-width="${hw}" pointer-events="stroke"`;
+        if (ONE_D.has(s.type)) geo += `<path class="dw-hit" d="${geo.match(/ d="([^"]*)"/)[1]}" ${band} stroke-linejoin="round" stroke-linecap="round"/>`;
+        else if (s.type === 'ellipse') geo += `<ellipse class="dw-hit" cx="${s.x + s.w / 2}" cy="${s.y + s.h / 2}" rx="${s.w / 2}" ry="${s.h / 2}" ${band}/>`;
+        else geo += `<rect class="dw-hit" x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" ${band}/>`;
     }
     let text = '';
     if (s.text && !ONE_D.has(s.type)) {
@@ -494,7 +505,6 @@ function linkBadge(s) {
 
 function overlaySvg(p) {
     const z = S.zoom, out = [];
-    for (const s of p.shapes) out.push(linkBadge(s));
     const showPoints = S.tool === 'connector' || S.tool === 'cpoint' || (S.drag && S.drag.mode === 'end');
     // the raster on the outline of the shape under the mouse, the place the end would glue to highlighted
     const hover = S.drag && S.drag.mode === 'end' ? S.drag.hover : (S.tool === 'connector' ? S.hover : null);
@@ -513,18 +523,26 @@ function overlaySvg(p) {
         if (ONE_D.has(s.type)) {
             const glued = [s.from, s.to];
             [[s.x1, s.y1], [s.x2, s.y2]].forEach(([x, y], i) => out.push(
-                `<rect class="dw-handle end" data-end="${i}" x="${x - 5 / z}" y="${y - 5 / z}" width="${10 / z}" height="${10 / z}" fill="${glued[i] ? '#16a34a' : '#fff'}" stroke="#1d4ed8" stroke-width="${1 / z}"/>`));
+                `<g class="dw-handle end" data-end="${i}"><rect x="${x - 5 / z}" y="${y - 5 / z}" width="${10 / z}" height="${10 / z}" fill="${glued[i] ? '#16a34a' : '#fff'}" stroke="#1d4ed8" stroke-width="${1 / z}"/>${handleHit(x, y, z)}</g>`));
         } else {
             out.push(`<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="none" stroke="#1d4ed8" stroke-width="${1 / z}" stroke-dasharray="${4 / z} ${3 / z}" pointer-events="none"/>`);
             if (S.sel.length === 1) for (const [h, fx, fy] of HANDLES)
-                out.push(`<rect class="dw-handle" data-handle="${h}" x="${s.x + fx * s.w - 4 / z}" y="${s.y + fy * s.h - 4 / z}" width="${8 / z}" height="${8 / z}" fill="#fff" stroke="#1d4ed8" stroke-width="${1 / z}" style="cursor:${h}-resize"/>`);
+                out.push(`<g class="dw-handle" data-handle="${h}" style="cursor:${h}-resize"><rect x="${s.x + fx * s.w - 4.5 / z}" y="${s.y + fy * s.h - 4.5 / z}" width="${9 / z}" height="${9 / z}" fill="#fff" stroke="#1d4ed8" stroke-width="${1 / z}"/>${handleHit(s.x + fx * s.w, s.y + fy * s.h, z)}</g>`);
         }
     }
+    // link badges over the handles: the top-right handle's grab area must not cover the badge (SFM-293)
+    for (const s of p.shapes) out.push(linkBadge(s));
     if (S.drag && S.drag.mode === 'marquee') {
         const m = S.drag.rect;
         out.push(`<rect x="${m.x}" y="${m.y}" width="${m.w}" height="${m.h}" fill="rgba(37,99,235,.08)" stroke="#2563eb" stroke-width="${1 / z}" stroke-dasharray="${3 / z}"/>`);
     }
     return out.join('');
+}
+
+// a handle's grab area: HANDLE_HIT_PX screen pixels square around it, larger than the drawn square (SFM-293)
+function handleHit(x, y, z) {
+    const r = HANDLE_HIT_PX / 2 / z;
+    return `<rect class="dw-hit" x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" fill="transparent"/>`;
 }
 
 const HANDLES = [['nw', 0, 0], ['n', 0.5, 0], ['ne', 1, 0], ['e', 1, 0.5], ['se', 1, 1], ['s', 0.5, 1], ['sw', 0, 1], ['w', 0, 0.5]];
