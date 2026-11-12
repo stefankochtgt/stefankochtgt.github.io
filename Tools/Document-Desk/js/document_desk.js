@@ -2189,7 +2189,7 @@ const hasFiles = e => !!e.dataTransfer && Array.from(e.dataTransfer.types || [])
 // standalone page has no setting and takes them. Off, a dropped file is not read -- and not left to the browser either
 // (it would open the file in the tab, the same reading).
 const LOCAL_FILES = stage.dataset.localFiles !== '0';
-const LOCAL_OFF = 'Files from this PC are switched off on this PC (Projects > This PC) -- use "From Library…".';
+const LOCAL_OFF = 'Files from this PC are switched off on this PC (Settings > This PC) -- use "From Library…".';
 
 function showDrop() {
     const drop = $('dd-drop');
