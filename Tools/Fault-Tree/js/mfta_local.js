@@ -773,7 +773,7 @@
         let s = `<?xml version='1.0' encoding='UTF-8'?>\n<faultTreeExport format="${FORMAT}" version="${VERSION}" source="manual"`
               + (a ? ` analysis="${esc(a.id)}" analysisName="${esc(a.name)}"` : '') + '>\n';
         s += `  <!-- Fault trees exported by ${TOOL}. Same format as the Integrity Workbench app: import it there or here. -->\n`;
-        s += `  <model project="standalone" revision="${revisionId(data)}" revisionChanged="${data.changed || ''}" fingerprint="" gitCommit="" gitState="not under version control" exported="${now}" tool="${esc(TOOL)}"/>\n`;
+        s += `  <model project="standalone" revision="${revisionId(data)}" revisionChanged="${data.changed || ''}" fingerprint="" exported="${now}" tool="${esc(TOOL)}"/>\n`;
         for (const t of data.tops.filter(x => !analysis || x.analysis === analysis)) s += `  <tree top="${esc(t.id)}">\n${eventXml(t, 2)}  </tree>\n`;
         return s + '</faultTreeExport>\n';
     }
