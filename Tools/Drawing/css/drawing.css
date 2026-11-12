@@ -9,6 +9,7 @@
 .menubar .menu-list { position: absolute; top: 100%; left: 0; z-index: 40; min-width: 220px; padding: 4px 0; background: #fff;
     border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 6px 18px rgba(15, 23, 42, .16); display: flex; flex-direction: column; }
 .menubar .menu-list[hidden] { display: none; }
+.menubar .menu-list button[hidden], .help-table tr[hidden] { display: none; }   /* Insert > Fault tree: not in the standalone */
 .menubar .menu-list button { text-align: left; background: none; border: 0; border-radius: 0; color: var(--text, #111); padding: 6px 14px; font-size: 13px; cursor: pointer; }
 .menubar .menu-list button:hover { background: #eef2ff; }
 .menubar .menu-list .danger { color: #b91c1c; }
@@ -92,3 +93,6 @@
     main.content.fill { padding-left: 6px; padding-right: 6px; }
     .app-heading { font-size: 16px !important; }
 }
+
+/* the hidden frame in which a fault tree page draws its picture for Insert > Fault tree (SFM-291) */
+.dw-picture-frame { position: fixed; left: -12000px; top: 0; width: 1400px; height: 900px; border: 0; }

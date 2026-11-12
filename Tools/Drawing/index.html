@@ -63,6 +63,13 @@
             </div>
         </div>
         <div class="menu">
+            <button type="button" class="menu-title" aria-haspopup="true">Insert</button>
+            <div class="menu-list" role="menu" hidden>
+                <button type="button" role="menuitem" id="dw-insert-clip" title="A picture you copied (e.g. a screenshot) -- also Ctrl+V on the drawing">Picture from the clipboard<span class="key">Ctrl+V</span></button>
+                <button type="button" role="menuitem" id="dw-insert-fta" class="dw-model-only" title="A page of the Manual FTA or the FTA tab of this project, drawn as there, as a picture">Fault tree from the app…</button>
+            </div>
+        </div>
+        <div class="menu">
             <button type="button" class="menu-title" aria-haspopup="true">Import / Export</button>
             <div class="menu-list" role="menu" hidden>
                 <button type="button" role="menuitem" id="dw-export-png" title="This page as a PNG image">Export PNG</button>
@@ -195,6 +202,18 @@
     </form>
 </dialog>
 
+<dialog id="dw-fta-dialog" class="dw-model-only">
+    <form method="dialog" style="min-width:460px; max-width:640px;">
+        <h3 style="margin-top:0;">Insert a fault tree</h3>
+        <p class="dw-muted" style="margin-top:0;">Choose a page: it is drawn as on its tab (compact display and system in scope
+        as set there) and inserted as a picture, with the model revision above each top event. It does not change when the
+        fault tree changes later &mdash; insert it again then.</p>
+        <div id="dw-fta-list" class="dw-link-list"></div>
+        <div id="dw-fta-status" class="dw-muted" aria-live="polite" style="min-height:1.4em; margin-top:6px;"></div>
+        <div style="text-align:right; margin-top:8px;"><button value="cancel" class="secondary">Cancel</button></div>
+    </form>
+</dialog>
+
 <dialog id="dw-help-dialog" class="help-dialog">
     <form method="dialog">
         <h3 style="margin-top:0;">Drawing &mdash; keyboard and mouse</h3>
@@ -205,6 +224,8 @@
             <tr><td>Text</td><td>click or drag on the page, type, click elsewhere (or <kbd>Esc</kbd>, <kbd>Ctrl</kbd>+<kbd>Enter</kbd>) to finish</td></tr>
             <tr><td>Connector</td><td>drag from a shape onto another: the ends are glued (green handles) and follow the shapes. Dropped on a shape's <b>line</b>, the end sits on that line, snapped to the <b>raster</b> shown as dots (twelfths of each side: halves, thirds, quarters &mdash; equal distances are easy); on an own &times; point it stays there; dropped inside the shape it takes the nearest side. Right angles (routed around the two shapes) or straight (Line menu)</td></tr>
             <tr><td>Connection point (&times;)</td><td>click on a shape to add a point where connectors can glue; click an own point to remove it</td></tr>
+            <tr><td>Picture</td><td>copy one (e.g. a screenshot with <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>), then <kbd>Ctrl</kbd>+<kbd>V</kbd> on the drawing (or Insert &gt; Picture from the clipboard); corner handles keep its proportions (<kbd>Shift</kbd>: free)</td></tr>
+            <tr class="dw-model-only"><td>Fault tree</td><td>Insert &gt; Fault tree from the app: a page of the Manual FTA or the FTA tab, drawn as there, as a picture with the model revision</td></tr>
             <tr><th colspan="2">Editing</th></tr>
             <tr><td>Click / <kbd>Shift</kbd> or <kbd>Ctrl</kbd> + click / drag on the empty page</td><td>select one / more / all inside the frame</td></tr>
             <tr><td>Drag / handles / arrow keys</td><td>move / resize (<kbd>Shift</kbd>: keep the proportions) / nudge 1 px (<kbd>Shift</kbd>: 10)</td></tr>

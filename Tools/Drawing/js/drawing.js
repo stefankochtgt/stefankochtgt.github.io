@@ -2,6 +2,9 @@
 // A small Visio: rectangles, ellipses, lines, text boxes and connectors glued to shapes (they follow when a
 // shape moves), connection points, text formatting and shape styles from a ribbon, several pages, undo,
 // copy / paste, PNG / SVG / XML export. In the workbench a shape can be linked to a model object.
+// Pictures (SFM-291): pasted from the clipboard (Ctrl+V) or, in the workbench, a fault tree page of the app
+// (Insert > Fault tree...); each picture is kept once in the document (doc.images, <images> in the XML) and the
+// picture shapes point to it -- so undo snapshots, copies and duplicated pages don't copy the picture data.
 //
 // The page holds the document in memory, draws it as SVG and saves it whole as XML through a store:
 //   workbench  -> PUT /api/drawings (model/drawings.xml of the open project)
@@ -18,6 +21,12 @@ const GRID = 10;
 const UNDO_LIMIT = 150;
 const KEY_PAGE = 'drawingPage';
 const ONE_D = new Set(['line', 'connector']);
+const SHAPE_TYPES = ['rect', 'ellipse', 'line', 'text', 'connector', 'image'];
+// a picture as stored: PNG, JPEG, GIF or WebP as a base64 data URI -- nothing that can run code (no SVG)
+const IMG_RE = /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+const IMG_KEEP = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const IMG_MAX_SIDE = 4000, IMG_MAX_BYTES = 8000000;      // larger pictures are redrawn smaller
+const COPY_MARK = 'safety-model-drawing-shapes';           // on the clipboard when shapes were copied (Ctrl+C / X)
 // A connector end glued onto a shape's outline sits on a raster: twelfths of the side (halves, thirds, quarters,
 // sixths -- equal distances for 1, 2, 3, 4 or 6 connectors). Stored as fromAt / toAt = "<side t|r|b|l>:<fraction>".
 const RASTER = 12;
@@ -44,11 +53,12 @@ const DEFAULTS = {
     text: { fill: 'none', line: 'none' },
     line: { fill: 'none' },
     connector: { fill: 'none', arrowEnd: true },
+    image: { fill: 'none', line: 'none' },
 };
 
 // ---- document <-> XML ------------------------------------------------------------------------
 
-function emptyDoc() { return { pages: [{ id: 'P1', name: 'Page 1', width: 1123, height: 794, shapes: [] }] }; }
+function emptyDoc() { return { pages: [{ id: 'P1', name: 'Page 1', width: 1123, height: 794, shapes: [] }], images: {} }; }
 
 function styleOf(shape) { return { ...BASE_STYLE, ...DEFAULTS[shape.type], ...shape.style }; }
 
@@ -58,9 +68,14 @@ function parseXml(text) {
     const root = xml.documentElement;
     if (root.tagName !== 'drawings' || root.getAttribute('format') !== FORMAT)
         throw new Error(`Not a drawing file (expected <drawings format="${FORMAT}">).`);
-    const doc = { pages: [] };
+    const doc = { pages: [], images: {} };
     const num = (el, a) => (el.hasAttribute(a) ? Number(el.getAttribute(a)) : undefined);
     for (const p of root.children) {
+        if (p.tagName === 'images') {
+            for (const im of p.children) if (im.tagName === 'image')
+                doc.images[im.getAttribute('id') || ''] = { src: im.textContent.trim(), name: im.getAttribute('name') || '' };
+            continue;
+        }
         if (p.tagName !== 'drawing') continue;
         const page = { id: p.getAttribute('id') || '', name: p.getAttribute('name') || '',
                        width: num(p, 'width'), height: num(p, 'height'), shapes: [] };
@@ -68,7 +83,7 @@ function parseXml(text) {
             if (el.tagName !== 'shape') continue;
             const s = { id: el.getAttribute('id') || '', type: el.getAttribute('type') || '', style: {}, cps: [] };
             for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt']) if (el.hasAttribute(a)) s[a] = num(el, a);
-            for (const a of ['from', 'to', 'fromAt', 'toAt', 'route', 'link']) if (el.getAttribute(a)) s[a] = el.getAttribute(a);
+            for (const a of ['from', 'to', 'fromAt', 'toAt', 'route', 'link', 'img']) if (el.getAttribute(a)) s[a] = el.getAttribute(a);
             for (const c of el.children) {
                 if (c.tagName === 'text') s.text = c.textContent;
                 else if (c.tagName === 'cp') s.cps.push([num(c, 'x'), num(c, 'y')]);
@@ -100,7 +115,7 @@ function toXml(doc) {
         for (const s of p.shapes) {
             let attrs = `id="${xmlEsc(s.id)}" type="${s.type}"`;
             for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2']) if (s[a] !== undefined) attrs += ` ${a}="${r1(s[a])}"`;
-            for (const a of ['from', 'fromPt', 'fromAt', 'to', 'toPt', 'toAt', 'route', 'link']) if (s[a] !== undefined && s[a] !== '' && s[a] !== null) attrs += ` ${a}="${xmlEsc(s[a])}"`;
+            for (const a of ['from', 'fromPt', 'fromAt', 'to', 'toPt', 'toAt', 'route', 'link', 'img']) if (s[a] !== undefined && s[a] !== '' && s[a] !== null) attrs += ` ${a}="${xmlEsc(s[a])}"`;
             const parts = [];
             if (s.text) parts.push(`<text>${xmlEsc(s.text)}</text>`);
             const st = Object.entries(s.style || {}).filter(([k]) => STYLE_KEYS.includes(k))
@@ -111,6 +126,14 @@ function toXml(doc) {
         }
         out.push('  </drawing>');
     }
+    // the pictures the shapes show -- only those still used (undo may have dropped a shape, its picture stays in memory)
+    const used = new Set(doc.pages.flatMap(p => p.shapes.filter(s => s.type === 'image').map(s => s.img)));
+    const images = Object.entries(doc.images || {}).filter(([id]) => used.has(id));
+    if (images.length) {
+        out.push('  <images>');
+        for (const [id, im] of images) out.push(`    <image id="${xmlEsc(id)}"${im.name ? ` name="${xmlEsc(im.name)}"` : ''}>${im.src}</image>`);
+        out.push('  </images>');
+    }
     out.push('</drawings>', '');
     return out.join('\n');
 }
@@ -118,6 +141,11 @@ function toXml(doc) {
 // The same rules as app/services/drawings.py :: check().
 function checkDoc(doc) {
     if (!doc.pages.length) throw new Error('The file has no drawing page.');
+    const images = doc.images || {};
+    for (const [id, im] of Object.entries(images)) {
+        if (!ID_RE.test(id)) throw new Error(`Picture id "${id}" is invalid.`);
+        if (!IMG_RE.test(im.src)) throw new Error(`Picture ${id} is not a PNG, JPEG, GIF or WebP picture.`);
+    }
     const pageIds = new Set();
     for (const p of doc.pages) {
         if (!ID_RE.test(p.id) || pageIds.has(p.id)) throw new Error(`Page id "${p.id}" is missing, invalid or used twice.`);
@@ -127,12 +155,14 @@ function checkDoc(doc) {
         const byId = new Map();
         for (const s of p.shapes) {
             if (!ID_RE.test(s.id) || byId.has(s.id)) throw new Error(`Page "${p.name}": shape id "${s.id}" is invalid or used twice.`);
-            if (!['rect', 'ellipse', 'line', 'text', 'connector'].includes(s.type)) throw new Error(`Page "${p.name}": ${s.id} has an unknown type "${s.type}".`);
+            if (!SHAPE_TYPES.includes(s.type)) throw new Error(`Page "${p.name}": ${s.id} has an unknown type "${s.type}".`);
             for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt'])
                 if (s[a] !== undefined && !Number.isFinite(s[a])) throw new Error(`Page "${p.name}": ${s.id} ${a} is not a number.`);
             const needed = ONE_D.has(s.type) ? ['x1', 'y1', 'x2', 'y2'] : ['x', 'y', 'w', 'h'];
             const missing = needed.filter(a => s[a] === undefined);
             if (missing.length) throw new Error(`Page "${p.name}": ${s.id} has no ${missing.join(', ')}.`);
+            if (s.type === 'image' && !Object.prototype.hasOwnProperty.call(images, s.img || ''))
+                throw new Error(`Page "${p.name}": ${s.id} shows picture "${s.img || ''}", which is not in the file.`);
             byId.set(s.id, s);
         }
         for (const s of p.shapes) for (const end of ['from', 'to']) {
@@ -310,8 +340,27 @@ function markerDefs() {
     </defs>`;
 }
 
-// One shape as SVG markup (also used for the PNG / SVG export, so no editor-only parts here).
-function shapeSvg(page, s) {
+// A picture's address: the data URI itself in an export (`embed`); in the editor a blob: URL made from it once --
+// a data URI of megabytes in every redraw would make dragging slow.
+const IMG_URLS = new Map();
+function imageHref(id, embed) {
+    const im = S.doc.images[id];
+    if (!im) return '';
+    if (embed) return im.src;
+    let u = IMG_URLS.get(id);
+    if (!u || u.src !== im.src) {
+        const comma = im.src.indexOf(','), bin = atob(im.src.slice(comma + 1)), bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        if (u) URL.revokeObjectURL(u.url);
+        u = { src: im.src, url: URL.createObjectURL(new Blob([bytes], { type: im.src.slice(5, im.src.indexOf(';')) })) };
+        IMG_URLS.set(id, u);
+    }
+    return u.url;
+}
+
+// One shape as SVG markup (also used for the PNG / SVG export -- `embed`: pictures as data URIs --, so no
+// editor-only parts here).
+function shapeSvg(page, s, embed) {
     const st = styleOf(s);
     const stroke = st.line === 'none' ? 'none' : st.line;
     const sw = st.lineWidth * PT;
@@ -321,6 +370,13 @@ function shapeSvg(page, s) {
     let geo = '';
     if (s.type === 'rect' || s.type === 'text') {
         geo = `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="${st.radius}" ${common}/>`;
+    } else if (s.type === 'image') {
+        const href = imageHref(s.img, embed);
+        geo = href ? `<image href="${esc(href)}" x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" preserveAspectRatio="none"/>`
+                   : `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="#f3f4f6" stroke="#dc2626"/>`;
+        if (st.line !== 'none') geo += `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="none" stroke="${esc(stroke)}" stroke-width="${sw}"${dash}/>`;
+        const name = !embed && S.doc.images[s.img] && S.doc.images[s.img].name;
+        if (name) geo += `<title>${esc(name)}</title>`;
     } else if (s.type === 'ellipse') {
         geo = `<ellipse cx="${s.x + s.w / 2}" cy="${s.y + s.h / 2}" rx="${s.w / 2}" ry="${s.h / 2}" ${common}/>`;
     } else {
@@ -374,7 +430,9 @@ function scheduleSave() {
     }, 300);
 }
 
-function snapshot() { return { doc: JSON.stringify(S.doc), pageId: S.pageId }; }
+// The pictures are not in the snapshot: they never change, and the shapes only point to them (doc.images).
+function snapshot() { return { doc: JSON.stringify({ pages: S.doc.pages }), pageId: S.pageId }; }
+function restoreDoc(json) { S.doc = { ...JSON.parse(json), images: S.doc.images }; }
 
 function pushUndo(snap) {
     S.undo.push(snap);
@@ -395,7 +453,7 @@ function undoRedo(from, to) {
     const step = from.pop();
     if (!step) return;
     to.push(snapshot());
-    S.doc = JSON.parse(step.doc);
+    restoreDoc(step.doc);
     S.pageId = S.doc.pages.some(p => p.id === step.pageId) ? step.pageId : S.doc.pages[0].id;
     S.sel = S.sel.filter(id => shape(id));
     scheduleSave();
@@ -743,7 +801,8 @@ function onPointerMove(evt) {
         if (h.includes('e')) { w = Math.max(5, mx - o.x); }
         if (h.includes('n')) { y = Math.min(my, o.y + o.h - 5); hh = o.y + o.h - y; }
         if (h.includes('s')) { hh = Math.max(5, my - o.y); }
-        if (evt.shiftKey && h.length === 2) { const ratio = o.w / o.h; if (w / hh > ratio) w = hh * ratio; else hh = w / ratio; if (h.includes('w')) x = o.x + o.w - w; if (h.includes('n')) y = o.y + o.h - hh; }
+        // a corner handle with Shift keeps the proportions -- a picture the other way round: always, Shift = free (SFM-291)
+        if ((s.type === 'image' ? !evt.shiftKey : evt.shiftKey) && h.length === 2) { const ratio = o.w / o.h; if (w / hh > ratio) w = hh * ratio; else hh = w / ratio; if (h.includes('w')) x = o.x + o.w - w; if (h.includes('n')) y = o.y + o.h - hh; }
         Object.assign(s, { x, y, w, h: hh });
         render();
     } else if (d.mode === 'end') {
@@ -794,7 +853,7 @@ function onPointerUp(evt) {
     if (d.mode === 'end' && d.created) {
         const s = shape(d.id);
         if (Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < 4 && !(s.from && s.to)) {   // a click without dragging: nothing
-            S.doc = JSON.parse(d.before.doc);
+            restoreDoc(d.before.doc);
             S.sel = [];
             render();
             return;
@@ -816,7 +875,7 @@ function commitDrag(d) {
 
 function startText(id) {
     const s = shape(id);
-    if (!s) return;
+    if (!s || s.type === 'image') return;             // pictures have no text
     S.sel = [id];
     render();
     const st = styleOf(s);
@@ -1006,6 +1065,197 @@ function linkDialog() {
     input.focus();
 }
 
+// ---- pictures (SFM-291) ----------------------------------------------------------------------------
+
+const clipboardHere = e => !(document.querySelector('dialog[open]') || S.editing
+                             || (e.target && e.target.closest && e.target.closest('input, textarea, select')));
+
+// Ctrl+C / X (and the menu): the shapes into the drawing's own clipboard, a mark onto the system clipboard -- so a
+// later Ctrl+V knows the shapes are newer than a picture copied before.
+function onCopy(e, cut) {
+    if (!clipboardHere(e) || !S.sel.length) return;
+    copySelected(cut);
+    if (e.clipboardData) e.clipboardData.setData('text/plain', `${COPY_MARK} ${S.clipboard.length}`);
+    e.preventDefault();
+}
+
+// Ctrl+V: copied shapes (the mark), else a picture on the clipboard, else the drawing's own clipboard.
+function onPaste(e) {
+    if (!clipboardHere(e)) return;
+    e.preventDefault();
+    const data = e.clipboardData;
+    if (data && data.getData('text/plain').startsWith(COPY_MARK)) { paste(); return; }
+    const files = data ? [...data.items].filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean) : [];
+    if (files.length) { insertPictureFile(files[0], 'Picture from the clipboard'); return; }
+    paste();
+}
+
+// The menu's Paste / Insert > Picture from the clipboard: reads the clipboard where the browser allows it
+// (it may ask first). True when it pasted something.
+async function pasteFromClipboard(picturesOnly) {
+    if (!navigator.clipboard || !navigator.clipboard.read) return false;
+    let items;
+    try { items = await navigator.clipboard.read(); } catch (e) { return false; }
+    for (const item of items) {
+        const type = item.types.find(t => t.startsWith('image/'));
+        if (type) { await insertPictureFile(await item.getType(type), 'Picture from the clipboard'); return true; }
+        if (!picturesOnly && item.types.includes('text/plain')) {
+            const text = await (await item.getType('text/plain')).text();
+            if (text.startsWith(COPY_MARK) && S.clipboard) { paste(); return true; }
+        }
+    }
+    return false;
+}
+
+const blobToDataUrl = blob => new Promise((ok, fail) => {
+    const r = new FileReader();
+    r.onload = () => ok(r.result);
+    r.onerror = () => fail(r.error);
+    r.readAsDataURL(blob);
+});
+
+// A picture (file / clipboard item) -> {src: data URI, w, h (its own size in px)}. PNG, JPEG, GIF and WebP stay as
+// they are; other kinds (BMP, SVG, ...) and very large pictures are redrawn as PNG (photos: JPEG), at most
+// IMG_MAX_SIDE px wide or high.
+async function readPicture(blob) {
+    const url = URL.createObjectURL(blob);
+    try {
+        const img = await new Promise((ok, fail) => {
+            const i = new Image();
+            i.onload = () => ok(i);
+            i.onerror = () => fail(new Error('This is not a picture the browser can read.'));
+            i.src = url;
+        });
+        const w = img.naturalWidth || 300, h = img.naturalHeight || 150;
+        if (IMG_KEEP.has(blob.type) && Math.max(w, h) <= IMG_MAX_SIDE && blob.size <= IMG_MAX_BYTES) {
+            const src = await blobToDataUrl(blob);
+            if (IMG_RE.test(src)) return { src, w, h };
+        }
+        const k = Math.min(1, IMG_MAX_SIDE / Math.max(w, h)), jpeg = blob.type === 'image/jpeg';
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(w * k)); canvas.height = Math.max(1, Math.round(h * k));
+        const ctx = canvas.getContext('2d');
+        if (jpeg) { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        return { src: canvas.toDataURL(jpeg ? 'image/jpeg' : 'image/png', 0.92), w, h };
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+}
+
+async function insertPictureFile(blob, name) {
+    try { const pic = await readPicture(blob); insertPicture(pic.src, pic.w, pic.h, name); }
+    catch (e) { alert(e.message); }
+}
+
+function nextImageId() {
+    let n = 0;
+    for (const id of Object.keys(S.doc.images)) { const m = /^IMG-(\d+)$/.exec(id); if (m) n = Math.max(n, +m[1]); }
+    return 'IMG-' + (n + 1);
+}
+
+// The middle of what is in view, on the page.
+function viewCentre() {
+    const r = $('dw-svg').getBoundingClientRect(), p = page();
+    return { x: Math.max(0, Math.min(p.width, (r.width / 2 - S.pan.x) / S.zoom)),
+             y: Math.max(0, Math.min(p.height, (r.height / 2 - S.pan.y) / S.zoom)) };
+}
+
+// A picture shape in the middle of the view, at its own size or smaller -- at most 90 % of the page -- and selected.
+// `name` (where it came from) is kept with the picture and shown when the mouse rests on it.
+function insertPicture(src, w, h, name) {
+    if (!IMG_RE.test(src)) { alert('This picture cannot be inserted (only PNG, JPEG, GIF and WebP pictures).'); return; }
+    const p = page(), k = Math.min(1, p.width * 0.9 / w, p.height * 0.9 / h);
+    w = Math.max(5, Math.round(w * k)); h = Math.max(5, Math.round(h * k));
+    const c = viewCentre();
+    const same = Object.entries(S.doc.images).find(([, x]) => x.src === src);    // pasted twice: kept once
+    const img = same ? same[0] : nextImageId();
+    if (!same) S.doc.images[img] = { src, name: name || '' };
+    if (S.editing) finishText();
+    change(() => {
+        const s = { id: nextShapeId(), type: 'image', img, style: {}, w, h,
+                    x: Math.round(Math.max(0, Math.min(p.width - w, c.x - w / 2))), y: Math.round(Math.max(0, Math.min(p.height - h, c.y - h / 2))) };
+        p.shapes.push(s);
+        S.sel = [s.id];
+    });
+    if (S.tool !== 'pointer') setTool('pointer');
+}
+
+// ---- Insert > Fault tree (workbench): a page of the Manual FTA or the FTA tab as a picture ----------------------
+// The page itself draws it: opened in a hidden frame with ?picture=1, it answers with the PNG of its diagram
+// (graph_export.js :: sendPicture) -- exactly what the tab shows (compact display, system in scope as chosen there),
+// with the model revision above each top event.
+
+function ftaPicture(url) {
+    return new Promise((resolve, reject) => {
+        const frame = document.createElement('iframe');
+        frame.className = 'dw-picture-frame';
+        frame.setAttribute('aria-hidden', 'true');
+        frame.tabIndex = -1;
+        const finish = (fn, value) => { clearTimeout(timer); window.removeEventListener('message', onMessage); frame.remove(); fn(value); };
+        const onMessage = e => {
+            if (e.source !== frame.contentWindow || e.origin !== location.origin || !e.data || e.data.type !== 'fta-picture') return;
+            if (e.data.empty) finish(reject, new Error('That page has no fault tree.'));
+            else if (e.data.error) finish(reject, new Error(e.data.error));
+            else finish(resolve, e.data);
+        };
+        const timer = setTimeout(() => finish(reject, new Error('The fault tree page did not answer within a minute.')), 60000);
+        window.addEventListener('message', onMessage);
+        frame.src = url + (url.includes('?') ? '&' : '?') + 'picture=1';
+        document.body.appendChild(frame);
+    });
+}
+
+function pageLabel(p) {
+    const tree = p.code ? `${p.code} ${p.title || ''}` : (p.trees || []).length === 1 ? `${p.trees[0].id} ${p.trees[0].title || ''}` : '';
+    return `Page ${p.number}` + (tree.trim() ? ` — ${tree.trim()}` : (p.trees || []).length > 1 ? ` (${p.trees.length} trees)` : '');
+}
+
+async function ftaDialog() {
+    const dlg = $('dw-fta-dialog'), list = $('dw-fta-list'), info = $('dw-fta-status');
+    if (!dlg) return;
+    list.innerHTML = '<div class="dw-muted" style="padding:6px;">Loading…</div>';
+    info.textContent = '';
+    dlg.showModal();
+    const enc = encodeURIComponent, out = [];
+    const item = (src, name, text) => `<button type="button" class="dw-dd-item" data-src="${esc(src)}" data-name="${esc(name)}">${esc(text)}</button>`;
+    try {
+        const r = await fetch('/api/manual-fta/explorer', { cache: 'no-store' });      // 404 while the plugin is off
+        if (r.ok) for (const a of (await r.json()).analyses) {
+            out.push(`<div class="dw-dd-title">Manual FTA — ${esc(a.name)}</div>`);
+            for (const p of a.pages)
+                out.push(item(`/manual-fta?analysis=${enc(a.id)}${p.id ? '&page=' + enc(p.id) : ''}`, `Manual FTA "${a.name}", ${pageLabel(p)}`, pageLabel(p)));
+            if (!a.pages.length) out.push('<div class="dw-muted" style="padding:2px 8px;">no fault tree yet</div>');
+        }
+    } catch (e) { /* none */ }
+    try {
+        const r = await fetch('/api/graph/fta-tree/page', { cache: 'no-store' });
+        const pages = r.ok ? (await r.json()).pages || [] : [];
+        if (pages.length) {
+            out.push('<div class="dw-dd-title">FTA (derived from the model)</div>');
+            for (const p of pages) out.push(item(`/fta?page=${enc(p.id)}`, `FTA, ${pageLabel(p)}`, pageLabel(p)));
+        }
+    } catch (e) { /* none */ }
+    list.innerHTML = out.join('') || '<div class="dw-muted" style="padding:6px;">This project has no fault trees.</div>';
+    list.onclick = async e => {
+        const b = e.target.closest('[data-src]');
+        if (!b || list.dataset.busy) return;
+        list.dataset.busy = '1';
+        list.querySelectorAll('button').forEach(x => { x.disabled = true; });
+        info.textContent = 'Drawing the fault tree…';
+        try {
+            const pic = await ftaPicture(b.dataset.src);
+            dlg.close();
+            insertPicture(pic.src, pic.width, pic.height, b.dataset.name + (pic.revision ? `, model revision ${pic.revision}` : ''));
+        } catch (err) {
+            info.textContent = err.message;
+        } finally {
+            delete list.dataset.busy;
+            list.querySelectorAll('button').forEach(x => { x.disabled = false; });
+        }
+    };
+}
+
 // ---- pages, files, menus ----------------------------------------------------------------------
 
 async function askText(title, value) {
@@ -1085,7 +1335,7 @@ function pageSvg(footer) {
     const text = lines.map((t, i) => `<text x="8" y="${p.height + 4 + (i + 1) * (FOOTER_SIZE + 3)}" font-family="Arial, Helvetica, sans-serif" `
         + `font-size="${FOOTER_SIZE}" fill="${FOOTER_GREY}">${xmlEsc(t)}</text>`).join('');
     return `<svg xmlns="${SVGNS}" width="${p.width}" height="${h}" viewBox="0 0 ${p.width} ${h}">${markerDefs()}`
-        + `<rect width="${p.width}" height="${h}" fill="#ffffff"/>${p.shapes.map(s => shapeSvg(p, s)).join('')}${text}</svg>`;
+        + `<rect width="${p.width}" height="${h}" fill="#ffffff"/>${p.shapes.map(s => shapeSvg(p, s, true)).join('')}${text}</svg>`;
 }
 
 function exportPng(footer) {
@@ -1108,7 +1358,13 @@ function exportPng(footer) {
 async function importXml(file) {
     let imported;
     try { imported = parseXml(await file.text()); } catch (e) { alert(`${file.name}: ${e.message}`); return; }
-    const added = [];
+    const added = [], remap = {};
+    for (const [id, im] of Object.entries(imported.images)) {      // the same picture is kept once
+        const same = Object.entries(S.doc.images).find(([, x]) => x.src === im.src);
+        remap[id] = same ? same[0] : nextImageId();
+        if (!same) S.doc.images[remap[id]] = im;
+    }
+    for (const p of imported.pages) for (const s of p.shapes) if (s.type === 'image') s.img = remap[s.img];
     change(() => {
         for (const p of imported.pages) {
             const copy = { ...p, id: nextPageId(), name: uniquePageName(p.name) };
@@ -1157,9 +1413,16 @@ const ACTIONS = {
     'dw-help': () => $('dw-help-dialog').showModal(),
     'dw-undo': () => undoRedo(S.undo, S.redo),
     'dw-redo': () => undoRedo(S.redo, S.undo),
-    'dw-cut': () => copySelected(true),
-    'dw-copy': () => copySelected(false),
-    'dw-paste': () => paste(),
+    // through the browser's copy / cut event, so the clipboard says "shapes" (see onCopy); without it, only here
+    'dw-cut': () => { if (!document.execCommand('cut')) copySelected(true); },
+    'dw-copy': () => { if (!document.execCommand('copy')) copySelected(false); },
+    'dw-paste': async () => { if (!(await pasteFromClipboard(false))) paste(); },
+    'dw-insert-clip': async () => {
+        if (!(await pasteFromClipboard(true)))
+            alert('No picture found -- copy one (e.g. a screenshot), then press Ctrl+V on the drawing. '
+                  + '(The menu can only read the clipboard where the browser allows it; Ctrl+V always works.)');
+    },
+    'dw-insert-fta': () => ftaDialog(),
     'dw-delete': deleteSelected,
     'dw-select-all': () => select(page().shapes.map(s => s.id)),
     'dw-front': () => order(true),
@@ -1254,8 +1517,9 @@ function wire() {
         if (e.key === ' ' && !e.target.closest('input, textarea, select')) { S.spaceDown = true; }
         if (document.querySelector('dialog[open]') || e.target.closest('input, textarea, select') || S.editing) return;
         const k = e.key.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
-        const map = { z: 'dw-undo', y: 'dw-redo', c: 'dw-copy', x: 'dw-cut', v: 'dw-paste', a: 'dw-select-all', b: 'dw-bold', i: 'dw-italic', u: 'dw-underline' };
+        const map = { z: 'dw-undo', y: 'dw-redo', a: 'dw-select-all', b: 'dw-bold', i: 'dw-italic', u: 'dw-underline' };
         if (ctrl && k === 'd') { e.preventDefault(); copySelected(false); paste(); return; }
+        if (ctrl && 'cxv'.includes(k)) return;          // the browser's copy / cut / paste events do it (SFM-291)
         if (ctrl && map[k]) { e.preventDefault(); ACTIONS[map[k]](); return; }
         if (ctrl) return;
         const step = e.shiftKey ? 10 : 1;
@@ -1266,13 +1530,16 @@ function wire() {
         else if (e.key === 'ArrowRight') { e.preventDefault(); nudge(step, 0); }
         else if (e.key === 'ArrowUp') { e.preventDefault(); nudge(0, -step); }
         else if (e.key === 'ArrowDown') { e.preventDefault(); nudge(0, step); }
-        else if (S.sel.length === 1 && e.key.length === 1 && !e.altKey && !ONE_D.has(selected()[0].type)) {   // typing replaces the text, like Visio
+        else if (S.sel.length === 1 && e.key.length === 1 && !e.altKey && !ONE_D.has(selected()[0].type) && selected()[0].type !== 'image') {   // typing replaces the text, like Visio
             e.preventDefault();
             startText(S.sel[0]);
             $('dw-text').value = e.key;
         }
     });
     document.addEventListener('keyup', e => { if (e.key === ' ') S.spaceDown = false; });
+    document.addEventListener('copy', e => onCopy(e, false));
+    document.addEventListener('cut', e => onCopy(e, true));
+    document.addEventListener('paste', onPaste);
     window.addEventListener('resize', () => render());
 }
 
@@ -1281,7 +1548,7 @@ function contextMenu(evt) {
     if (id && !S.sel.includes(id)) select([id]);
     const items = [];
     if (S.sel.length) {
-        items.push(['Edit text', () => startText(S.sel[0]), S.sel.length !== 1], ['Cut', () => copySelected(true)], ['Copy', () => copySelected(false)]);
+        items.push(['Edit text', () => startText(S.sel[0]), S.sel.length !== 1 || selected()[0].type === 'image'], ['Cut', () => copySelected(true)], ['Copy', () => copySelected(false)]);
         if (S.clipboard) items.push(['Paste', () => paste()]);
         items.push(['Bring to front', () => order(true)], ['Send to back', () => order(false)]);
         if (S.store.models && S.sel.length === 1) {
@@ -1335,5 +1602,5 @@ const serverStore = {
 };
 
 window.Drawing = { init, parseXml, toXml, checkDoc, connectorPoints, pageSvg, state: S, get page() { return page(); },
-                   setTool, select, startText, finishText };
+                   setTool, select, startText, finishText, insertPicture };
 })();
