@@ -340,7 +340,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <tr><td>Save (Ctrl+S) / Version control</td><td>every change is kept at once; <b>Save</b> also creates a numbered revision with what changed and when (the button is marked while there are unsaved changes); the <b>Version control</b> tab lists the revisions with their changes &mdash; <b>Restore</b> makes one current again (unsaved changes are saved first)</td></tr>
                 <tr><td>Small triangle on the side / &#9650; &#9660;</td><td>on its own page the continued gate has a small triangle with &ldquo;&hellip;&rdquo; &mdash; click it to go back to the page it continues from; &#9650; next to the Page list: the page above, &#9660;: the page of the selected transfer triangle, else the first page continued from here</td></tr>
                 <tr><td><kbd>Ctrl</kbd> + <kbd>&larr;</kbd> / <kbd>&rarr;</kbd></td><td>moves the selected event (with its branch) one place left / right among its neighbours</td></tr>
-                <tr><td>Right-click an event</td><td>add below, edit, add / edit / remove the label (the boxed text right of it), AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
+                <tr><td>Right-click an event</td><td>selects it (red, as a click does) and opens its menu: add below, edit, add / edit / remove the label (the boxed text right of it), AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
                 <tr><th colspan="2">Moving and copying</th></tr>
                 <tr><td>Phone / tablet</td><td>tap = click, <strong>long-press</strong> = right-click; the event menu has <em>Select</em> and <em>Move / copy to…</em> (then tap the gate); pinch zooms</td></tr>
                 <tr><td><kbd>Ctrl</kbd> + drag onto a gate</td><td>menu: move here, copy (same IDs = the same event, dashed box), copy with new IDs</td></tr>
@@ -916,7 +916,7 @@ menu.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('mousedown', e => { if (!menu.contains(e.target)) hideMenu(); });
 document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
-    if (!menu.hidden) { hideMenu(); return; }
+    if (!menu.hidden) { hideMenu(); e.preventDefault(); return; }        // only the menu: the selection stays (SFM-276)
     if (!dialog.open && !addMode && picked.size) clearPicks();
 });
 
@@ -1389,7 +1389,7 @@ document.addEventListener('keydown', e => {
     if (dialog.open || renaming || tourAt >= 0) return;
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName)) return;
     if (e.key === 'F2' && chosen && cy) { e.preventDefault(); startRename(cy.$id(chosen)); }
-    else if (e.key === 'Escape' && chosen && menu.hidden) unchoose();
+    else if (e.key === 'Escape' && chosen && menu.hidden && !e.defaultPrevented) unchoose();
     else if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         e.preventDefault();
         shiftChosen(e.key === 'ArrowLeft' ? 'left' : 'right');
@@ -1545,6 +1545,9 @@ async function loadGraph(options = {}) {
     }));
     cy = cytoscape({
         container: document.getElementById('manual-fta-graph'),
+        // smaller zoom steps (SFM-277, user 2026-11-12: "make the zoom slower"): about 10 % per wheel notch instead of
+        // cytoscape's default x2.5 (sensitivity 1)
+        wheelSensitivity: 0.1,
         elements: [...data.nodes, ...treeEdges, ...notes, ...connectorElements(data.nodes, data.edges)],
         style: [
             { selector: 'node', style: {
@@ -1657,6 +1660,13 @@ async function loadGraph(options = {}) {
                 showMenu(evt.renderedPosition, `${picked.size} events selected`, bulkMenuItems());
             } else {
                 const t = evt.target, again = t.data('occurrences') > 1 ? ` — appears ${t.data('occurrences')}×` : '';
+                // the right-clicked event is selected (red) like on a left click (SFM-276) -- the one Ctrl+click
+                // selected (blue) event stays as it is
+                if (!picked.has(t.id())) {
+                    clearTimeout(renameTimer);
+                    if (picked.size) clearPicks();
+                    choose(t);
+                }
                 showMenu(evt.renderedPosition, `${t.data('code')}: ${t.data('label')}${again}`, eventMenuItems(t));
             }
         }
