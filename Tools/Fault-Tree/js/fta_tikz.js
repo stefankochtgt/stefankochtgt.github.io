@@ -46,6 +46,13 @@
         const t = Array.from((text || '').split(/\s+/).filter(Boolean).join(' '));
         return t.length <= limit ? t.join('') : t.slice(0, limit - 1).join('').trimEnd() + '…';
     };
+    // the lines of a label (SFM-285), as fta_tikz.py :: note_lines()
+    const noteLines = note => {
+        const lines = String(note || '').replace(/\r\n/g, '\n').split('\n').map(l => l.trim());
+        while (lines.length && !lines[lines.length - 1]) lines.pop();
+        while (lines.length && !lines[0]) lines.shift();
+        return lines.length ? lines : [''];
+    };
     const pt = (ux, uy) => `(${fix(ux * SCALE, 3)},${fix(-uy * SCALE, 3)})`;
     const cm = units => `${fix(units * SCALE, 3)}cm`;
     const text = (ux, uy, content, size, width) =>
@@ -127,10 +134,12 @@
             const sideX = left + BOX_W + (tag && !data.compact ? TAG_GAP + TAG_W : 0);
             // moved / sized by the user (SFM-278): note_box = [dx, dy, w, h], 0 = from the text
             const [dx, dy, w, h] = (data.note_box || []).length === 4 ? data.note_box : [0, 0, 0, 0];
-            const width = w ? Math.max(w - 2 * NOTE_PAD, 1) : Math.min(textWidth(data.note) * NOTE_FONT_U / 1000 * 1.1 + 0.5, BOX_W);
+            const noteLs = noteLines(data.note);                            // Shift+Enter in the label (SFM-285)
+            const width = w ? Math.max(w - 2 * NOTE_PAD, 1)
+                : Math.min(Math.max(...noteLs.map(textWidth)) * NOTE_FONT_U / 1000 * 1.1 + 0.5, BOX_W);
             lines.push(`\\node[draw, fill=white, line width=0.4pt, anchor=west, inner sep=${cm(NOTE_PAD)}, text width=${cm(width)},`
                        + `${h ? ` minimum height=${cm(h)},` : ''} align=left, font={${NOTE_FONT}}] at `
-                       + `${pt(sideX + 3 + 2 - NOTE_PAD + dx, top + BOX_H / 2 + dy)} {${esc(data.note)}};`);
+                       + `${pt(sideX + 3 + 2 - NOTE_PAD + dx, top + BOX_H / 2 + dy)} {${noteLs.map(l => esc(l) || '{}').join('\\\\')}};`);
         }
         return lines;
     }

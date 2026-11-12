@@ -399,7 +399,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
         <label>Description</label>
         <textarea name="description" rows="3"></textarea>
         <label>Label <span style="color:var(--muted); font-weight:normal;">(shown next to the box)</span></label>
-        <input name="label" autocomplete="off">
+        <textarea name="label" rows="2" autocomplete="off" title="Shift+Enter: a new line in the label"></textarea>
         <label>Safety criticality <span style="color:var(--muted); font-weight:normal;">(H category or ASIL, the square next to the box)</span></label>
         <select name="criticality">
             <option value="">&mdash; none &mdash;</option>
@@ -765,9 +765,11 @@ function eventMenuItems(node) {
     ];
     items.push({ label: 'Edit…', run: () => editEvent(node) });
     // the label: the boxed text right of the event (user, 2026-10-26)
+    // an existing label is edited in place (Shift+Enter = a new line, SFM-285); a new one starts with a prompt
     items.push({ label: d.note ? 'Edit label…' : '+ Add label…', run: () => {
-        const text = prompt(`Label of ${d.code}:`, d.note || '');
-        if (text !== null && text.trim() !== (d.note || '')) put({ label: text.trim() });
+        if (d.note) { startRename(node, 'note'); return; }
+        const text = prompt(`Label of ${d.code}:`, '');
+        if (text !== null && text.trim()) put({ label: text.trim() });
     } });
     if (d.note) items.push({ label: 'Remove label', run: () => put({ label: '' }) });
     if (d.note && (d.note_box || []).some(v => v))                   // moved / sized by hand (SFM-278)
@@ -1380,7 +1382,10 @@ async function endRename(save) {
     if (!renaming) return;
     const { node, box, part } = renaming;
     renaming = null;
-    const value = box.value.replace(/\s+/g, ' ').trim();
+    // a label keeps its lines (Shift+Enter, SFM-285); a title / ID is one line
+    const value = part === 'note'
+        ? box.value.split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).join('\n').replace(/^\n+|\n+$/g, '')
+        : box.value.replace(/\s+/g, ' ').trim();
     box.remove();
     if (node.removed()) return;
     node.removeClass('renaming');

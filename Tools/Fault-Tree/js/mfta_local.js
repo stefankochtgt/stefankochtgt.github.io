@@ -756,7 +756,7 @@
         const pad = '  '.repeat(indent);
         let a = ` id="${esc(e.id)}" kind="${e.kind}" gate="${e.gate}"`;
         if (e.uid) a += ` uid="${esc(e.uid)}"`;
-        if (e.label) a += ` label="${esc(e.label)}"`;
+        if (e.label) a += ` label="${esc(e.label).replace(/\r/g, '&#13;').replace(/\n/g, '&#10;').replace(/\t/g, '&#9;')}"`;
         if (e.label && (e.label_box || []).length === 4) a += ` labelBox="${e.label_box.map(num).join(' ')}"`;
         if (e.criticality) a += ` criticality="${esc(e.criticality)}"`;
         if (e.color) a += ` color="${esc(e.color)}"`;
