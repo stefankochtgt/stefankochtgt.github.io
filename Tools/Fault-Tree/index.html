@@ -2168,7 +2168,8 @@ async function loadAnalyses(preferred) {
 }
 
 function rememberAnalysis() {
-    try { localStorage.setItem(ANALYSIS_KEY, analysisId); } catch (e) { /* private window */ }
+    // not when the Drawing draws a page in its hidden frame (SFM-291): that's not the user's choice
+    if (!PICTURE_MODE) try { localStorage.setItem(ANALYSIS_KEY, analysisId); } catch (e) { /* private window */ }
     const url = new URL(location.href);
     url.searchParams.set('analysis', analysisId);
     if (pageId) url.searchParams.set('page', pageId); else url.searchParams.delete('page');
@@ -2348,6 +2349,7 @@ loadGraph = async function (options = {}) {
     setExplorer(show);
 }
 loadAnalyses().then(() => loadGraph()).then(() => {
+    if (PICTURE_MODE) { sendPicture(cy); return; }    // opened by the Drawing's "Insert fault tree" (SFM-291)
     let seen = true;
     try { seen = !!localStorage.getItem('faultTreeTourSeen'); } catch (e) { /* private window */ }
     if (window.FTA_STANDALONE && !seen) startTour();      // the shared standalone: first visit starts the tour
