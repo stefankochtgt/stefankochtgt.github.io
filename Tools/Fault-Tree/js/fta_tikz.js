@@ -125,9 +125,12 @@
         }
         if (data.note && data.tag_box) {     // SFM-212: the Manual FTA's label, framed, right of the box / square
             const sideX = left + BOX_W + (tag && !data.compact ? TAG_GAP + TAG_W : 0);
-            const width = Math.min(textWidth(data.note) * NOTE_FONT_U / 1000 * 1.1 + 0.5, BOX_W);
+            // moved / sized by the user (SFM-278): note_box = [dx, dy, w, h], 0 = from the text
+            const [dx, dy, w, h] = (data.note_box || []).length === 4 ? data.note_box : [0, 0, 0, 0];
+            const width = w ? Math.max(w - 2 * NOTE_PAD, 1) : Math.min(textWidth(data.note) * NOTE_FONT_U / 1000 * 1.1 + 0.5, BOX_W);
             lines.push(`\\node[draw, fill=white, line width=0.4pt, anchor=west, inner sep=${cm(NOTE_PAD)}, text width=${cm(width)},`
-                       + ` align=left, font={${NOTE_FONT}}] at ${pt(sideX + 3 + 2 - NOTE_PAD, top + BOX_H / 2)} {${esc(data.note)}};`);
+                       + `${h ? ` minimum height=${cm(h)},` : ''} align=left, font={${NOTE_FONT}}] at `
+                       + `${pt(sideX + 3 + 2 - NOTE_PAD + dx, top + BOX_H / 2 + dy)} {${esc(data.note)}};`);
         }
         return lines;
     }

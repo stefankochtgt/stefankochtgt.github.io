@@ -59,7 +59,19 @@
     const ev = (o = {}) => ({ id: o.id, title: o.title || '', description: o.description || '', label: o.label || '',
         kind: KINDS.includes(o.kind) ? o.kind : 'intermediate', gate: GATES.includes(o.gate) ? o.gate : 'or',
         causes: o.causes || [], criticality: o.criticality || '', color: o.color || '', analysis: o.analysis || '',
-        new_page: !!o.new_page, uid: o.uid || '', undeveloped: !!o.undeveloped && o.kind === 'basic' });
+        new_page: !!o.new_page, uid: o.uid || '', undeveloped: !!o.undeveloped && o.kind === 'basic',
+        label_box: parseLabelBox((o.label_box || []).join(' ')) });
+    // where the label is and how big (SFM-278), manual_fta.py :: parse_label_box() / _num()
+    const LABEL_BOX_MAX = 5000;
+    const round1 = v => { const r = Math.round(Number(v) * 10) / 10; return r === 0 ? 0 : r; };
+    const num = v => String(round1(v));
+    function parseLabelBox(text) {
+        const parts = String(text || '').split(/\s+/).filter(Boolean);
+        if (parts.length !== 4 || parts.some(x => !isFinite(Number(x)))) return [];
+        const box = parts.map(round1);
+        if (box.some(v => Math.abs(v) > LABEL_BOX_MAX) || box[2] < 0 || box[3] < 0 || !box.some(v => v)) return [];
+        return box;
+    }
     const clone = e => JSON.parse(JSON.stringify(e));
     // the internal ID that never changes (manual_fta._ensure_uids(), SFM-202): kept; new events get one; every
     // occurrence of a repeated event shares one; one used by two different events is replaced for the later one
@@ -248,6 +260,19 @@
                 if (i >= 0) t.causes.splice(i, 1);
             }
             return removed;
+        },
+        setLabelBox(data, id, b) {                 // in every occurrence, never asked (SFM-278)
+            const occ = occurrences(data.tops, id);
+            if (!occ.length) throw new FtaError(`There is no event ${id}.`);
+            const values = b.box || [];
+            if (!Array.isArray(values) || (values.length && values.length !== 4) || values.some(v => v === null || v === '' || !isFinite(Number(v))))
+                throw new FtaError('A label box is four numbers: dx, dy, width, height.');
+            const stored = values.length ? parseLabelBox(values.join(' ')) : [];
+            if (values.length && !stored.length && values.some(v => Number(v)))
+                throw new FtaError('The label box is out of range.');
+            for (const [e] of occ) e.label_box = [...stored];
+            save(data);
+            return { box: stored };
         },
         deleteEvent(data, id, at, scope, everywhere) {
             if (everywhere) {                      // every occurrence with its branch (SFM-274)
@@ -672,7 +697,8 @@
             const transfer = e.new_page && row > 0;
             nodes.push({ data: { id: nodeId, type: 'manual_event', symbol: symbol(e), label: e.title, shared: (counts[e.id] || 0) > 1,
                 occurrences: counts[e.id] || 0, code: e.id, depth: row, kind: e.kind, gate: e.gate, undeveloped: !!e.undeveloped, top: topId,
-                description: e.description, note: e.label, tag: e.criticality, tag_box: true, color: e.color,
+                description: e.description, note: e.label, note_box: e.label ? [...(e.label_box || [])] : [],
+                tag: e.criticality, tag_box: true, color: e.color,
                 fill: e.color ? COLORS[e.color] : '', tikz_fill: e.color ? TIKZ_COLORS[e.color] : '', causes: e.causes.length,
                 new_page: !!e.new_page, page_number: e.new_page ? (pageNo[e.id] || 0) : 0 }, position: { x, y: row * pitch } });
             if (stage) { nodes[nodes.length - 1].data.compact = true; if (stage === 2) nodes[nodes.length - 1].data.stacked = true; }
@@ -731,6 +757,7 @@
         let a = ` id="${esc(e.id)}" kind="${e.kind}" gate="${e.gate}"`;
         if (e.uid) a += ` uid="${esc(e.uid)}"`;
         if (e.label) a += ` label="${esc(e.label)}"`;
+        if (e.label && (e.label_box || []).length === 4) a += ` labelBox="${e.label_box.map(num).join(' ')}"`;
         if (e.criticality) a += ` criticality="${esc(e.criticality)}"`;
         if (e.color) a += ` color="${esc(e.color)}"`;
         if (e.new_page) a += ` newPage="true"`;
@@ -807,7 +834,7 @@
         return head.concat(schema, inputs, rows, ['</XMLExport>']).join('\n') + '\n';
     }
     function parseEvent(el) {
-        return ev({ id: el.getAttribute('id') || '', title: (el.querySelector(':scope > title') || {}).textContent || '',
+        return ev({ id: el.getAttribute('id') || '', label_box: parseLabelBox(el.getAttribute('labelBox')), title: (el.querySelector(':scope > title') || {}).textContent || '',
             description: (el.querySelector(':scope > description') || {}).textContent || '', label: el.getAttribute('label') || '',
             kind: el.getAttribute('kind'), gate: el.getAttribute('gate'),
             criticality: CRITICALITY_LEVELS.includes(el.getAttribute('criticality')) ? el.getAttribute('criticality') : '',
@@ -1029,10 +1056,11 @@
             if (preview.errors.length) throw Object.assign(new FtaError(preview.errors[0]), { body: out });
             return out;
         }
-        if ((m = /^\/api\/manual-fta\/events\/([^/]+)(\/causes|\/move|\/move-to)?$/.exec(p))) {
+        if ((m = /^\/api\/manual-fta\/events\/([^/]+)(\/causes|\/move|\/move-to|\/label-box)?$/.exec(p))) {
             const id = decodeURIComponent(m[1]);
             if (m[2] === '/causes') return ops.addCause(data, id, body || {});
             if (m[2] === '/move') return ops.moveCause(data, id, body || {});
+            if (m[2] === '/label-box') return ops.setLabelBox(data, id, body || {});
             if (m[2] === '/move-to') return ops.moveBranch(data, id, body || {});
             if (method === 'PUT') return ops.updateEvent(data, id, body || {});
             if (method === 'DELETE') return { deleted: ops.deleteEvent(data, id, q.get('at') || null, q.get('scope') || null,

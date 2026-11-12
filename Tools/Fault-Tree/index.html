@@ -154,6 +154,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
     font-family: Arial, Helvetica, sans-serif; text-align: center; line-height: 1.15; }
 .context-menu-item .check { display: inline-block; width: 1.2em; }
 .rename-box.rename-id { font-family: Arial, Helvetica, sans-serif; padding: 0 2px; }
+.rename-box.rename-note { font-weight: bold; text-align: left; }   /* a label's text (SFM-278) */
 /* phones and narrow windows (SFM-183): everything wraps inside the screen, nothing makes the page wider */
 .fta-toolbar { flex-wrap: wrap; row-gap: 6px; }
 @media (max-width: 760px) {
@@ -340,6 +341,7 @@ main.content.fill .fill-graph.with-explorer > #fta-versions { left: 248px; }
                 <tr><td>Save (Ctrl+S) / Version control</td><td>every change is kept at once; <b>Save</b> also creates a numbered revision with what changed and when (the button is marked while there are unsaved changes); the <b>Version control</b> tab lists the revisions with their changes &mdash; <b>Restore</b> makes one current again (unsaved changes are saved first)</td></tr>
                 <tr><td>Small triangle on the side / &#9650; &#9660;</td><td>on its own page the continued gate has a small triangle with &ldquo;&hellip;&rdquo; &mdash; click it to go back to the page it continues from; &#9650; next to the Page list: the page above, &#9660;: the page of the selected transfer triangle, else the first page continued from here</td></tr>
                 <tr><td><kbd>Ctrl</kbd> + <kbd>&larr;</kbd> / <kbd>&rarr;</kbd></td><td>moves the selected event (with its branch) one place left / right among its neighbours</td></tr>
+                <tr><td>Label (the boxed text right of an event)</td><td><b>drag</b> it to move it, drag its <b>right / bottom edge</b> to size it; click selects it with its event, a second click edits the text in place (<kbd>Enter</kbd> saves, <kbd>Esc</kbd> cancels); right-click &gt; <em>Label: default place and size</em> puts it back</td></tr>
                 <tr><td>Right-click an event</td><td>selects it (red, as a click does) and opens its menu: add below, edit, add / edit / remove the label (the boxed text right of it), AND / OR, make gate / basic event, move left / right, H category / ASIL, colour, delete</td></tr>
                 <tr><th colspan="2">Moving and copying</th></tr>
                 <tr><td>Phone / tablet</td><td>tap = click, <strong>long-press</strong> = right-click; the event menu has <em>Select</em> and <em>Move / copy to…</em> (then tap the gate); pinch zooms</td></tr>
@@ -768,6 +770,8 @@ function eventMenuItems(node) {
         if (text !== null && text.trim() !== (d.note || '')) put({ label: text.trim() });
     } });
     if (d.note) items.push({ label: 'Remove label', run: () => put({ label: '' }) });
+    if (d.note && (d.note_box || []).some(v => v))                   // moved / sized by hand (SFM-278)
+        items.push({ label: 'Label: default place and size', run: () => run(() => api('PUT', path + '/label-box', { box: [] })) });
     // without a Ctrl key (phone, tablet) these are the way to select several and to move / copy (SFM-183)
     items.push({ label: picked.has(node.id()) ? 'Unselect' : 'Select (for several)', run: () => togglePick(node) });
     if (d.id !== d.top || cy.nodes('[type = "manual_event"]').length > 1)
@@ -1313,9 +1317,11 @@ let chosen = null, renameTimer = null, renaming = null;
 function paintChosen() {
     if (!cy) return;
     cy.nodes('.chosen').forEach(n => { n.removeClass('chosen'); n.data('svg', blockSvg({ ...n.data() })); });
+    cy.nodes('.note-chosen').removeClass('note-chosen');
     const node = chosen && cy.$id(chosen);
     if (!node || !node.length) { chosen = null; return; }
     node.addClass('chosen');
+    cy.$id(chosen + '#note').addClass('note-chosen');                 // its label as well (SFM-278)
     node.data('svg', blockSvg({ ...node.data(), fill: CHOSEN_FILL, text_color: '#fff' }));
     updatePageButtons();
 }
@@ -1331,16 +1337,18 @@ function onIdLabel(node, pos) {
 // part: 'title' (in the description box) or 'id' (in the ID label box, SFM-188)
 function startRename(node, part = 'title') {
     if (tourAt >= 0 || renaming || !node || !node.length) return;
+    if (part === 'note' && !cy.$id(node.id() + '#note').length) return;
     hideMenu();
     const box = document.createElement(part === 'id' ? 'input' : 'textarea');
-    box.className = 'rename-box' + (part === 'id' ? ' rename-id' : '');
-    box.value = part === 'id' ? node.data('code') : node.data('label') || '';
+    box.className = 'rename-box' + (part === 'id' ? ' rename-id' : part === 'note' ? ' rename-note' : '');
+    box.value = part === 'id' ? node.data('code') : part === 'note' ? node.data('note') || '' : node.data('label') || '';
     box.spellcheck = part !== 'id';
-    box.setAttribute('aria-label', part === 'id' ? `New ID of ${node.data('code')}` : `New title of ${node.data('code')}`);
+    box.setAttribute('aria-label', part === 'id' ? `New ID of ${node.data('code')}`
+                     : part === 'note' ? `Label of ${node.data('code')}` : `New title of ${node.data('code')}`);
     document.getElementById('manual-fta-graph').parentElement.appendChild(box);
     renaming = { node, box, part };
     positionRename();
-    node.addClass('renaming');
+    (part === 'note' ? cy.$id(node.id() + '#note') : node).addClass('renaming');
     box.focus(); box.select();
     box.addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); endRename(true); }
@@ -1356,6 +1364,12 @@ function diagramOffset() {
 function positionRename() {
     if (!renaming) return;
     const { node, box, part } = renaming, z = cy.zoom(), p = node.renderedPosition(), o = diagramOffset();
+    if (part === 'note') {                            // over the label's frame (SFM-278)
+        const b = cy.$id(node.id() + '#note').renderedBoundingBox({ includeLabels: false, includeOverlays: false });
+        Object.assign(box.style, { left: `${o.x + b.x1}px`, top: `${o.y + b.y1}px`, width: `${Math.max(b.w, 60)}px`,
+            height: `${Math.max(b.h, 16)}px`, fontSize: `${Math.max(9, 9 * z)}px` });
+        return;
+    }
     const left = o.x + p.x - BOX_W * U * z / 2, top = o.y + p.y - BLOCK_H * U * z / 2;
     if (part === 'id') Object.assign(box.style, { left: `${left + LABEL_X * U * z}px`, top: `${top + LABEL_TOP * U * z}px`,
         width: `${LABEL_W * U * z}px`, height: `${LABEL_H * U * z}px`, fontSize: `${Math.max(9, 7.5 * z)}px` });
@@ -1370,6 +1384,12 @@ async function endRename(save) {
     box.remove();
     if (node.removed()) return;
     node.removeClass('renaming');
+    if (part === 'note') {                            // the label's text (SFM-278); empty = no label
+        cy.$id(node.id() + '#note').removeClass('renaming');
+        if (!save || value === (node.data('note') || '')) return;
+        await run(() => withScope(scope => api('PUT', eventUrl(node), { label: value, at: node.id(), scope })));
+        return;
+    }
     if (part === 'id') {                              // the ID (SFM-188): checked by the server -- unique, no spaces
         const old = node.data('code');
         if (!save || !value || value === old) return;
@@ -1429,6 +1449,67 @@ function branchOf(node) {
             .forEach(e => branch.push(cy.$id(e.data('target'))));
     }
     return branch;
+}
+
+// ---- labels (SFM-278, user 2026-11-12): moved and sized by hand, the text edited in place; the default stays -------
+// note_box = [dx, dy, w, h] in units: the frame's left middle from its default place, its width / height (0 = from
+// the text). Stored for every occurrence of the event (PUT .../label-box), drawn the same in the LaTeX / PDF export.
+const NOTE_PAD_PX = 3;                                  // 2 px padding + 1 px frame, as the frame before
+const NOTE_EDGE_PX = 6;                                 // on screen: the right / bottom edge sizes the label
+const NOTE_CURSOR = { move: 'move', w: 'ew-resize', h: 'ns-resize', wh: 'nwse-resize' };
+let noteDrag = null;
+
+function sizeNote(n, box = n.data('box')) {
+    const [dx, dy, w, h] = box;
+    n.data('tw', w ? Math.max(w * U - 2 * NOTE_PAD_PX, 6) : BOX_W * U);
+    const text = n.boundingBox({ includeNodes: false, includeLabels: true, includeOverlays: false });
+    const wide = w ? w * U : text.w + 2 * NOTE_PAD_PX, high = Math.max(h * U, text.h + 2 * NOTE_PAD_PX);
+    const a = n.data('anchor');
+    n.data({ w: wide, h: high, box: [...box] });
+    n.position({ x: a.x + dx * U + wide / 2, y: a.y + dy * U });
+}
+
+function noteMode(n, pos) {
+    const b = n.boundingBox({ includeLabels: false, includeOverlays: false }), e = NOTE_EDGE_PX / cy.zoom();
+    const right = pos.x >= b.x2 - e, bottom = pos.y >= b.y2 - e;
+    return right && bottom ? 'wh' : right ? 'w' : bottom ? 'h' : 'move';
+}
+
+function startNoteDrag(n, pos) {
+    if (addMode || moveSource || renaming || tourAt >= 0) return;
+    hideMenu();
+    noteDrag = { n, mode: noteMode(n, pos), start: { ...pos }, box: [...n.data('box')], w: n.data('w'), h: n.data('h'),
+                 moved: false };
+    cy.userPanningEnabled(false);
+}
+
+function duringNoteDrag(pos) {
+    const d = noteDrag, dx = pos.x - d.start.x, dy = pos.y - d.start.y;
+    if (!d.moved && Math.hypot(dx, dy) * cy.zoom() < 4) return;     // not a drag (yet): a click stays a click
+    d.moved = true;
+    const [bx, by, bw, bh] = d.box;
+    if (d.mode === 'move') { sizeNote(d.n, [bx + dx / U, by + dy / U, bw, bh]); return; }
+    const w = d.mode.includes('w') ? Math.max(20, (d.w + dx) / U) : bw;
+    const h = d.mode.includes('h') ? Math.max(8, (d.h + dy) / U) : bh;
+    sizeNote(d.n, [bx, by, w, h]);
+    // the frame grows from its middle: shifted by half the change, its top edge stays
+    sizeNote(d.n, [bx, by + (d.n.data('h') - d.h) / 2 / U, w, h]);
+}
+
+async function endNoteDrag() {
+    const { n, moved } = noteDrag;
+    noteDrag = null;
+    cy.userPanningEnabled(!moveModeOn);
+    const owner = cy.$id(n.data('owner'));
+    if (!moved) {                                       // a click: select the event, a click on its label again: edit
+        clearTimeout(renameTimer);
+        if (picked.size) clearPicks();
+        if (chosen === owner.id()) startRename(owner, 'note'); else choose(owner);
+        return;
+    }
+    const box = n.data('box').map(v => Math.round(v * 10) / 10);
+    if (chosen !== owner.id()) choose(owner);
+    await run(() => api('PUT', eventUrl(owner) + '/label-box', { box }));
 }
 
 function startDrag(node, pointer) {
@@ -1538,11 +1619,15 @@ async function loadGraph(options = {}) {
     const treeEdges = data.edges.map(e => ({ data: { ...e.data, tree: true }, classes: 'tree-edge' }));
     // an event's label: text right of its description box (own invisible node, so it is not clipped)
     // compact too (SFM-212: compacting does not affect the label) -- there the square is in the box
-    const notes = data.nodes.filter(n => n.data.note).map(n => ({
-        data: { id: `${n.data.id}#note`, note: n.data.note }, classes: 'note',
+    // SFM-278: a frame of its own size, which the user can move and size (note_box); `anchor` = its default left middle
+    const notes = data.nodes.filter(n => n.data.note).map(n => {
         // right of the box -- or of its criticality square, when it has one (it was drawn over it)
-        position: { x: n.position.x + (BOX_W / 2 + (n.data.tag && !n.data.compact ? TAG_GAP + TAG_W : 0) + 3) * U, y: n.position.y + (BOX_H / 2 - BLOCK_H / 2) * U },
-    }));
+        const anchor = { x: n.position.x + (BOX_W / 2 + (n.data.tag && !n.data.compact ? TAG_GAP + TAG_W : 0) + 3) * U,
+                         y: n.position.y + (BOX_H / 2 - BLOCK_H / 2) * U };
+        const box = (n.data.note_box || []).length === 4 ? n.data.note_box : [0, 0, 0, 0];
+        return { data: { id: `${n.data.id}#note`, note: n.data.note, owner: n.data.id, anchor, box, w: 1, h: 1, tw: BOX_W * U },
+                 classes: 'note', position: { ...anchor } };
+    });
     cy = cytoscape({
         container: document.getElementById('manual-fta-graph'),
         // smaller zoom steps (SFM-277, user 2026-11-12: "make the zoom slower"): about 10 % per wheel notch instead of
@@ -1565,16 +1650,16 @@ async function loadGraph(options = {}) {
                 'width': 0.1, 'height': 0.1, 'background-image': 'none', 'label': '', 'events': 'no',
             }},
             { selector: 'node.note', style: {
-                'width': 0.1, 'height': 0.1, 'background-image': 'none', 'events': 'no',
+                // a box around the label (user, 2026-10-26), sized by sizeNote() -- by default as wide as its text, at
+                // most as wide as the description box (the layout keeps that much room right of it, SFM-212)
+                'width': 'data(w)', 'height': 'data(h)', 'background-image': 'none',
+                'background-color': '#fff', 'background-opacity': 1, 'border-width': 1, 'border-color': '#000',
                 'label': 'data(note)', 'font-size': 9, 'font-weight': 'bold', 'color': '#000',
-                'text-halign': 'right', 'text-valign': 'center', 'text-margin-y': 0, 'text-margin-x': 3,
-                // at most as wide as the description box -- the layout keeps that much room right of it (SFM-212)
-                'text-wrap': 'wrap', 'text-max-width': BOX_W * U,
-                // a box around the label (user, 2026-10-26)
-                'text-background-color': '#fff', 'text-background-opacity': 1, 'text-background-padding': 2,
-                'text-background-shape': 'rectangle', 'text-border-width': 1, 'text-border-color': '#000',
-                'text-border-opacity': 1,
+                'text-halign': 'center', 'text-valign': 'center', 'text-margin-y': 0, 'text-margin-x': 0,
+                'text-wrap': 'wrap', 'text-max-width': 'data(tw)', 'text-justification': 'left',
             }},
+            // the label of the selected event (SFM-278): red frame, like the event
+            { selector: 'node.note.note-chosen', style: { 'border-color': CHOSEN_FILL, 'border-width': 2, 'border-style': 'dashed' } },
             { selector: 'edge', style: {
                 'curve-style': 'straight', 'width': 1, 'line-color': STROKE,
                 'target-arrow-shape': 'none', 'events': 'no', 'label': '',
@@ -1595,6 +1680,7 @@ async function loadGraph(options = {}) {
         ],
         layout: { name: 'preset', padding: 40 },
     });
+    cy.nodes('.note').forEach(n => sizeNote(n));
     if (viewport) cy.viewport(viewport);
     else if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(); }   // a small tree is not blown up
     if (options.reveal) reveal(cy.nodes().filter(n => n.data('code') === options.reveal).first());
@@ -1604,6 +1690,11 @@ async function loadGraph(options = {}) {
     cy.on('tapstart', 'node[type = "manual_event"]', evt => { if (moveModeOn) startDrag(evt.target, evt.position); });
     cy.on('tapdrag', evt => { if (drag) duringDrag(evt.position); });
     cy.on('tapend', () => { if (drag) endDrag(); });
+    // labels (SFM-278): drag = move, right / bottom edge = size, click = select, click on the selected one = edit
+    cy.on('tapstart', 'node.note', evt => { if (!moveModeOn) startNoteDrag(evt.target, evt.position); });
+    cy.on('tapdrag', evt => { if (noteDrag) duringNoteDrag(evt.position); });
+    cy.on('tapend', () => { if (noteDrag) endNoteDrag(); });
+    cy.on('dbltap', 'node.note', evt => { if (!addMode && !moveSource) startRename(cy.$id(evt.target.data('owner')), 'note'); });
     cy.on('tap', 'node[type = "manual_event"]', evt => {
         const oe = evt.originalEvent || {};
         if (held) return;                                                      // the release of a long-press
@@ -1632,6 +1723,12 @@ async function loadGraph(options = {}) {
     // the "…" triangle of a branch continued on another page: a pointer hand and a tooltip over it
     cy.on('mousemove', evt => {
         const node = evt.target !== cy && evt.target.isNode && evt.target.isNode() ? evt.target : null;
+        if (node && node.hasClass('note')) {                                   // a label (SFM-278)
+            const mode = noteDrag ? noteDrag.mode : noteMode(node, evt.position);
+            cy.container().style.cursor = NOTE_CURSOR[mode];
+            cy.container().title = 'Label: drag to move it, drag its right / bottom edge to size it; click to select, click again to edit';
+            return;
+        }
         const over = node && onTransfer(node, evt.position), back = node && onPageStart(node, evt.position);
         const box = cy.container();
         box.style.cursor = over || back ? 'pointer' : '';
@@ -1653,6 +1750,8 @@ async function loadGraph(options = {}) {
     });
     cy.on('cxttap', contextMenuFor);
     function contextMenuFor(evt) {
+        if (evt.target !== cy && evt.target.hasClass('note'))                  // a label: its event's menu (SFM-278)
+            evt = { target: cy.$id(evt.target.data('owner')), renderedPosition: evt.renderedPosition };
         if (evt.target === cy) showMenu(evt.renderedPosition, 'Manual FTA', [{ label: '+ Add top event', run: newTree },
                                                                              { label: 'Fit to window', run: () => cy.fit(undefined, 30) }]);
         else if (evt.target.isNode() && evt.target.data('type') === 'manual_event') {
