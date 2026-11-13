@@ -104,6 +104,17 @@ button.danger, .btn.danger { background: #fff; color: var(--error); border-color
 .update-note a { color: inherit; font-weight: 600; }
 .update-note-close { border: 0; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer;
                      padding: 0 4px; }
+/* Update bar of the online edition (SFM-298, js/update_banner.js) */
+.update-banner { display: flex; align-items: flex-start; gap: 16px; padding: 8px 16px; background: #dbeafe;
+                 color: #1e3a8a; border-bottom: 1px solid #93c5fd; font-size: 13px; }
+.update-banner[hidden] { display: none; }
+.update-banner.error { background: #fee2e2; color: #991b1b; border-bottom-color: #fca5a5; }
+.update-banner-text { flex: 1; min-width: 0; }
+.update-banner-text ul { margin: 4px 0 0; padding-left: 20px; }
+.update-banner-actions { display: flex; gap: 8px; flex: none; align-items: center; }
+.update-banner-actions button, .update-banner-actions a { margin: 0; white-space: nowrap; }
+a.update-banner-primary { padding: 5px 12px; border-radius: 4px; background: #1d4ed8; color: #fff; text-decoration: none; }
+html.embedded .update-banner { display: none; }
 
 .filters { display: flex; gap: 10px; margin-bottom: 12px; align-items: flex-end; }
 .filters > div { flex: 1; }
