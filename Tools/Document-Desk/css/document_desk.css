@@ -52,6 +52,18 @@ body.dd-clean > header.topbar, body.dd-clean main.dd-main > h1 { display: none; 
 .dd-mark.icon { pointer-events: auto; cursor: pointer; border: 1px solid rgba(0, 0, 0, .45); border-radius: 3px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, .3); }
 .dd-mark.active { outline: 2px solid #2563eb; outline-offset: 1px; }
+/* links to a page of another PDF (SFM-300): clickable, an arrow out of a box */
+.dd-mark.link { pointer-events: auto; cursor: pointer; }
+.dd-mark.link.ul { background: rgba(37, 99, 235, .06); }
+.dd-mark.link.icon { display: flex; align-items: center; justify-content: center; }
+.dd-mark.link.icon::after { content: "↗"; font: 700 13px/1 system-ui, sans-serif; color: rgba(0, 0, 0, .7); }
+.dd-note .target { margin-top: 2px; font-weight: 600; color: #1d4ed8; overflow-wrap: anywhere; }
+.dd-link-editor { width: 280px; }
+.dd-link-editor select { width: 100%; box-sizing: border-box; font-size: 12px; }
+.dd-link-editor input[type=number] { width: 64px; font-size: 12px; }
+.dd-link-editor textarea { min-height: 40px; margin-top: 4px; }
+.dd-win.dd-flash { animation: dd-flash 1s ease-out 1; }
+@keyframes dd-flash { 0%, 40% { box-shadow: 0 0 0 4px #2563eb; } 100% { box-shadow: 0 6px 18px rgba(37, 99, 235, .28); } }
 .dd-body.tool-note .dd-page { cursor: crosshair; }
 .dd-editor { position: absolute; z-index: 5; width: 240px; background: #fff; color: #111; border: 1px solid #9ca3af;
     border-radius: 6px; padding: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, .25); font: 12px "Segoe UI", Arial, sans-serif; }

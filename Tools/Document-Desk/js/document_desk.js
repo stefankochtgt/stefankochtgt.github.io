@@ -137,7 +137,7 @@ async function addFiles(list, replaceId = null, handles = []) {
     const added = [];
     for (const [f, kind] of accepted) {
         added.push({id: desk.nextId++, fileId: await keepFile(f, handleOf(f)), name: f.name, kind, x: 0, y: 0, w: 0.5, h: 0.6,
-                    zoom: 0, locked: false, onTop: false, z: desk.z++, view: null, max: null, dirty: false,
+                    zoom: 0, locked: false, onTop: false, z: desk.z++, view: f.view || null, max: null, dirty: false,
                     libId: f.libId || null});
     }
     place(added);
@@ -194,7 +194,7 @@ function mount(w) {
         <button type="button" data-act="lib" title="Show a document of the Library in this window instead">📚</button>
         <button type="button" data-act="app" title="Show a tool in this window instead: Text from screenshot, Manual FTA">🧰</button>
         <button type="button" data-act="save" title="Save the changes into the file (Ctrl+S)">💾</button>
-        <button type="button" data-act="hl" title="Highlight: select text on the page (a comment is optional) -- written into the PDF">🖍</button><button type="button" data-act="note" title="Note: click on the page where it goes -- written into the PDF">📝</button><button type="button" data-act="notes" title="The notes and highlights of this PDF: list, edit, delete">💬</button>
+        <button type="button" data-act="hl" title="Highlight: select text on the page (a comment is optional) -- written into the PDF">🖍</button><button type="button" data-act="note" title="Note: click on the page where it goes -- written into the PDF">📝</button><button type="button" data-act="link" title="Link to a page of another PDF on the desk: click on the page or select text, then choose the window and the page -- written into the PDF (Acrobat follows it too)">🔗</button><button type="button" data-act="notes" title="The notes, highlights and links of this PDF: list, edit, delete">💬</button>
         <button type="button" data-act="out" title="Zoom out (Ctrl + mouse wheel, Ctrl + −)">−</button><button type="button" data-act="zoom" class="dd-zoom" title="Zoom: a level, fit width or fit page"></button><button type="button" data-act="in" title="Zoom in (Ctrl + mouse wheel, Ctrl + +)">+</button>
         <button type="button" data-act="fit" title="Fit the width once (the zoom then stays as it is)">↔</button>
         <button type="button" data-act="top" title="Always on top of the other windows">📌</button>
@@ -254,7 +254,7 @@ function labelWindow(w) {
     rt.head.querySelector('[data-act="save"]').hidden = !EDITABLE[w.kind] || (w.kind === 'pdf' && !!w.libId);
     rt.head.querySelector('[data-act="notes"]').hidden = w.kind !== 'pdf';
     rt.head.querySelector('[data-act="hl"]').hidden = rt.head.querySelector('[data-act="note"]').hidden =
-        w.kind !== 'pdf' || !NOTES_ON;
+        rt.head.querySelector('[data-act="link"]').hidden = w.kind !== 'pdf' || !NOTES_ON;
     if (w.kind !== 'pdf') { rt.notes = []; rt.noteTool = null; }
     rt.info.textContent = '';
     rt.tabs.hidden = true;
@@ -287,6 +287,7 @@ function paint(w) {
     btn('notes').textContent = rt.notes.length ? `💬${rt.notes.length}` : '💬';
     btn('hl').classList.toggle('on', rt.noteTool === 'highlight');
     btn('note').classList.toggle('on', rt.noteTool === 'note');
+    btn('link').classList.toggle('on', rt.noteTool === 'link');
     rt.el.classList.toggle('notes-open', notesOpen);
     rt.notesBox.hidden = !notesOpen;
     rt.body.classList.toggle('tool-note', rt.noteTool === 'note');
@@ -333,6 +334,7 @@ const ACTIONS = {
     save: w => saveFile(w),
     hl: w => setNoteTool(w, 'highlight'),
     note: w => setNoteTool(w, 'note'),
+    link: w => setNoteTool(w, 'link'),
     notes: w => { w.notesOpen = !w.notesOpen; paint(w); renderNotes(w, live.get(w.id)); saveSoon(); },
     lib: w => openLibrary(w),
     app: w => appMenu(w),
@@ -2261,10 +2263,32 @@ document.addEventListener('paste', e => { const rt = sheetTarget(); if (rt && rt
 // window from the Library writes into the Library's file (its routes) and shows the new file; any other PDF goes to
 // /mini-tools/api/pdf-notes and comes back with the change -- the window is then "changed" and 💾 saves it into the
 // file. A note is named by pdf.js's object id ("12R"), which the app finds too.
+// Links (SFM-300, 🔗): a link to a page of another PDF on the desk, written into the PDF as a real link to that file
+// (GoToR: the file name -- for two Library documents the path from one to the other -- and the page). Clicked (also in
+// the standalone Desk) it brings that PDF's window to the front at the page; a PDF not on the desk is opened from the
+// Library when it is there.
 
 const NOTE_LABEL = {text: 'Note', highlight: 'Highlight', freetext: 'Text box', underline: 'Underline', strikeout: 'Strike-out',
     squiggly: 'Squiggly', square: 'Rectangle', circle: 'Circle', ink: 'Drawing', stamp: 'Stamp', line: 'Line',
-    polygon: 'Polygon', polyline: 'Polyline', caret: 'Caret', fileattachment: 'Attachment'};
+    polygon: 'Polygon', polyline: 'Polyline', caret: 'Caret', fileattachment: 'Attachment', link: 'Link'};
+
+// A link to another file (GoToR) as pdf.js reports it: unsafeUrl = "<file>#<destination>", a page's destination
+// '[index,{"name":"Fit"}]' (0 = the first page). A web link (a scheme such as https:) or a place in the same PDF is no note.
+function fileLink(a) {
+    if (a.subtype !== 'Link' || typeof a.unsafeUrl !== 'string' || a.dest) return null;
+    const raw = a.unsafeUrl, cut = raw.indexOf('#');
+    const file = (cut < 0 ? raw : raw.slice(0, cut)).trim().replace(/\\/g, '/');
+    if (!file || /^[a-z][a-z0-9+.-]+:/i.test(file) || !/\.pdf$/i.test(file)) return null;
+    let page = null;
+    if (cut >= 0) {
+        try {
+            const d = JSON.parse(raw.slice(cut + 1));
+            if (Array.isArray(d) && Number.isInteger(d[0]) && d[0] >= 0) page = d[0] + 1;
+        } catch { /* a named place in the other file */ }
+    }
+    return {file, page};
+}
+const fileName = path => path.split('/').pop();
 const OBJECT_KEY = /^\d+R\d*$/;
 const pdfDate = s => {
     const d = /^D:(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?/.exec(s || '');
@@ -2286,9 +2310,11 @@ function loadNotes(w, rt, pdf) {
                 const annots = await (await pdf.getPage(i)).getAnnotations();
                 if (rt.pdf !== pdf) return;                 // closed or replaced meanwhile
                 for (const a of annots) {
-                    if (!MARKUP.has(a.subtype)) continue;
+                    const link = fileLink(a);
+                    if (!link && !MARKUP.has(a.subtype)) continue;
                     const q = a.quadPoints ? Array.from(a.quadPoints) : [];
-                    notes.push({key: a.id || '', page: i, kind: a.subtype.toLowerCase(), rect: a.rect ? Array.from(a.rect) : [],
+                    notes.push({key: a.id || '', page: i, kind: link ? 'link' : a.subtype.toLowerCase(), target: link,
+                        rect: a.rect ? Array.from(a.rect) : [],
                         quads: Array.from({length: Math.floor(q.length / 8)}, (_, k) => q.slice(k * 8, k * 8 + 8)),
                         text: (a.contentsObj && a.contentsObj.str) || '', author: (a.titleObj && a.titleObj.str) || '',
                         date: pdfDate(a.modificationDate || a.creationDate), color: rgbHex(a.color), replyTo: a.inReplyTo || null});
@@ -2314,7 +2340,15 @@ function drawMarks(rt, n) {
         const act = rt.activeNote && rt.activeNote === note.key ? ' active' : '';
         const tip = esc(`${note.author ? note.author + ': ' : ''}${note.text || '(no comment)'}`);
         const key = esc(note.key);
-        if (['highlight', 'underline', 'strikeout', 'squiggly'].includes(note.kind) && note.quads.length) {
+        if (note.kind === 'link') {                       // SFM-300: underlined text or an arrow icon, click follows
+            const t = esc(linkTip(note));
+            if (note.quads.length) for (const q of note.quads)
+                html.push(`<div class="dd-mark link ul${act}" data-key="${key}" title="${t}" style="${box(viewRect(p.viewport, quadRect(q)))}border-color:${note.color}"></div>`);
+            else if (note.rect.length === 4) {
+                const r = viewRect(p.viewport, note.rect), size = Math.max(14, Math.min(r.width, r.height) || 20 * p.viewport.scale);
+                html.push(`<div class="dd-mark link icon${act}" data-key="${key}" title="${t}" style="left:${r.left}px;top:${r.top}px;width:${size}px;height:${size}px;background:${note.color}"></div>`);
+            }
+        } else if (['highlight', 'underline', 'strikeout', 'squiggly'].includes(note.kind) && note.quads.length) {
             const hl = note.kind === 'highlight';
             for (const q of note.quads)
                 html.push(`<div class="dd-mark ${hl ? 'hl' : 'ul'}${act}" data-key="${key}" title="${tip}" style="${box(viewRect(p.viewport, quadRect(q)))}${hl ? 'background' : 'border-color'}:${note.color}"></div>`);
@@ -2337,14 +2371,18 @@ function renderNotes(w, rt) {
     const color = desk.noteColor || 'yellow';
     const one = n => `<div class="dd-note${n.replyTo ? ' reply' : ''}${rt.activeNote && rt.activeNote === n.key ? ' active' : ''}" data-key="${esc(n.key)}" style="--c:${n.color}">
         <div class="meta"><span>p. ${n.page}</span><span>${esc(n.replyTo ? 'Reply' : NOTE_LABEL[n.kind] || n.kind)}</span><span class="grow"></span><span>${esc(n.author)}</span><span>${esc(n.date)}</span></div>
+        ${n.kind === 'link' ? `<div class="target">→ ${esc(targetLabel(n.target))}</div>` : ''}
         <div class="text${n.text ? '' : ' empty'}">${n.text ? esc(n.text) : '(no comment)'}</div>`
-        + (NOTES_ON && OBJECT_KEY.test(n.key) ? '<div class="acts"><button type="button" class="secondary" data-note-act="edit">Edit</button><button type="button" class="secondary" data-note-act="delete">Delete</button></div>' : '')
+        + (n.kind === 'link' || (NOTES_ON && OBJECT_KEY.test(n.key)) ? '<div class="acts">'
+            + (n.kind === 'link' ? '<button type="button" data-note-act="open">Open</button>' : '')
+            + (NOTES_ON && OBJECT_KEY.test(n.key) ? '<button type="button" class="secondary" data-note-act="edit">Edit</button><button type="button" class="secondary" data-note-act="delete">Delete</button>' : '')
+            + '</div>' : '')
         + '</div>';
     box.innerHTML = `<div class="dd-notes-head"><b>Notes (${notes.length})</b>`
         + (NOTES_ON ? `<select class="dd-note-color" title="Colour of new notes and highlights">${Object.keys(NOTE_COLORS).map(c =>
             `<option value="${c}"${c === color ? ' selected' : ''}>${c}</option>`).join('')}</select>` : '') + '</div>'
         + (notes.length ? notes.map(one).join('') : `<div class="dd-notes-none">${NOTES_ON
-            ? 'No notes yet. 🖍 highlights text you select, 📝 puts a note where you click -- written into the PDF, so Acrobat shows them too.'
+            ? 'No notes yet. 🖍 highlights text you select, 📝 puts a note where you click, 🔗 links to a page of another PDF on the desk -- written into the PDF, so Acrobat shows them too.'
             : 'No notes in this PDF.'}</div>`)
         + (NOTES_ON ? (w.libId ? `<div class="dd-notes-none">Written into the Library's file (${esc(w.libId)}).</div>` : '')
             : '<div class="dd-notes-none">Shown here; writing notes needs the Integrity Workbench app.</div>');
@@ -2356,7 +2394,160 @@ function setNoteTool(w, tool) {
     rt.noteTool = rt.noteTool === tool ? null : tool;
     paint(w);
     status({note: 'Click on the page where the note goes (📝 again or Esc: off).',
-            highlight: 'Select text on the page: the highlight is made when you let go (🖍 again or Esc: off).'}[rt.noteTool] || '');
+            highlight: 'Select text on the page: the highlight is made when you let go (🖍 again or Esc: off).',
+            link: 'Click on the page where the link goes, or select text; then choose the PDF on the desk it goes to and the page (🔗 again or Esc: off).'}[rt.noteTool] || '');
+}
+
+// ---- links (SFM-300)
+
+function targetLabel(t) {
+    return t ? fileName(t.file) + (t.page ? ` p. ${t.page}` : '') : '?';
+}
+
+function linkTip(note) {
+    return `Link to ${targetLabel(note.target)}${note.text ? ' -- ' + note.text : ''} (click to open)`;
+}
+
+// The page a PDF window shows (a third down its view), 1 when it isn't open yet
+function shownPage(w) {
+    const rt = live.get(w.id);
+    if (rt && pdfViewer.ready(rt)) return pdfViewer.pageAt(rt, rt.body.scrollTop + rt.body.clientHeight / 3);
+    return (w.view && w.view.page) || 1;
+}
+
+// Brings the window to the front at the page
+function showPdfPage(w, page) {
+    activate(w);
+    const rt = live.get(w.id);
+    if (rt && pdfViewer.ready(rt)) {
+        const p = rt.pages[Math.max(1, Math.min(page, rt.pages.length - 1))];
+        rt.body.scrollTop = p.div.offsetTop - 6;
+        pdfViewer.track(w, rt);
+    } else w.view = {page, frac: 0, left: 0};
+    rt.el.classList.remove('dd-flash');
+    void rt.el.offsetWidth;
+    rt.el.classList.add('dd-flash');
+}
+
+async function followLink(w, rt, key) {
+    const note = rt.notes.find(n => n.key === key), t = note && note.target;
+    if (!t) return;
+    const name = fileName(t.file);
+    const other = desk.windows.find(o => o !== w && o.kind === 'pdf' && o.name.toLowerCase() === name.toLowerCase());
+    if (other) { showPdfPage(other, t.page || 1); status(`${other.name}${t.page ? ', page ' + t.page : ''}.`); return; }
+    if ($('dd-lib') && await openLinkFromLibrary(w, t)) return;
+    status(`“${name}” is not on the desk${$('dd-lib') ? ' and not in the Library' : ''} -- open it (${LOCAL_FILES ? 'Add files…' : ''}`
+        + `${LOCAL_FILES && $('dd-lib') ? ' or ' : ''}${$('dd-lib') ? 'From Library…' : ''}) and click the link again.`, true);
+}
+
+// The linked PDF from the Library as a new window at the page: for a link in a Library document by its path from that
+// document's folder, otherwise the one Library PDF of that file name. False when the Library has none.
+async function openLinkFromLibrary(w, t) {
+    let docs;
+    try {
+        const r = await fetch('/api/library', {cache: 'no-store'});
+        if (!r.ok) return false;
+        docs = ((await r.json()).documents || []).filter(d => d.name && !d.missing && !d.bib_only && /\.pdf$/i.test(d.name));
+    } catch { return false; }
+    const src = w.libId && docs.find(d => d.id === w.libId);
+    const want = src ? resolvePath(src.folder ? src.folder + '/' : '', t.file).toLowerCase() : null;
+    const named = docs.filter(d => d.name.toLowerCase() === fileName(t.file).toLowerCase());
+    const doc = (want && docs.find(d => d.path.toLowerCase() === want)) || (named.length === 1 ? named[0] : null);
+    if (!doc) return false;
+    status(`Opening ${doc.name} from the Library…`);
+    try {
+        const r = await fetch(`/library/file/${encodeURIComponent(doc.id)}`, {cache: 'no-store'});
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const blob = await r.blob();
+        const file = new File([blob], doc.name, {type: blob.type});
+        file.libId = doc.id;
+        file.view = {page: t.page || 1, frac: 0, left: 0};
+        await addFiles([file]);
+        status(`${doc.name}${t.page ? ', page ' + t.page : ''} -- from the Library.`);
+        return true;
+    } catch (e) {
+        status(`${doc.name} not loaded from the Library: ${e.message}.`, true);
+        return true;
+    }
+}
+
+// The editor of a new link on page p at (left, top): the PDF window it goes to, its page (that window's shown page to
+// start with), a comment. Resolves with {wid, page, text}, or null.
+function linkEditor(w, parent, left, top, title) {
+    const others = desk.windows.filter(o => o !== w && o.kind === 'pdf');
+    if (!others.length) {
+        status('Open the PDF the link goes to on the desk first (scrolled to its page) -- then 🔗 again.', true);
+        return Promise.resolve(null);
+    }
+    document.querySelectorAll('.dd-editor').forEach(e => e.remove());
+    const ed = document.createElement('div');
+    ed.className = 'dd-editor dd-link-editor';
+    ed.style.left = Math.max(0, Math.min(left, parent.clientWidth - 290)) + 'px';
+    ed.style.top = Math.max(0, top) + 'px';
+    const pick = others.find(o => o.id === desk.lastLinkWindow) || [...others].sort((a, b) => b.z - a.z)[0];
+    ed.innerHTML = `<div class="ttl">${esc(title)}</div>
+        <select data-f="win" size="${Math.min(5, Math.max(2, others.length))}">${others.map(o =>
+            `<option value="${o.id}"${o === pick ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select>
+        <div class="row"><label>Page <input type="number" data-f="page" min="1" value="${shownPage(pick)}"></label></div>
+        <textarea data-f="text" placeholder="Comment (optional)"></textarea>
+        <div class="row"><span class="hint">Ctrl+Enter saves</span><button type="button" class="secondary" data-ed="cancel">Cancel</button><button type="button" data-ed="save">Save</button></div>`;
+    for (const ev of ['pointerdown', 'mouseup', 'click']) ed.addEventListener(ev, e => e.stopPropagation());
+    parent.appendChild(ed);
+    const f = name => ed.querySelector(`[data-f=${name}]`);
+    f('win').addEventListener('change', () => { const o = byId(+f('win').value); if (o) f('page').value = shownPage(o); });
+    f('page').focus();
+    f('page').select();
+    return new Promise(resolve => {
+        const done = ok => {
+            const value = ok ? {wid: +f('win').value, page: +f('page').value || 0, text: f('text').value} : null;
+            if (value && value.page < 1) { status('The page is 1 or more.', true); return; }
+            ed.remove();
+            resolve(value);
+        };
+        ed.querySelector('[data-ed=save]').onclick = () => done(true);
+        ed.querySelector('[data-ed=cancel]').onclick = () => done(false);
+        ed.addEventListener('keydown', e => {
+            e.stopPropagation();
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(true); }
+            else if (e.key === 'Escape') { e.preventDefault(); done(false); }
+        });
+    });
+}
+
+// The link's target as the app writes it: between two Library documents by identifier (the app writes the path from
+// one to the other), otherwise the other PDF's file name
+function linkTarget(w, other, page) {
+    return w.libId && other.libId ? {doc: other.libId, page} : {file: other.name, page};
+}
+
+async function addLinkAt(w, rt, n, e) {
+    const p = rt.pages[n];
+    if (!p || !p.viewport) return;
+    const r = p.div.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    const [px, py] = p.viewport.convertToPdfPoint(x, y);
+    const value = await linkEditor(w, p.div, x + 6, y + 6, 'New link to a page of another PDF');
+    const other = value && byId(value.wid);
+    if (!other) return;
+    desk.lastLinkWindow = other.id;
+    await writeNote(w, rt, {action: 'add', page: n, kind: 'link', text: value.text, color: desk.noteColor || 'yellow',
+                            point: [px, py], target: linkTarget(w, other, value.page)});
+}
+
+async function linkSelection(w, rt) {
+    const quads = selectionQuads(rt), pages = Object.keys(quads).map(Number).filter(n => quads[n].length);
+    if (!pages.length) return;
+    const marked = window.getSelection().toString().trim();
+    const last = pages[pages.length - 1], p = rt.pages[last];
+    const v = viewRect(p.viewport, quadRect(quads[last][quads[last].length - 1]));
+    window.getSelection().removeAllRanges();
+    const value = await linkEditor(w, p.div, v.left + v.width - 280, v.top + v.height + 6,
+        `Link${marked ? ': “' + (marked.length > 40 ? marked.slice(0, 40) + '…' : marked) + '”' : ''}`);
+    const other = value && byId(value.wid);
+    if (!other) return;
+    desk.lastLinkWindow = other.id;
+    for (const n of pages)
+        if (!await writeNote(w, rt, {action: 'add', page: n, kind: 'link', text: value.text, color: desk.noteColor || 'yellow',
+                                     quads: quads[n], target: linkTarget(w, other, value.page)})) return;
 }
 
 function showNote(w, rt, key, scrollPage) {
@@ -2511,7 +2702,8 @@ async function writeNote(w, rt, op) {
         let blob;
         if (w.libId) {                                // into the Library's file, then the desk shows that file
             const url = `/api/library/documents/${encodeURIComponent(w.libId)}/notes` + (op.key ? '/' + encodeURIComponent(op.key) : '');
-            const body = op.action === 'add' ? {page: op.page, kind: op.kind, text: op.text, color: op.color, point: op.point, quads: op.quads}
+            const body = op.action === 'add' ? {page: op.page, kind: op.kind, text: op.text, color: op.color, point: op.point,
+                                                quads: op.quads, target: op.target}
                 : op.action === 'update' ? {text: op.text} : null;
             const r = await fetch(url, {method: {add: 'POST', update: 'PUT', delete: 'DELETE'}[op.action],
                 headers: body ? {'Content-Type': 'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
@@ -2556,7 +2748,12 @@ async function reloadPdf(w, rt) {
 
 function wireNotes(w, rt) {
     rt.body.addEventListener('mouseup', e => {
-        if (w.kind === 'pdf' && rt.noteTool === 'highlight' && !e.target.closest('.dd-editor')) setTimeout(() => highlightSelection(w, rt), 0);
+        if (w.kind !== 'pdf' || e.target.closest('.dd-editor')) return;
+        if (rt.noteTool === 'highlight') setTimeout(() => highlightSelection(w, rt), 0);
+        else if (rt.noteTool === 'link') {
+            const sel = window.getSelection();
+            if (sel && !sel.isCollapsed) setTimeout(() => linkSelection(w, rt), 0);
+        }
     });
     rt.body.addEventListener('click', e => {
         if (w.kind !== 'pdf' || !rt.pages || e.target.closest('.dd-editor')) return;
@@ -2564,9 +2761,13 @@ function wireNotes(w, rt) {
         if (!div) return;
         const n = +div.dataset.page;
         if (rt.noteTool === 'note') { addNoteAt(w, rt, n, e); return; }
-        const icon = e.target.closest('.dd-mark.icon'), sel = window.getSelection();
-        const key = icon ? icon.dataset.key : sel && !sel.isCollapsed ? null : hitNote(rt, n, e);
-        if (key) showNote(w, rt, key, false);
+        const sel = window.getSelection(), selecting = sel && !sel.isCollapsed;
+        if (rt.noteTool === 'link') { if (!selecting) addLinkAt(w, rt, n, e); return; }
+        const icon = e.target.closest('.dd-mark.icon, .dd-mark.link');
+        const key = icon ? icon.dataset.key : selecting ? null : hitNote(rt, n, e);
+        const note = key && rt.notes.find(x => x.key === key);
+        if (note && note.kind === 'link') followLink(w, rt, key);
+        else if (key) showNote(w, rt, key, false);
         else if (rt.activeNote) { rt.activeNote = null; redrawMarks(rt); renderNotes(w, rt); }
     });
     rt.notesBox.addEventListener('change', e => {
@@ -2577,8 +2778,11 @@ function wireNotes(w, rt) {
         if (!item || e.target.closest('.dd-note-edit')) return;
         const key = item.dataset.key, act = e.target.closest('[data-note-act]');
         if (!act) { if (key) showNote(w, rt, key, true); return; }
-        if (act.dataset.noteAct === 'edit') editInList(w, rt, item, key);
-        else if (act.dataset.noteAct === 'delete' && confirm('Delete this note from the PDF?')) await writeNote(w, rt, {action: 'delete', key});
+        const kind = (rt.notes.find(n => n.key === key) || {}).kind;
+        if (act.dataset.noteAct === 'open') followLink(w, rt, key);
+        else if (act.dataset.noteAct === 'edit') editInList(w, rt, item, key);
+        else if (act.dataset.noteAct === 'delete' && confirm(`Delete this ${kind === 'link' ? 'link' : 'note'} from the PDF?`))
+            await writeNote(w, rt, {action: 'delete', key});
     });
 }
 
