@@ -184,6 +184,8 @@ async function replaceDocument(w, file, kind, handle = null) {
 // ---------------------------------------------------------------- windows
 
 const EDITABLE = {sheet: true, csv: true, pdf: NOTES_ON};
+// Show in Explorer (SFM-301): only in the workbench on this Windows PC (data-reveal on the stage), for Library files
+const REVEAL = stage.dataset.reveal === '1';
 
 function mount(w) {
     const el = document.createElement('div');
@@ -194,6 +196,7 @@ function mount(w) {
         <button type="button" data-act="lib" title="Show a document of the Library in this window instead">📚</button>
         <button type="button" data-act="app" title="Show a tool in this window instead: Text from screenshot, Manual FTA">🧰</button>
         <button type="button" data-act="save" title="Save the changes into the file (Ctrl+S)">💾</button>
+        <button type="button" data-act="reveal" title="Show the file in Windows Explorer (its folder opens with the file selected)">📂</button>
         <button type="button" data-act="hl" title="Highlight: select text on the page (a comment is optional) -- written into the PDF">🖍</button><button type="button" data-act="note" title="Note: click on the page where it goes -- written into the PDF">📝</button><button type="button" data-act="link" title="Link to a page of another PDF on the desk: click on the page or select text, then choose the window and the page -- written into the PDF (Acrobat follows it too)">🔗</button><button type="button" data-act="notes" title="The notes, highlights and links of this PDF: list, edit, delete">💬</button>
         <button type="button" data-act="out" title="Zoom out (Ctrl + mouse wheel, Ctrl + −)">−</button><button type="button" data-act="zoom" class="dd-zoom" title="Zoom: a level, fit width or fit page"></button><button type="button" data-act="in" title="Zoom in (Ctrl + mouse wheel, Ctrl + +)">+</button>
         <button type="button" data-act="fit" title="Fit the width once (the zoom then stays as it is)">↔</button>
@@ -253,6 +256,8 @@ function labelWindow(w) {
     // a PDF's 💾 saves its notes into the file; a Library PDF's notes are already in the Library's file
     rt.head.querySelector('[data-act="save"]').hidden = !EDITABLE[w.kind] || (w.kind === 'pdf' && !!w.libId);
     rt.head.querySelector('[data-act="notes"]').hidden = w.kind !== 'pdf';
+    // SFM-301: only a file of the Library has a known place on this PC (the browser never tells where a dropped file is)
+    rt.head.querySelector('[data-act="reveal"]').hidden = !REVEAL || !w.libId;
     rt.head.querySelector('[data-act="hl"]').hidden = rt.head.querySelector('[data-act="note"]').hidden =
         rt.head.querySelector('[data-act="link"]').hidden = w.kind !== 'pdf' || !NOTES_ON;
     if (w.kind !== 'pdf') { rt.notes = []; rt.noteTool = null; }
@@ -332,6 +337,7 @@ function toggleMax(w) {
 
 const ACTIONS = {
     save: w => saveFile(w),
+    reveal: w => revealInExplorer(w),
     hl: w => setNoteTool(w, 'highlight'),
     note: w => setNoteTool(w, 'note'),
     link: w => setNoteTool(w, 'link'),
@@ -1401,6 +1407,17 @@ async function keepEdits(w, rt) {
         status('Changes not kept: ' + e.message, true);
         return null;
     }
+}
+
+// SFM-301: Explorer opens the Library file's folder with the file selected; the header tells the app it's this page asking
+async function revealInExplorer(w) {
+    if (!w.libId) return;
+    try {
+        const res = await fetch(`/api/library/documents/${encodeURIComponent(w.libId)}/reveal`, {method: 'POST', headers: {'X-Safety-Model': 'reveal'}});
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || `${res.status} ${res.statusText}`);
+        status(`${w.name}: shown in Explorer.`);
+    } catch (e) { status(e.message, true); }
 }
 
 async function saveFile(w) {
