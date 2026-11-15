@@ -39,7 +39,7 @@
 <h1 class="app-heading">Document Desk <span class="muted">— PDFs, Excel sheets, CSV files and images arranged for screen sharing</span></h1>
 <div class="dd-bar" id="dd-bar">
     <input type="file" id="dd-file" multiple hidden
-           accept=".pdf,.xlsx,.xlsm,.xltx,.xltm,.csv,.tsv,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg">
+           accept=".pdf,.docx,.docm,.dotx,.dotm,.xlsx,.xlsm,.xltx,.xltm,.csv,.tsv,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg">
     <button type="button" id="dd-add" title="Or drop files anywhere on the page">Add files…</button>
     
     
@@ -48,7 +48,7 @@
     <span class="dd-sep"></span>
     <span class="dd-find">
         <input type="search" id="dd-find" placeholder="Search the documents (Ctrl+F)" autocomplete="off" spellcheck="false"
-               title="Searches the text of every window: PDFs and sheet cells. * = any characters (at the start or end: the rest of the word), ? = one character, ~* = a real *. Case does not matter. Enter = next, Shift+Enter = previous, Esc = clear.">
+               title="Searches the text of every window: PDFs, Word documents and sheet cells. * = any characters (at the start or end: the rest of the word), ? = one character, ~* = a real *. Case does not matter. Enter = next, Shift+Enter = previous, Esc = clear.">
         <button type="button" class="secondary" id="dd-find-prev" title="Previous match (Shift+Enter, Shift+F3)">‹</button><button type="button" class="secondary" id="dd-find-next" title="Next match (Enter, F3)">›</button>
         <span class="dd-find-info" id="dd-find-info"></span>
     </span>
@@ -69,6 +69,7 @@
     <button type="button" class="danger" id="dd-clear" title="Close all windows and forget their files">Clear desk</button>
     <span class="dd-status" id="dd-status"></span>
 </div>
+<div class="dd-tray" id="dd-tray" hidden aria-label="Minimized windows"></div>
 <div class="dd-stage" id="dd-stage" data-local-files="1">
     <div class="dd-empty" id="dd-empty"><div>
         <b>Drop PDFs and Excel files here</b><br>

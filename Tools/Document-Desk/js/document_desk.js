@@ -10,6 +10,8 @@ import * as pdfjsLib from '../vendor/pdfjs/pdf.min.js';
 // pdf.js files relative to this script, so the same file works in the app (/static/js/) and in the standalone
 // Document Desk (SFM-262, js/ next to vendor/)
 const PDFJS = new URL('../vendor/pdfjs/', import.meta.url).href;
+// Word (SFM-314): docx-preview + JSZip, vendored (vendor/docx/README.md), loaded when the first Word window opens
+const DOCX = new URL('../vendor/docx/', import.meta.url).href;
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js';
 
 const $ = id => document.getElementById(id);
@@ -22,7 +24,7 @@ const SNAP = 8, GAP = 6, MIN_W = 180, MIN_H = 110;
 const MAX_CANVAS_PIXELS = 8e6;
 const ON_TOP = 100000;                 // z-index offset of "always on top" windows
 const DIRS = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
-const KIND_LABEL = {pdf: 'PDF', sheet: 'XLSX', csv: 'CSV', image: 'IMG', app: 'TOOL'};
+const KIND_LABEL = {pdf: 'PDF', sheet: 'XLSX', csv: 'CSV', image: 'IMG', word: 'DOCX', app: 'TOOL'};
 
 const stage = $('dd-stage');
 // Notes in PDFs (SFM-271): shown everywhere (read from the PDF by pdf.js); written only in the workbench, which has the
@@ -92,6 +94,7 @@ function kindOf(file) {
     const ext = (/\.([^.]+)$/.exec(file.name) || [, ''])[1].toLowerCase();
     if (ext === 'pdf' || file.type === 'application/pdf') return 'pdf';
     if (['xlsx', 'xlsm', 'xltx', 'xltm'].includes(ext)) return 'sheet';
+    if (['docx', 'docm', 'dotx', 'dotm'].includes(ext)) return 'word';                  // SFM-314 (macros never run)
     if (ext === 'csv' || ext === 'tsv') return 'csv';
     if (/^(png|jpe?g|gif|webp|bmp|svg)$/.test(ext) || (file.type || '').startsWith('image/')) return 'image';
     return null;
@@ -124,8 +127,8 @@ async function addFiles(list, replaceId = null, handles = []) {
         const kind = kindOf(f);
         if (kind) accepted.push([f, kind]); else refused.push(f.name);
     }
-    if (refused.length) status(`Not shown: ${refused.join(', ')} -- PDF, Excel (.xlsx / .xlsm), CSV and images only `
-        + '(an old .xls: save it as .xlsx in Excel).', true);
+    if (refused.length) status(`Not shown: ${refused.join(', ')} -- PDF, Word (.docx), Excel (.xlsx / .xlsm), CSV and images only `
+        + '(an old .doc / .xls: save it as .docx / .xlsx in Word / Excel).', true);
     else status('');
     const target = replaceId != null ? desk.windows.find(w => w.id === replaceId) : null;
     let replaced = true;
@@ -202,6 +205,7 @@ function mount(w) {
         <button type="button" data-act="fit" title="Fit the width once (the zoom then stays as it is)">↔</button>
         <button type="button" data-act="top" title="Always on top of the other windows">📌</button>
         <button type="button" data-act="lock" title="Lock place and size -- Arrange leaves the window where it is">🔓</button>
+        <button type="button" data-act="min" title="Minimize: into the tray below the bar -- the other windows are arranged again; click it there to bring it back">▁</button>
         <button type="button" data-act="max" title="Fill the desk / back (or double-click the title bar)">▢</button>
         <button type="button" data-act="close" title="Close">✕</button></span></div>
         <div class="dd-body" tabindex="-1"></div><div class="dd-tabs" hidden></div><div class="dd-notes" hidden></div>`
@@ -275,6 +279,7 @@ function paint(w) {
     s.height = w.h * 100 + '%';
     s.zIndex = (w.onTop ? ON_TOP : 0) + w.z;
     rt.el.classList.toggle('locked', !!w.locked);
+    rt.el.classList.toggle('minimized', !!w.min);
     rt.el.classList.toggle('active', activeId === w.id);
     rt.el.classList.toggle('dirty', !!w.dirty);
     const name = rt.head.querySelector('.dd-name');
@@ -321,9 +326,55 @@ function closeWindow(w, force = false) {
     forgetFileIfUnused(w.fileId);
     if (activeId === w.id) activeId = null;
     refreshEmpty();
+    renderTray();
     saveSoon();
     findDocsChanged();
 }
+
+// ---- minimized windows (SFM-315): hidden, a button each in the tray; arranging leaves them out
+
+function renderTray() {
+    const tray = $('dd-tray'), mins = desk.windows.filter(w => w.min).sort((a, b) => a.id - b.id);
+    tray.hidden = !mins.length;
+    tray.innerHTML = mins.length ? '<span class="dd-label">Minimized</span>' + mins.map(w => `<button type="button" class="dd-tray-item" data-id="${w.id}" title="Bring back: ${esc(w.name)}">`
+        + `<span class="dd-kind" data-kind="${w.kind}">${KIND_LABEL[w.kind]}</span>${esc(w.name)}</button>`).join('')
+        + (mins.length > 1 ? '<button type="button" class="secondary dd-tray-all" title="Bring all minimized windows back">Show all</button>' : '') : '';
+}
+
+function minimize(w) {
+    if (w.min) return;
+    w.min = true;
+    if (activeId === w.id) activeId = null;
+    paint(w);
+    if (desk.arrange) arrange(desk.arrange); else saveSoon();
+    const next = [...desk.windows].filter(o => !o.min).sort((a, b) => b.z - a.z)[0];
+    if (next) activate(next);
+    renderTray();
+    findDocsChanged();
+}
+
+function restore(w, rearrange = true) {
+    if (!w.min) return;
+    w.min = false;
+    paint(w);
+    if (rearrange && desk.arrange) arrange(desk.arrange);
+    activate(w);
+    const rt = live.get(w.id), viewer = VIEWERS[w.kind];
+    if (rt && viewer.ready(rt)) requestAnimationFrame(() => viewer.rezoom(w, rt));     // drawn again at its size
+    renderTray();
+    saveSoon();
+}
+
+$('dd-tray').addEventListener('click', e => {
+    if (e.target.closest('.dd-tray-all')) {
+        desk.windows.filter(w => w.min).forEach(w => restore(w, false));
+        if (desk.arrange) arrange(desk.arrange);
+        return;
+    }
+    const b = e.target.closest('.dd-tray-item');
+    const w = b && desk.windows.find(o => o.id === +b.dataset.id);
+    if (w) restore(w);
+});
 
 function toggleMax(w) {
     if (w.locked) return;
@@ -351,6 +402,7 @@ const ACTIONS = {
     top: w => { w.onTop = !w.onTop; paint(w); saveSoon(); },
     lock: w => { w.locked = !w.locked; paint(w); saveSoon(); },
     max: toggleMax,
+    min: w => minimize(w),
     close: w => closeWindow(w),
 };
 
@@ -583,7 +635,7 @@ function swapPlaces(a, b) {
 
 // The largest empty rectangle of the stage not covered by a locked window (fractions), or null.
 function freeRect() {
-    const locked = desk.windows.filter(w => w.locked);
+    const locked = desk.windows.filter(w => w.locked && !w.min);
     if (!locked.length) return {x: 0, y: 0, w: 1, h: 1};
     const N = 96, eps = 1e-6;
     const blocked = (i, j) => locked.some(w => w.x < (j + 1) / N - eps && w.x + w.w > j / N + eps
@@ -645,8 +697,8 @@ const LAYOUTS = {
 function arrange(kind, fresh = []) {
     const box = stage.getBoundingClientRect();
     const region = freeRect();
-    const ws = desk.windows.filter(w => !w.locked);
-    if (!ws.length) return;
+    const ws = desk.windows.filter(w => !w.locked && !w.min);
+    if (!ws.length) { if (kind) { desk.arrange = kind; markArrange(); saveSoon(); } return; }
     if (!region || region.w * box.width < MIN_W || region.h * box.height < MIN_H) {
         status('No room left: locked windows cover the desk. Unlock one (🔒) to arrange the others.', true);
         return;
@@ -687,7 +739,7 @@ function saveLayout() {
     if (!name) return;
     desk.layouts[name] = [...desk.windows].sort((a, b) => a.z - b.z).map(w => ({
         fileId: w.fileId, name: w.name, kind: w.kind, x: w.x, y: w.y, w: w.w, h: w.h, zoom: w.zoom,
-        locked: w.locked, onTop: w.onTop}));
+        locked: w.locked, onTop: w.onTop, min: !!w.min}));
     fillLayouts(name);
     saveSoon();
     status(`Layout "${name}" saved (${desk.layouts[name].length} windows).`);
@@ -710,10 +762,11 @@ function applyLayout(name) {
     take(() => true);
     entries.forEach(e => delete e.taken);
     for (const [w, e] of pairs) {
-        Object.assign(w, {x: e.x, y: e.y, w: e.w, h: e.h, locked: !!e.locked, onTop: !!e.onTop, max: null, z: desk.z++});
+        Object.assign(w, {x: e.x, y: e.y, w: e.w, h: e.h, locked: !!e.locked, onTop: !!e.onTop, max: null, z: desk.z++, min: !!e.min});
         if (e.zoom) setZoom(w, e.zoom);
         paint(w);
     }
+    renderTray();
     desk.arrange = '';
     markArrange();
     saveSoon();
@@ -1470,7 +1523,137 @@ async function saveFile(w) {
     status(handle ? `Saved into ${handle.name}.` : `Downloaded ${w.name}.`);
 }
 
-const VIEWERS = {pdf: pdfViewer, image: imageViewer, sheet: sheetViewer, csv: sheetViewer, app: appViewer};
+// ---------------------------------------------------------------- Word (.docx, SFM-314)
+// docx-preview draws the document as pages (styles, numbering, tables, pictures, headers / footers, footnotes) into a
+// detached element; cleanWord() removes what could reach the network or run code before it goes on the page. Read only.
+
+let docxLib = null;
+function loadDocx() {
+    if (!docxLib) docxLib = (async () => {
+        for (const f of ['jszip.min.js', 'docx-preview.min.js']) await new Promise((ok, fail) => {
+            const s = document.createElement('script');
+            s.src = DOCX + f;
+            s.onload = ok;
+            s.onerror = () => fail(new Error(`the Word viewer (${f}) could not be loaded`));
+            document.head.append(s);
+        });
+        if (!window.docx || !window.JSZip) throw new Error('the Word viewer did not load');
+        return window.docx;
+    })().catch(e => { docxLib = null; throw e; });
+    return docxLib;
+}
+
+const SAFE_URL = /^\s*(?:data:|blob:)/i;
+// Links: web and mail links open in a new tab, bookmarks inside the document stay; any other target (file:,
+// javascript:, ...) is taken off. Styles: no url() except data: / blob:, no @import. Pictures: data: / blob: only.
+function cleanWord(...roots) {
+    const strip = css => css.replace(/@import[^;]*;?/gi, '').replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (m, q, u) => (SAFE_URL.test(u) ? m : 'none'));
+    for (const root of roots) {
+        root.querySelectorAll('a').forEach(a => {
+            const href = (a.getAttribute('href') || '').trim();
+            if (/^(https?:|mailto:)/i.test(href)) { a.target = '_blank'; a.rel = 'noopener noreferrer'; a.title = href; }
+            else if (!href.startsWith('#')) a.removeAttribute('href');
+        });
+        root.querySelectorAll('style').forEach(s => { s.textContent = strip(s.textContent); });
+        root.querySelectorAll('[style]').forEach(el => {
+            const v = el.getAttribute('style');
+            if (/url\(|@import|expression\(/i.test(v)) el.setAttribute('style', strip(v).replace(/expression\(/gi, ''));
+        });
+        root.querySelectorAll('img, image, use, iframe, object, embed, script, link, video, audio, source').forEach(el => {
+            if (['IFRAME', 'OBJECT', 'EMBED', 'SCRIPT', 'LINK'].includes(el.tagName.toUpperCase())) { el.remove(); return; }
+            for (const a of ['src', 'href', 'xlink:href', 'srcset', 'poster'])
+                if (el.hasAttribute(a) && !SAFE_URL.test(el.getAttribute(a)) && !(a !== 'src' && el.getAttribute(a).startsWith('#'))) el.removeAttribute(a);
+        });
+        root.querySelectorAll('*').forEach(el => {
+            for (const at of [...el.attributes]) if (/^on/i.test(at.name)) el.removeAttribute(at.name);
+        });
+    }
+}
+
+const wordViewer = {
+    async open(w, rt, blob, gen) {
+        const docx = await loadDocx();
+        const body = document.createElement('div'), styles = document.createElement('div');
+        await docx.renderAsync(await blob.arrayBuffer(), body, styles, {
+            className: `ddw${w.id}`,              // the document's styles apply to this window only
+            inWrapper: true, ignoreWidth: false, ignoreHeight: false, ignoreFonts: false, breakPages: true,
+            ignoreLastRenderedPageBreak: true, renderHeaders: true, renderFooters: true, renderFootnotes: true,
+            renderEndnotes: true, renderComments: false, renderChanges: false, useBase64URL: true,
+            renderAltChunks: false,               // embedded HTML would run in a frame of this page (vendor/docx/README.md)
+            experimental: false, debug: false,
+        });
+        if (gen !== rt.gen) return;
+        cleanWord(styles, body);
+        const box = document.createElement('div');
+        box.className = 'dd-wordbox';
+        box.append(styles, body);
+        rt.body.replaceChildren(box);
+        rt.word = {box, body};
+        rt.wordText = null;
+        const pages = body.querySelectorAll('section').length;
+        rt.info.textContent = `${pages} page${pages === 1 ? '' : 's'}`;
+        body.style.zoom = 1;
+        const first = body.querySelector('section');
+        rt.natural = [Math.max(200, body.scrollWidth || 0, first ? first.offsetWidth + 60 : 0) || 860,
+                      first ? first.offsetHeight + 60 : 1150];
+        if (!w.zoom) w.zoom = Math.min(1, this.fit(w, rt));
+        this.rezoom(w, rt);
+    },
+    ready: rt => !!rt.word,
+    fit: (w, rt) => clampZoom((rt.body.clientWidth - 20) / rt.natural[0]),
+    fitPage: (w, rt) => clampZoom(Math.min((rt.body.clientWidth - 20) / rt.natural[0], (rt.body.clientHeight - 10) / rt.natural[1])),
+    rezoom(w, rt) {
+        rt.word.body.style.zoom = w.zoom;
+        restoreScroll(w, rt);
+    },
+    track: (w, rt, save = true) => trackScroll(w, rt, {}, save),
+    close(rt) { rt.word = rt.wordText = null; },
+};
+
+// The text of every paragraph (search, SFM-267): its text nodes joined, with each node's start
+function wordText(rt) {
+    if (!rt.wordText) rt.wordText = [...rt.word.body.querySelectorAll('p')].map(p => {
+        const nodes = [], walk = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+        let text = '';
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) { nodes.push({n, s: text.length}); text += n.data; }
+        return {text, nodes};
+    });
+    return rt.wordText;
+}
+
+// The matches of this window as <mark>s in the paragraphs' text (old marks taken out first)
+function markWord(w, rt) {
+    const old = rt.word.body.querySelectorAll('mark.dd-hit');
+    if (old.length) {
+        const parents = new Set();
+        old.forEach(m => { parents.add(m.parentNode); m.replaceWith(...m.childNodes); });
+        parents.forEach(p => p.normalize());
+        rt.wordText = null;
+    }
+    const list = find.byPlace.get(`${w.id}:w`);
+    if (!list) return;
+    const paras = wordText(rt);
+    const hits = list.map(i => [find.hits[i], i === find.cur]).sort((a, b) => b[0].para - a[0].para || b[0].start - a[0].start);
+    for (const [h, cur] of hits) {
+        const para = paras[h.para];
+        if (!para) continue;
+        for (let k = para.nodes.length - 1; k >= 0; k--) {
+            const {n, s} = para.nodes[k], len = n.data.length;
+            const a = Math.max(h.start - s, 0), b = Math.min(h.end - s, len);
+            if (b <= a) continue;
+            let part = n;
+            if (b < len) part.splitText(b);
+            if (a > 0) part = part.splitText(a);
+            const m = document.createElement('mark');
+            m.className = cur ? 'dd-hit cur' : 'dd-hit';
+            part.replaceWith(m);
+            m.append(part);
+        }
+    }
+    rt.wordText = null;                       // the nodes are split now
+}
+
+const VIEWERS = {pdf: pdfViewer, image: imageViewer, sheet: sheetViewer, csv: sheetViewer, word: wordViewer, app: appViewer};
 
 // ---- reading .xlsx: a zip of XML parts (ECMA-376). Values, shared strings, number formats, fonts, fills, borders,
 // alignment, column widths / row heights, hidden rows / columns / sheets, merged cells, frozen panes. Formulas show
@@ -2841,7 +3024,7 @@ function findPattern(q, flags = 'gi') {
 }
 
 const upperBound = (arr, x) => { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] <= x) lo = m + 1; else hi = m; } return lo; };
-const placeKey = h => h.page != null ? `${h.wid}:p${h.page}` : `${h.wid}:s${h.sheet}`;
+const placeKey = h => h.page != null ? `${h.wid}:p${h.page}` : h.para != null ? `${h.wid}:w` : `${h.wid}:s${h.sheet}`;
 const readingOrder = () => [...desk.windows].sort((a, b) => Math.round(a.y * 20) - Math.round(b.y * 20) || a.x - b.x);
 
 // The text of every page: the items' strings in text-layer order (item i = the text layer's span i), \n after an item
@@ -2907,6 +3090,10 @@ async function runFind(jump = true) {
             (pages || []).forEach((pg, page) => {
                 if (pg) for (const m of pg.text.matchAll(re)) if (m[0]) hits.push({wid: w.id, page, start: m.index, end: m.index + m[0].length});
             });
+        } else if (rt.word) {
+            wordText(rt).forEach((pg, para) => {
+                for (const m of pg.text.matchAll(re)) if (m[0]) hits.push({wid: w.id, para, start: m.index, end: m.index + m[0].length});
+            });
         } else if (rt.book) {
             rt.book.sheets.forEach((sh, sheet) => {
                 const L = sh.layout && !sh.stale ? sh.layout : sheetLayout(sh);
@@ -2926,7 +3113,7 @@ async function runFind(jump = true) {
     if (!hits.length) { markAll(); findInfo('No match', true); return; }
     if (jump) { goFind(0); return; }
     find.cur = before ? hits.findIndex(h => h.wid === before.wid && h.page === before.page && h.start === before.start
-                                             && h.sheet === before.sheet && h.k === before.k) : -1;
+                                             && h.sheet === before.sheet && h.k === before.k && h.para === before.para) : -1;
     markAll();
     findInfo();
 }
@@ -2942,6 +3129,7 @@ function goFind(i) {
     find.cur = ((i % n) + n) % n;
     const h = find.hits[find.cur], w = byId(h.wid), rt = w && live.get(w.id);
     if (!rt) { scheduleFind(0, false); return; }
+    if (w.min) restore(w);                         // a match in a minimized window brings it back (SFM-315)
     activate(w);
     if (h.page != null) {
         find.scrollTo = {wid: w.id, page: h.page};
@@ -2953,6 +3141,10 @@ function goFind(i) {
             const x = p.div.offsetLeft + (pg.xs[item] || 0) * p.div.offsetWidth;
             if (x < rt.body.scrollLeft || x > rt.body.scrollLeft + rt.body.clientWidth - 40) rt.body.scrollLeft = x - rt.body.clientWidth / 3;
         }
+    } else if (rt.word) {
+        markAll();
+        const m = rt.word.body.querySelector('mark.dd-hit.cur');
+        if (m) bringIntoView(rt, m);
     } else if (rt.book) {
         if (rt.editor) commitEdit(w, rt);
         if (rt.sheet !== h.sheet) { w.view = {sheet: h.sheet, top: 0, left: 0}; rt.sel = null; sheetViewer.show(w, rt); }
@@ -2967,6 +3159,11 @@ function findInfo(msg = null, warn = false) {
         const n = find.hits.length, h = find.hits[find.cur], w = h && byId(h.wid), rt = w && live.get(w.id);
         let where = '';
         if (h && h.page != null) where = ` p. ${h.page}`;
+        else if (h && h.para != null && rt && rt.word) {
+            const m = rt.word.body.querySelector('mark.dd-hit.cur'), sec = m && m.closest('section');
+            const n = sec ? [...rt.word.body.querySelectorAll('section')].indexOf(sec) + 1 : 0;
+            if (n) where = ` p. ${n}`;
+        }
         else if (h && rt && rt.book) {
             const sh = rt.book.sheets[h.sheet];
             where = ` ${rt.book.sheets.length > 1 ? sh.name + '!' : ''}${colName(h.k % KEY)}${Math.floor(h.k / KEY)}`;
@@ -2984,6 +3181,7 @@ function markAll() {
         const rt = live.get(w.id);
         if (!rt) continue;
         if (w.kind === 'pdf' && rt.pages) rt.pages.forEach((p, n) => { if (p) markPdfPage(w, rt, n); });
+        else if (rt.word) markWord(w, rt);
         else if (rt.book && rt.body.querySelector('.dd-sheet')) markSheet(w, rt);
     }
 }
@@ -3237,6 +3435,7 @@ async function init() {
     fillLayouts();
     markArrange();
     refreshEmpty();
+    renderTray();
 }
 
 const byId = id => desk.windows.find(w => w.id === id);
