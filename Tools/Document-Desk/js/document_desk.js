@@ -2467,9 +2467,12 @@ async function openLinkFromLibrary(w, t) {
         docs = ((await r.json()).documents || []).filter(d => d.name && !d.missing && !d.bib_only && /\.pdf$/i.test(d.name));
     } catch { return false; }
     const src = w.libId && docs.find(d => d.id === w.libId);
-    const want = src ? resolvePath(src.folder ? src.folder + '/' : '', t.file).toLowerCase() : null;
+    // by the path inside the source's library folder (SFM-304: several folders -- same folder only)
+    const dir = src ? src.path.replace(/[^/]*$/, '') : '';
+    const want = src ? resolvePath(dir, t.file).toLowerCase() : null;
     const named = docs.filter(d => d.name.toLowerCase() === fileName(t.file).toLowerCase());
-    const doc = (want && docs.find(d => d.path.toLowerCase() === want)) || (named.length === 1 ? named[0] : null);
+    const doc = (want && docs.find(d => (d.root || '') === (src.root || '') && d.path.toLowerCase() === want))
+        || (named.length === 1 ? named[0] : null);
     if (!doc) return false;
     status(`Opening ${doc.name} from the Library…`);
     try {
@@ -3148,11 +3151,11 @@ function renderLibrary() {
     const hay = d => [d.id, d.title, d.name, d.path, d.folder, ...(d.aliases || [])].join(' ');
     const shown = (lib.docs || []).filter(d => words.every(re => !re || re.test(hay(d))));
     $('dd-lib-list').innerHTML = shown.length ? shown.map(d => `
-        <label class="dd-lib-item${lib.chosen.has(d.id) ? ' on' : ''}" data-id="${esc(d.id)}" data-kind="${d.kind}" title="${esc(d.path || d.name)}">
+        <label class="dd-lib-item${lib.chosen.has(d.id) ? ' on' : ''}" data-id="${esc(d.id)}" data-kind="${d.kind}" title="${esc(d.shown_path || d.path || d.name)}">
             <input type="checkbox" value="${esc(d.id)}"${lib.chosen.has(d.id) ? ' checked' : ''}>
             <span class="dd-kind">${KIND_LABEL[d.kind]}</span>
             <span class="dd-lib-text"><div class="dd-lib-title">${esc(d.title || d.name)}</div>
-                <div class="dd-lib-path">${esc(d.path || d.name)}</div></span>
+                <div class="dd-lib-path">${esc(d.shown_path || d.path || d.name)}</div></span>
             <span class="dd-lib-id">${esc(d.id)}</span>
         </label>`).join('')
         : `<div class="dd-msg">${lib.docs && lib.docs.length ? 'No document matches.' : 'No PDF, Excel, CSV or image in the Library.'}</div>`;

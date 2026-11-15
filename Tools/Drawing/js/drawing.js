@@ -968,6 +968,45 @@ function paste(offset = 20) {
     });
 }
 
+// Right-click > Add connected shape (SFM-305, like the Manual FTA's "add below"): a shape of the same kind, size and
+// style (no text, no model link) `CONNECT_GAP` away on that side, glued with an arrow connector from the middle of the
+// side to the middle of the facing side. When that place is taken it moves on sideways (right of / below the shapes
+// already there, like siblings in a tree). Its text opens for typing.
+const CONNECT_GAP = 60;
+const CONNECT_DIRS = { right: ['r', 'l', 1, 0], below: ['b', 't', 0, 1], left: ['l', 'r', -1, 0], above: ['t', 'b', 0, -1] };
+
+function connectedPlace(p, s, dir) {
+    const [, , ux, uy] = CONNECT_DIRS[dir];
+    let x = snap(s.x + ux * (s.w + CONNECT_GAP)), y = snap(s.y + uy * (s.h + CONNECT_GAP));
+    const free = (x, y) => !p.shapes.some(o => !ONE_D.has(o.type) && o.id !== s.id
+        && x < o.x + o.w + GRID && x + s.w + GRID > o.x && y < o.y + o.h + GRID && y + s.h + GRID > o.y);
+    for (let i = 0; i < 200 && !free(x, y); i++) {
+        if (ux) y = snap(y + s.h / 2 + GRID); else x = snap(x + s.w / 2 + GRID);     // sideways: below / right of it
+    }
+    return { x, y };
+}
+
+function addConnected(dir) {
+    const s = selected()[0];
+    if (!s || ONE_D.has(s.type) || !CONNECT_DIRS[dir]) return;
+    const [fromSide, toSide] = CONNECT_DIRS[dir];
+    let made = null;
+    change(() => {
+        const p = page();
+        const at = connectedPlace(p, s, dir);
+        const n = { id: nextShapeId(p), type: s.type, x: at.x, y: at.y, w: s.w, h: s.h, style: JSON.parse(JSON.stringify(s.style || {})) };
+        if (s.type === 'image') n.img = s.img;
+        p.shapes.push(n);
+        const c = { id: nextShapeId(p), type: 'connector', route: 'orthogonal', x1: 0, y1: 0, x2: 0, y2: 0, style: { arrowEnd: true },
+                    from: s.id, fromAt: `${fromSide}:0.5000`, to: n.id, toAt: `${toSide}:0.5000` };
+        p.shapes.push(c);
+        resolveEnds(p, c);
+        S.sel = [n.id];
+        made = n;
+    });
+    if (made && made.type !== 'image') startText(made.id);
+}
+
 function nudge(dx, dy) {
     if (!S.sel.length) return;
     change(() => { for (const s of selected()) { if (ONE_D.has(s.type)) { if (!s.from) { s.x1 += dx; s.y1 += dy; } if (!s.to) { s.x2 += dx; s.y2 += dy; } } else { s.x += dx; s.y += dy; } } });
@@ -1576,6 +1615,8 @@ function contextMenu(evt) {
     if (S.sel.length) {
         items.push(['Edit text', () => startText(S.sel[0]), S.sel.length !== 1 || selected()[0].type === 'image'], ['Cut', () => copySelected(true)], ['Copy', () => copySelected(false)]);
         if (S.clipboard) items.push(['Paste', () => paste()]);
+        if (S.sel.length === 1 && !ONE_D.has(selected()[0].type))       // SFM-305
+            for (const dir of Object.keys(CONNECT_DIRS)) items.push([`Add connected shape ${dir}`, () => addConnected(dir), false, 'dw-add-connected']);
         items.push(['Bring to front', () => order(true)], ['Send to back', () => order(false)]);
         if (S.store.models && S.sel.length === 1) {
             items.push(['Link to model object…', linkDialog]);
