@@ -43,8 +43,14 @@
             <button type="button" class="menu-title" aria-haspopup="true">File</button>
             <div class="menu-list" role="menu" hidden>
                 <button type="button" role="menuitem" id="dw-page-new">New page…</button>
+                <button type="button" role="menuitem" id="dw-page-sub" title="A new page below this one in the pages tree">New page below this one…</button>
                 <button type="button" role="menuitem" id="dw-page-rename">Rename page…</button>
                 <button type="button" role="menuitem" id="dw-page-copy">Duplicate page</button>
+                <hr>
+                <button type="button" role="menuitem" id="dw-rev-save-now" title="Keep the drawing as it is now as a numbered revision, with the time and what changed">Save revision<span class="key">Ctrl+S</span></button>
+                <button type="button" role="menuitem" id="dw-revisions" title="The revisions: what changed in each, restore one">Revisions…</button>
+                <button type="button" role="menuitem" id="dw-folder" hidden>Keep on this computer (folder)…</button>
+                <button type="button" role="menuitem" id="dw-folder-stop" hidden>Stop using the folder</button>
                 <hr>
                 <button type="button" role="menuitem" id="dw-page-delete" class="danger">Delete page…</button>
             </div>
@@ -86,6 +92,11 @@
             </div>
         </div>
         <input type="file" id="dw-import-file" accept=".xml,application/xml,text/xml" hidden>
+        <span class="dw-search" title="Searches the text, ID and model link of every shape on all pages; every word must match, * and ? work">
+            <input type="search" id="dw-search" placeholder="Search all pages (Ctrl+F)" autocomplete="off" spellcheck="false">
+            <button type="button" class="dw-btn" id="dw-search-prev" title="Previous match (Shift+Enter)">&#8249;</button><button type="button" class="dw-btn" id="dw-search-next" title="Next match (Enter)">&#8250;</button>
+            <span id="dw-search-count" class="dw-muted" aria-live="polite"></span>
+        </span>
     </nav>
 
     <!-- the ribbon (like Visio's Home tab): Font, Paragraph, Tools, Shape styles -->
@@ -173,15 +184,41 @@
             </div>
             <div class="dw-label">Page</div>
         </div>
+        <div class="dw-group">
+            <div class="dw-rows">
+                <div class="dw-row"><button type="button" class="dw-btn wide" id="dw-pages-toggle" title="Show / hide the pages tree on the left">&#9776; Pages</button></div>
+                <div class="dw-row"><button type="button" class="dw-btn wide" id="dw-grid-toggle" title="All shapes as a table: text, connections, notes, links -- edit the texts there">&#9638; Grid view</button></div>
+            </div>
+            <div class="dw-label">View</div>
+        </div>
     </div>
-    <div class="dw-statusbar"><span id="dw-hint"></span><span id="dw-status" aria-live="polite"></span></div>
+    <div class="dw-statusbar"><span id="dw-hint"></span><span id="dw-folder-status" hidden></span><span id="dw-status" aria-live="polite"></span></div>
 
-    <div class="fill-graph" id="dw-canvas">
-        <svg id="dw-svg" xmlns="http://www.w3.org/2000/svg"></svg>
-        <textarea id="dw-text" hidden spellcheck="false"></textarea>
-        <div id="dw-menu" class="context-menu" role="menu" hidden></div>
+    <div class="dw-body">
+        <aside class="dw-pages" id="dw-pages" aria-label="Pages">
+            <div class="dw-pages-head"><span>Pages</span><button type="button" class="dw-btn" id="dw-pages-add" title="New page">+</button></div>
+            <div class="dw-pages-tree" id="dw-pages-tree"></div>
+        </aside>
+        <div class="fill-graph" id="dw-canvas">
+            <svg id="dw-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+            <textarea id="dw-text" hidden spellcheck="false"></textarea>
+        </div>
+        <div class="dw-grid" id="dw-gridview" hidden>
+            <div class="dw-grid-bar">
+                <input type="search" id="dw-grid-filter" placeholder="Filter: page, ID, kind, text, link (* ?)" autocomplete="off" spellcheck="false">
+                <label class="dw-muted"><input type="checkbox" id="dw-grid-all" checked> All pages</label>
+                <span id="dw-grid-count" class="dw-muted"></span>
+                <button type="button" class="secondary" id="dw-grid-close" title="Back to the drawing">Back to the drawing</button>
+            </div>
+            <div class="dw-grid-scroll">
+                <table class="dw-grid-table">
+                    <thead><tr><th>Page</th><th>ID</th><th>Kind</th><th>Text</th><th>Connections</th><th>Note of</th><th class="dw-model-only">Model link</th><th></th></tr></thead>
+                    <tbody id="dw-grid-body"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
-    <div class="dw-tabs" id="dw-tabs"></div>
+    <div id="dw-menu" class="context-menu" role="menu" hidden></div>
 </div>
 <div id="dw-dropdown" class="dw-dropdown" hidden></div>
 
@@ -214,6 +251,31 @@
     </form>
 </dialog>
 
+<dialog id="dw-tree-dialog">
+    <form method="dialog" class="dw-form">
+        <h3 style="margin-top:0;">Arrange as tree</h3>
+        <p class="dw-muted" style="margin-top:0; max-width:420px;">The shape stays where it is; everything its connectors lead to is laid out as a
+        tree below it (or to its right), like a fault tree. Notes move with their shapes. One Undo puts everything back.</p>
+        <label>Direction <select id="dw-tree-dir"><option value="down">Down -- children below, side by side</option><option value="right">Right -- children to the right, one under the other</option></select></label>
+        <label>Space between the levels <input type="number" id="dw-tree-level" min="0" max="1000" step="10"> px</label>
+        <label>Space between neighbours <input type="number" id="dw-tree-sibling" min="0" max="1000" step="10"> px</label>
+        <label><input type="checkbox" id="dw-tree-reglue"> Connectors from the middle of the side to the middle of the facing side</label>
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:10px;"><button value="cancel" class="secondary">Cancel</button><button value="ok" id="dw-tree-ok">Arrange</button></div>
+    </form>
+</dialog>
+
+<dialog id="dw-rev-dialog">
+    <form method="dialog" style="min-width:560px; max-width:820px;">
+        <h3 style="margin-top:0;">Revisions</h3>
+        <p class="dw-muted" style="margin-top:0;">Every change is saved at once; a <b>revision</b> additionally keeps the whole drawing as it is
+        now, with the time and what changed since the revision before. <b>Restore</b> makes the drawing as it was then -- what changed
+        since the last revision is saved as a revision first.</p>
+        <div style="display:flex; gap:6px;"><input id="dw-rev-note" placeholder="What is this revision? (optional)" autocomplete="off" style="flex:1;"><button type="button" id="dw-rev-save">Save revision</button></div>
+        <div id="dw-rev-list" class="dw-rev-list"></div>
+        <div style="text-align:right; margin-top:8px;"><button value="close" class="secondary">Close</button></div>
+    </form>
+</dialog>
+
 <dialog id="dw-help-dialog" class="help-dialog">
     <form method="dialog">
         <h3 style="margin-top:0;">Drawing &mdash; keyboard and mouse</h3>
@@ -233,10 +295,16 @@
             <tr><td>Font, Paragraph, Shape styles</td><td>apply to the selected shapes (the whole text of a shape)</td></tr>
             <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd> / <kbd>D</kbd>, <kbd>Del</kbd></td><td>copy / cut / paste / duplicate, delete</td></tr>
             <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>undo / redo</td></tr>
-            <tr><td>Right-click</td><td>edit text, cut / copy / paste, front / back, link, delete</td></tr>
+            <tr><td>Right-click</td><td>edit text, cut / copy / paste, add connected shape, arrange as tree, add / detach note, front / back, link, delete</td></tr>
+            <tr><td><kbd>Alt</kbd> + drag</td><td>moves the shape with its <b>branch</b>: everything its connectors lead to, and on</td></tr>
+            <tr><td>Arrange as tree</td><td>right-click a shape with connectors leading away: the branch is laid out below it (or to its right), spacing as you choose</td></tr>
+            <tr><td>Note</td><td>right-click &gt; Add note: a text box attached to the shape -- it moves, copies and is deleted with it</td></tr>
             <tr><th colspan="2">Viewing and pages</th></tr>
             <tr><td><kbd>Ctrl</kbd> + wheel / wheel / middle button or <kbd>Space</kbd> + drag</td><td>zoom / scroll / move the view; <b>Fit</b> shows the page</td></tr>
-            <tr><td>Page tabs (below)</td><td>switch; <b>+</b> new page; double-click renames; File: duplicate, delete</td></tr>
+            <tr><td>Pages (left)</td><td>click switches; <b>+</b> new page; double-click renames; drag a page onto another to put it below that one (onto the empty space: top level); right-click: new page below, rename, duplicate, move up / down, delete; &#9776; Pages hides the panel</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>search all pages: <kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> next / previous match (it opens its page), <kbd>Esc</kbd> clears</td></tr>
+            <tr><td>Grid view</td><td>every shape as a table row (page, ID, kind, text, connections, note of, link): filter, edit the texts, <b>Show</b> jumps to it</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd>, File &gt; Revisions</td><td>save a revision (time + what changed); restore one</td></tr>
             <tr><td>Export PNG / SVG / XML, Import XML</td><td>the page as an image; all pages as XML (the workbench and the standalone Drawing read each other's files)</td></tr>
         </table>
         <p style="margin-bottom:0; text-align:right;"><button value="close">Close</button></p>

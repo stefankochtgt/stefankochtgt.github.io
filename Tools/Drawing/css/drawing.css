@@ -82,10 +82,6 @@
 #dw-text { position: absolute; z-index: 5; box-sizing: border-box; padding: 4px; margin: 0; resize: none; border: 1px solid #2563eb;
     outline: 2px solid rgba(37, 99, 235, .25); background: rgba(255, 255, 255, .96); line-height: 1.2; overflow: auto; }
 #dw-text[hidden] { display: none; }
-.dw-tabs { display: flex; gap: 2px; flex: none; padding: 3px 2px 0; overflow-x: auto; }
-.dw-tab { background: #f3f4f6; color: #111827; border: 1px solid #d1d5db; border-top: 0; border-radius: 0 0 4px 4px; padding: 3px 12px; font-size: 12px; cursor: default; white-space: nowrap; }
-.dw-tab.active { background: #fff; font-weight: 600; }
-.dw-tab.add { padding: 3px 9px; }
 .dw-link-list { max-height: 50vh; overflow: auto; border: 1px solid #e5e7eb; margin-top: 6px; }
 .dw-link-list code { color: var(--accent, #1d4ed8); }
 @media (max-width: 760px) {
@@ -93,6 +89,47 @@
     main.content.fill { padding-left: 6px; padding-right: 6px; }
     .app-heading { font-size: 16px !important; }
 }
+
+/* SFM-306..313: search, pages tree, Grid view, revisions, tree dialog */
+.dw-search { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+.dw-search input { width: 220px; height: 24px; padding: 0 6px; font-size: 12px; margin: 0; }
+#dw-search-count { min-width: 70px; padding-left: 4px; }
+#dw-folder-status { color: #1e3a8a; }
+#dw-folder-status.error { color: var(--error, #b91c1c); }
+.dw-body { display: flex; flex: 1; min-height: 0; gap: 4px; }
+.dw-body > #dw-canvas { flex: 1; min-width: 0; }
+.dw-body > #dw-canvas[hidden], .dw-grid[hidden] { display: none; }
+.dw-pages { width: 190px; flex: none; display: flex; flex-direction: column; background: #f9fafb; border: 1px solid #d1d5db; min-height: 0; }
+.dw-pages.closed { display: none; }
+.dw-pages-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 2px 8px; font-size: 12px; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb; }
+.dw-pages-tree { flex: 1; overflow: auto; padding: 2px 0 20px; font-size: 12px; }
+.dw-pages-tree.drop { background: #eef2ff; }
+.dw-pg { display: flex; align-items: center; gap: 2px; padding: 3px 6px 3px 4px; cursor: default; white-space: nowrap; border-left: 3px solid transparent; }
+.dw-pg:hover { background: #eef2ff; }
+.dw-pg.active { background: #dbeafe; border-left-color: #2563eb; font-weight: 600; }
+.dw-pg.drop { outline: 2px dashed #2563eb; outline-offset: -2px; }
+.dw-pg-tw { width: 12px; flex: none; text-align: center; color: #6b7280; }
+.dw-pg-name { overflow: hidden; text-overflow: ellipsis; }
+.dw-pg-empty { color: #9ca3af; margin-left: 4px; font-size: 10px; }
+.dw-grid { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid #d1d5db; background: #fff; }
+.dw-grid-bar { display: flex; gap: 8px; align-items: center; padding: 4px 6px; border-bottom: 1px solid #e5e7eb; }
+.dw-grid-bar input[type=search] { flex: 1; max-width: 420px; margin: 0; }
+.dw-grid-bar label { margin: 0; }
+.dw-grid-bar button { margin: 0 0 0 auto; }
+.dw-grid-scroll { flex: 1; overflow: auto; }
+.dw-grid-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.dw-grid-table th { position: sticky; top: 0; background: #f3f4f6; text-align: left; padding: 4px 6px; border-bottom: 1px solid #d1d5db; z-index: 1; }
+.dw-grid-table td { padding: 3px 6px; border-bottom: 1px solid #eef0f3; vertical-align: top; }
+.dw-grid-text { width: 40%; }
+.dw-grid-text textarea { width: 100%; box-sizing: border-box; min-height: 24px; resize: vertical; font: inherit; margin: 0; padding: 2px 4px; }
+.dw-grid-table button { margin: 0; padding: 1px 8px; font-size: 12px; }
+.dw-rev-list { max-height: 55vh; overflow: auto; margin-top: 8px; border: 1px solid #e5e7eb; padding: 4px 8px; font-size: 13px; }
+.dw-rev summary { padding: 4px 0; cursor: default; }
+.dw-rev summary button { margin: 0 0 0 8px; padding: 1px 8px; font-size: 12px; }
+.dw-rev ul { margin: 2px 0 8px; padding-left: 22px; font-size: 12px; }
+.dw-form label { display: block; margin: 6px 0; font-size: 13px; }
+.dw-form input[type=number] { width: 80px; margin: 0 4px; }
+.dw-form select { margin-left: 4px; }
 
 /* the hidden frame in which a fault tree page draws its picture for Insert > Fault tree (SFM-291) */
 .dw-picture-frame { position: fixed; left: -12000px; top: 0; width: 1400px; height: 900px; border: 0; }

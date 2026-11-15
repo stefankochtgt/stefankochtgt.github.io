@@ -2,6 +2,9 @@
 // A small Visio: rectangles, ellipses, lines, text boxes and connectors glued to shapes (they follow when a
 // shape moves), connection points, text formatting and shape styles from a ribbon, several pages, undo,
 // copy / paste, PNG / SVG / XML export. In the workbench a shape can be linked to a model object.
+// Since SFM-306..313 (from the Manual FTA): Alt+drag moves a shape with its branch, *Arrange as tree*, notes attached to a
+// shape (`attach`), a Grid view, search across all pages, revisions (store.versions / saveVersion / version), pages in a
+// tree (`parent`), and in the standalone a folder on this computer (store.chooseFolder, standalone/drawing_local.js).
 // Pictures (SFM-291): pasted from the clipboard (Ctrl+V) or, in the workbench, a fault tree page of the app
 // (Insert > Fault tree...); each picture is kept once in the document (doc.images, <images> in the XML) and the
 // picture shapes point to it -- so undo snapshots, copies and duplicated pages don't copy the picture data.
@@ -79,11 +82,12 @@ function parseXml(text) {
         if (p.tagName !== 'drawing') continue;
         const page = { id: p.getAttribute('id') || '', name: p.getAttribute('name') || '',
                        width: num(p, 'width'), height: num(p, 'height'), shapes: [] };
+        if (p.getAttribute('parent')) page.parent = p.getAttribute('parent');          // SFM-313
         for (const el of p.children) {
             if (el.tagName !== 'shape') continue;
             const s = { id: el.getAttribute('id') || '', type: el.getAttribute('type') || '', style: {}, cps: [] };
             for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt']) if (el.hasAttribute(a)) s[a] = num(el, a);
-            for (const a of ['from', 'to', 'fromAt', 'toAt', 'route', 'link', 'img']) if (el.getAttribute(a)) s[a] = el.getAttribute(a);
+            for (const a of ['from', 'to', 'fromAt', 'toAt', 'route', 'link', 'img', 'attach']) if (el.getAttribute(a)) s[a] = el.getAttribute(a);
             for (const c of el.children) {
                 if (c.tagName === 'text') s.text = c.textContent;
                 else if (c.tagName === 'cp') s.cps.push([num(c, 'x'), num(c, 'y')]);
@@ -109,13 +113,14 @@ const r1 = v => Math.round(v * 100) / 100;
 function toXml(doc) {
     const out = ['<?xml version="1.0" encoding="UTF-8"?>', `<drawings format="${FORMAT}" version="1">`];
     for (const p of doc.pages) {
-        const head = `  <drawing id="${xmlEsc(p.id)}" name="${xmlEsc(p.name)}" width="${r1(p.width)}" height="${r1(p.height)}"`;
+        const head = `  <drawing id="${xmlEsc(p.id)}" name="${xmlEsc(p.name)}" width="${r1(p.width)}" height="${r1(p.height)}"`
+            + (p.parent ? ` parent="${xmlEsc(p.parent)}"` : '');
         if (!p.shapes.length) { out.push(head + '/>'); continue; }
         out.push(head + '>');
         for (const s of p.shapes) {
             let attrs = `id="${xmlEsc(s.id)}" type="${s.type}"`;
             for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2']) if (s[a] !== undefined) attrs += ` ${a}="${r1(s[a])}"`;
-            for (const a of ['from', 'fromPt', 'fromAt', 'to', 'toPt', 'toAt', 'route', 'link', 'img']) if (s[a] !== undefined && s[a] !== '' && s[a] !== null) attrs += ` ${a}="${xmlEsc(s[a])}"`;
+            for (const a of ['from', 'fromPt', 'fromAt', 'to', 'toPt', 'toAt', 'route', 'link', 'img', 'attach']) if (s[a] !== undefined && s[a] !== '' && s[a] !== null) attrs += ` ${a}="${xmlEsc(s[a])}"`;
             const parts = [];
             if (s.text) parts.push(`<text>${xmlEsc(s.text)}</text>`);
             const st = Object.entries(s.style || {}).filter(([k]) => STYLE_KEYS.includes(k))
@@ -171,6 +176,19 @@ function checkDoc(doc) {
             if (g && (!byId.has(g) || g === s.id || ONE_D.has(byId.get(g).type)))
                 throw new Error(`Page "${p.name}": ${s.id} is glued to ${g}, which is not a shape on this page.`);
         }
+        for (const s of p.shapes) if (s.attach) {          // a note (SFM-311): on a shape of this page that is no note itself
+            const a = byId.get(s.attach);
+            if (ONE_D.has(s.type) || !a || a.id === s.id || ONE_D.has(a.type) || a.attach)
+                throw new Error(`Page "${p.name}": ${s.id} is a note of ${s.attach}, which is not a shape on this page.`);
+        }
+    }
+    // pages in a tree (SFM-313): the parent is another page, and no page lies below itself
+    const parentOf = new Map(doc.pages.map(p => [p.id, p.parent || '']));
+    for (const p of doc.pages) {
+        if (!p.parent) continue;
+        if (!pageIds.has(p.parent) || p.parent === p.id) throw new Error(`Page "${p.name}" lies below page "${p.parent}", which is not in the file.`);
+        for (let at = p.parent, n = 0; at; at = parentOf.get(at), n++)
+            if (at === p.id || n > doc.pages.length) throw new Error(`Page "${p.name}" lies below itself.`);
     }
 }
 
@@ -419,7 +437,7 @@ function shapeSvg(page, s, embed) {
 
 const S = { store: null, doc: null, pageId: null, sel: [], tool: 'pointer', shapeKind: 'rect', zoom: 1, pan: { x: 40, y: 40 },
             undo: [], redo: [], clipboard: null, drag: null, editing: null, saveTimer: null, saving: Promise.resolve(),
-            objects: null, snap: true };
+            objects: null, snap: true, grid: false, search: null, collapsed: new Set(), pagesPanel: true, dragPage: null };
 
 const page = () => S.doc.pages.find(p => p.id === S.pageId) || S.doc.pages[0];
 const shape = id => page().shapes.find(s => s.id === id);
@@ -434,11 +452,21 @@ function status(text, isError) {
 function scheduleSave() {
     status('Saving…');
     clearTimeout(S.saveTimer);
-    S.saveTimer = setTimeout(() => {
-        const xml = toXml(S.doc);
-        S.saving = S.saving.then(() => S.store.save(xml)).then(() => status('Saved'))
-            .catch(e => { status(e.message, true); alert(e.message); });
-    }, 300);
+    S.saveTimer = setTimeout(saveNow, 300);
+}
+
+function saveNow() {
+    clearTimeout(S.saveTimer);
+    S.saveTimer = null;
+    const xml = toXml(S.doc);
+    S.saving = S.saving.then(() => S.store.save(xml)).then(() => { status('Saved'); updateFolderUi(); })
+        .catch(e => { status(e.message, true); alert(e.message); });
+    return S.saving;
+}
+
+async function flushSave() {                // a change still waiting for its save is written now
+    if (S.saveTimer) saveNow();
+    await S.saving;
 }
 
 // The pictures are not in the snapshot: they never change, and the shapes only point to them (doc.images).
@@ -489,7 +517,8 @@ function render() {
         + `<rect class="dw-page" x="0" y="0" width="${p.width}" height="${p.height}" fill="#fff" stroke="#c7cdd6" filter="url(#dw-shadow)"/>`
         + `<rect x="0" y="0" width="${p.width}" height="${p.height}" fill="url(#dw-grid)" pointer-events="none"/>`
         + `<g id="dw-shapes">${shapes}</g><g id="dw-overlay">${overlaySvg(p)}</g></g>`;
-    renderTabs();
+    renderPages();
+    if (S.grid && !$('dw-gridview').contains(document.activeElement)) renderGrid();
     updateRibbon();
     $('dw-zoom').textContent = Math.round(S.zoom * 100) + '%';
 }
@@ -530,6 +559,19 @@ function overlaySvg(p) {
                 out.push(`<g class="dw-handle" data-handle="${h}" style="cursor:${h}-resize"><rect x="${s.x + fx * s.w - 4.5 / z}" y="${s.y + fy * s.h - 4.5 / z}" width="${9 / z}" height="${9 / z}" fill="#fff" stroke="#1d4ed8" stroke-width="${1 / z}"/>${handleHit(s.x + fx * s.w, s.y + fy * s.h, z)}</g>`);
         }
     }
+    // a selected note: a dashed line to its shape (SFM-311)
+    for (const s of selected()) {
+        const a = s.attach && shape(s.attach);
+        if (a) out.push(`<path class="dw-note-leader" d="M${s.x + s.w / 2},${s.y + s.h / 2} L${a.x + a.w / 2},${a.y + a.h / 2}" stroke="#d4b106" stroke-width="${1.2 / z}" stroke-dasharray="${4 / z} ${3 / z}" fill="none" pointer-events="none"/>`);
+    }
+    // search matches on this page (SFM-309): framed in amber, the current one thicker
+    if (S.search) S.search.hits.forEach((h, i) => {
+        if (h.page !== p.id) return;
+        const t = shape(h.id);
+        if (!t) return;
+        const b = bbox(p, t), pad = 4 / z;
+        out.push(`<rect class="dw-search-hit${i === S.search.i ? ' current' : ''}" x="${b.x - pad}" y="${b.y - pad}" width="${b.w + 2 * pad}" height="${b.h + 2 * pad}" fill="none" stroke="#f59e0b" stroke-width="${(i === S.search.i ? 3 : 1.5) / z}" pointer-events="none"/>`);
+    });
     // link badges over the handles: the top-right handle's grab area must not cover the badge (SFM-293)
     for (const s of p.shapes) out.push(linkBadge(s));
     if (S.drag && S.drag.mode === 'marquee') {
@@ -549,9 +591,148 @@ const HANDLES = [['nw', 0, 0], ['n', 0.5, 0], ['ne', 1, 0], ['e', 1, 0.5], ['se'
 
 function renderOverlay() { $('dw-overlay').innerHTML = overlaySvg(page()); }
 
-function renderTabs() {
-    $('dw-tabs').innerHTML = S.doc.pages.map(p => `<button type="button" class="dw-tab${p.id === page().id ? ' active' : ''}" data-page="${esc(p.id)}" title="Double-click to rename">${esc(p.name)}</button>`).join('')
-        + '<button type="button" class="dw-tab add" id="dw-page-add" title="New page">+</button>';
+// ---- pages in a tree (SFM-313) -----------------------------------------------------------------
+
+const KEY_COLLAPSED = 'drawingPagesCollapsed', KEY_PANEL = 'drawingPagesPanel';
+const pageById = id => S.doc.pages.find(p => p.id === id);
+const pageChildren = parentId => S.doc.pages.filter(p => (p.parent || '') === (parentId || ''));
+
+// every page in tree order (a page, then its subpages), with its depth
+function pageOrder() {
+    const out = [], seen = new Set();
+    const walk = (pid, depth) => { for (const p of pageChildren(pid)) { if (seen.has(p.id)) continue; seen.add(p.id); out.push({ p, depth }); walk(p.id, depth + 1); } };
+    walk('', 0);
+    for (const p of S.doc.pages) if (!seen.has(p.id)) out.push({ p, depth: 0 });       // never: checkDoc refuses it
+    return out;
+}
+
+function isBelow(id, ancestor) {
+    for (let at = pageById(id) && pageById(id).parent, n = 0; at && n <= S.doc.pages.length; at = pageById(at) && pageById(at).parent, n++)
+        if (at === ancestor) return true;
+    return false;
+}
+
+function rememberCollapsed() { try { localStorage.setItem(KEY_COLLAPSED, JSON.stringify([...S.collapsed])); } catch (e) { /* private window */ } }
+
+function renderPages() {
+    const tree = $('dw-pages-tree');
+    if (!tree) return;
+    const cur = page().id;
+    for (let at = page().parent; at; at = pageById(at) && pageById(at).parent) if (S.collapsed.delete(at)) rememberCollapsed();
+    const rows = [];
+    const walk = (pid, depth) => {
+        for (const p of pageChildren(pid)) {
+            const kids = pageChildren(p.id).length, closed = S.collapsed.has(p.id);
+            rows.push(`<div class="dw-pg${p.id === cur ? ' active' : ''}" data-page="${esc(p.id)}" draggable="true" style="padding-left:${4 + depth * 14}px" title="${esc(p.name)} -- double-click renames, right-click for more, drag onto another page to put it below that one">`
+                + `<span class="dw-pg-tw"${kids ? ` data-toggle="${esc(p.id)}" title="${closed ? 'Show' : 'Hide'} the subpages"` : ''}>${kids ? (closed ? '&#9656;' : '&#9662;') : ''}</span>`
+                + `<span class="dw-pg-name">${esc(p.name)}</span>${p.shapes.length ? '' : '<span class="dw-pg-empty" title="no shapes">&#8709;</span>'}</div>`);
+            if (!closed) walk(p.id, depth + 1);
+        }
+    };
+    walk('', 0);
+    tree.innerHTML = rows.join('');
+}
+
+function newPage(parent) {
+    return async () => {
+        const name = await askText(parent ? `New page below "${pageById(parent).name}"` : 'New page', uniquePageName('Page ' + (S.doc.pages.length + 1)));
+        if (!name) return;
+        const p = { id: nextPageId(), name: uniquePageName(name), width: page().width, height: page().height, shapes: [] };
+        if (parent) p.parent = parent;
+        change(() => { S.doc.pages.push(p); });
+        openPage(p.id);
+    };
+}
+
+// `id` goes below `parent` ('' = top level), as its last subpage; refused below itself
+function movePage(id, parent) {
+    const p = pageById(id);
+    if (!p || (parent || '') === (p.parent || '')) return false;
+    if (parent && (parent === id || isBelow(parent, id))) { status('A page can not go below itself or one of its subpages.', true); return false; }
+    return change(() => {
+        if (parent) p.parent = parent; else delete p.parent;
+        S.doc.pages = [...S.doc.pages.filter(x => x !== p), p];         // the last one of its new siblings
+    });
+}
+
+function shiftPage(id, step) {           // up / down among its siblings
+    const p = pageById(id), sibs = pageChildren(p.parent || ''), i = sibs.indexOf(p), other = sibs[i + step];
+    if (!other) return;
+    change(() => {
+        const a = S.doc.pages.indexOf(p), b = S.doc.pages.indexOf(other);
+        [S.doc.pages[a], S.doc.pages[b]] = [S.doc.pages[b], S.doc.pages[a]];
+    });
+}
+
+function deletePage(id) {
+    const p = pageById(id), kids = pageChildren(id);
+    if (!confirm(`Delete the page "${p.name}" with its ${p.shapes.length} shape(s)?` + (kids.length ? `\n\nIts ${kids.length} subpage(s) move up one level.` : ''))) return;
+    change(() => {
+        for (const k of kids) { if (p.parent) k.parent = p.parent; else delete k.parent; }
+        S.doc.pages = S.doc.pages.filter(x => x !== p);
+        if (!S.doc.pages.length) S.doc.pages.push({ id: 'P1', name: 'Page 1', width: 1123, height: 794, shapes: [] });
+        if (S.pageId === id) S.pageId = (kids[0] || pageById(p.parent) || pageOrder()[0].p).id;
+    });
+    openPage(S.pageId);
+}
+
+function pageMenu(evt, id) {
+    const p = pageById(id), sibs = pageChildren(p.parent || ''), i = sibs.indexOf(p);
+    if (id !== page().id) openPage(id);
+    showMenu([
+        ['New page below this one…', newPage(id)],
+        ['Rename…', ACTIONS['dw-page-rename']],
+        ['Duplicate', ACTIONS['dw-page-copy']],
+        ['Move up', () => shiftPage(id, -1), i <= 0],
+        ['Move down', () => shiftPage(id, 1), i >= sibs.length - 1],
+        ['Move to the top level', () => movePage(id, ''), !p.parent],
+        ['Delete…', () => deletePage(id), false, 'danger'],
+    ], evt.clientX, evt.clientY);
+}
+
+function setPagesPanel(open) {
+    S.pagesPanel = open;
+    $('dw-pages').classList.toggle('closed', !open);
+    $('dw-pages-toggle').classList.toggle('on', open);
+    try { localStorage.setItem(KEY_PANEL, open ? '1' : '0'); } catch (e) { /* private window */ }
+}
+
+function wirePages() {
+    const tree = $('dw-pages-tree');
+    tree.addEventListener('click', e => {
+        const tw = e.target.closest('[data-toggle]');
+        if (tw) {
+            const id = tw.dataset.toggle;
+            if (!S.collapsed.delete(id)) S.collapsed.add(id);
+            rememberCollapsed();
+            renderPages();
+            return;
+        }
+        const row = e.target.closest('.dw-pg');
+        if (row && row.dataset.page !== page().id) openPage(row.dataset.page);
+    });
+    tree.addEventListener('dblclick', e => { if (e.target.closest('.dw-pg') && !e.target.closest('[data-toggle]')) ACTIONS['dw-page-rename'](); });
+    tree.addEventListener('contextmenu', e => { const row = e.target.closest('.dw-pg'); if (row) { e.preventDefault(); pageMenu(e, row.dataset.page); } });
+    tree.addEventListener('dragstart', e => { const row = e.target.closest('.dw-pg'); if (!row) return; S.dragPage = row.dataset.page; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', row.dataset.page); });
+    tree.addEventListener('dragend', () => { S.dragPage = null; tree.querySelectorAll('.drop').forEach(x => x.classList.remove('drop')); });
+    const target = e => { const row = e.target.closest('.dw-pg'); return row ? row.dataset.page : ''; };
+    tree.addEventListener('dragover', e => {
+        if (!S.dragPage) return;
+        e.preventDefault();
+        tree.querySelectorAll('.drop').forEach(x => x.classList.remove('drop'));
+        const row = e.target.closest('.dw-pg');
+        (row || tree).classList.add('drop');
+    });
+    tree.addEventListener('drop', e => {
+        if (!S.dragPage) return;
+        e.preventDefault();
+        const id = S.dragPage, to = target(e);
+        S.dragPage = null;
+        tree.querySelectorAll('.drop').forEach(x => x.classList.remove('drop'));
+        if (to !== id) movePage(id, to);
+    });
+    $('dw-pages-add').addEventListener('click', () => newPage('')());
+    $('dw-pages-toggle').addEventListener('click', () => { setPagesPanel(!S.pagesPanel); render(); });
 }
 
 // ---- ribbon state ----------------------------------------------------------------------------
@@ -755,7 +936,14 @@ function onPointerDown(evt) {
             select(S.sel);
             return;
         }
-        S.drag = { mode: 'move', start: m, orig: selected().map(x => ({ id: x.id, x: x.x, y: x.y, x1: x.x1, y1: x.y1, x2: x.x2, y2: x.y2 })), before: snapshot(), moved: false };
+        let moving = selected();
+        if (evt.altKey && !ONE_D.has(s.type)) {               // Alt+drag: the shape with its branch (SFM-306)
+            const ids = branchOf(p, id);
+            S.sel = [id];
+            moving = p.shapes.filter(x => ids.has(x.id));
+            status(`Moving ${moving.length} shape(s): ${s.id} and what its connectors lead to`);
+        }
+        S.drag = { mode: 'move', start: m, orig: moveOrig(withNotes(p, moving)), before: snapshot(), moved: false };
         $('dw-svg').setPointerCapture(evt.pointerId);
         select(S.sel);
         return;
@@ -785,10 +973,9 @@ function onPointerMove(evt) {
     if (d.mode === 'ctrl') {                        // dragged: copies of the selection (with the shape) follow the mouse
         if (Math.abs(m.x - d.start.x) + Math.abs(m.y - d.start.y) <= 3 / S.zoom) return;
         if (!S.sel.includes(d.id)) S.sel = [...S.sel, d.id];
-        const copies = duplicate(selected(), 0);
-        S.sel = copies.map(c => c.id);
-        S.drag = { mode: 'move', start: d.start, orig: copies.map(x => ({ id: x.id, x: x.x, y: x.y, x1: x.x1, y1: x.y1, x2: x.x2, y2: x.y2 })),
-                   before: d.before, moved: true };
+        const copies = duplicate(withNotes(p, selected()), 0);
+        S.sel = copies.filter(c => !c.attach || !copies.some(x => x.id === c.attach)).map(c => c.id);
+        S.drag = { mode: 'move', start: d.start, orig: moveOrig(copies), before: d.before, moved: true };
         select(S.sel);
         onPointerMove(evt);
         return;
@@ -930,6 +1117,7 @@ function finishText(cancel) {
 function deleteSelected() {
     if (!S.sel.length) return;
     const ids = new Set(S.sel);
+    for (const n of notesOf(page(), ids)) ids.add(n.id);         // a shape's notes go with it (SFM-311)
     change(() => {
         const p = page();
         p.shapes = p.shapes.filter(s => !ids.has(s.id));
@@ -943,7 +1131,7 @@ function deleteSelected() {
 
 function copySelected(cut) {
     if (!S.sel.length) return;
-    S.clipboard = JSON.parse(JSON.stringify(selected()));
+    S.clipboard = JSON.parse(JSON.stringify(withNotes(page(), selected())));
     if (cut) deleteSelected();
 }
 
@@ -955,6 +1143,7 @@ function duplicate(shapes, offset) {
     for (const c of copies) {
         if (ONE_D.has(c.type)) { c.x1 += offset; c.y1 += offset; c.x2 += offset; c.y2 += offset; } else { c.x += offset; c.y += offset; }
         for (const [i, end] of ['from', 'to'].entries()) if (c[end]) { if (map.has(c[end])) c[end] = map.get(c[end]); else setGlue(c, i, null); }
+        if (c.attach) { if (map.has(c.attach)) c.attach = map.get(c.attach); else delete c.attach; }     // a note without its shape: a text
     }
     return copies;
 }
@@ -1007,9 +1196,389 @@ function addConnected(dir) {
     if (made && made.type !== 'image') startText(made.id);
 }
 
+// ---- branches, trees and notes (SFM-306, SFM-307, SFM-311) -------------------------------------
+
+function moveOrig(list) { return list.map(x => ({ id: x.id, x: x.x, y: x.y, x1: x.x1, y1: x.y1, x2: x.x2, y2: x.y2 })); }
+
+// The notes attached to the shapes `ids` (SFM-311) that are not among them: they move, copy and go with their shape.
+function notesOf(p, ids) {
+    const set = ids instanceof Set ? ids : new Set(ids);
+    return p.shapes.filter(s => s.attach && set.has(s.attach) && !set.has(s.id));
+}
+function withNotes(p, shapes) { return [...shapes, ...notesOf(p, shapes.map(s => s.id))]; }
+
+// The shapes a connector or line leads to from `id` (its `from` end there, its `to` end on the other shape) -- the
+// children in a branch, like the inputs of a gate in a fault tree. Notes are no children (they go with their shape).
+function treeChildren(p, id) {
+    const byId = new Map(p.shapes.map(x => [x.id, x]));
+    return p.shapes.filter(c => ONE_D.has(c.type) && c.from === id && c.to && c.to !== id && byId.has(c.to) && !byId.get(c.to).attach)
+        .map(c => ({ c, s: byId.get(c.to) }));
+}
+
+// SFM-306: the shape and everything its connectors lead to, and on (each shape once, loops stop)
+function branchOf(p, id) {
+    const seen = new Set([id]), queue = [id];
+    while (queue.length) for (const { s } of treeChildren(p, queue.shift())) if (!seen.has(s.id)) { seen.add(s.id); queue.push(s.id); }
+    return seen;
+}
+
+const KEY_TREE = 'drawingTree';
+const TREE_DEFAULTS = { dir: 'down', level: 60, sibling: 20, reglue: true };
+function treeSettings() {
+    try { return { ...TREE_DEFAULTS, ...JSON.parse(localStorage.getItem(KEY_TREE) || '{}') }; } catch (e) { return { ...TREE_DEFAULTS }; }
+}
+
+// SFM-307 (the Manual FTA's layout): the branch below `rootId` laid out as a tree -- down (children below, side by side)
+// or right (children to the right, one under the other). The root stays where it is; each level is as deep as its
+// deepest shape plus `level`, siblings `sibling` apart, a parent centred over its children; the order of the
+// children is their order on the page now. A shape reached twice is placed once (under the first parent). With
+// `reglue` the connectors of the tree run from the middle of the parent's side to the middle of the child's facing
+// side. Notes move with their shapes. One change (one Undo). Returns the number of shapes placed.
+function arrangeTree(rootId, opt = treeSettings()) {
+    const p = page(), root = shape(rootId);
+    if (!root || ONE_D.has(root.type)) return 0;
+    const down = opt.dir !== 'right', sib = Math.max(0, Number(opt.sibling) || 0), lvl = Math.max(0, Number(opt.level) || 0);
+    const along = x => (down ? x.w : x.h), deep = x => (down ? x.h : x.w);
+    const placed = new Set([rootId]), kids = new Map(), edges = [], levels = [];
+    const build = (id, depth) => {
+        const node = shape(id);
+        levels[depth] = Math.max(levels[depth] || 0, deep(node));
+        const list = treeChildren(p, id).filter(k => !placed.has(k.s.id))
+            .sort((a, b) => (down ? a.s.x - b.s.x || a.s.y - b.s.y : a.s.y - b.s.y || a.s.x - b.s.x));
+        const own = [];
+        for (const k of list) if (!placed.has(k.s.id)) { placed.add(k.s.id); own.push(k); edges.push(k.c); }
+        kids.set(id, own.map(k => k.s.id));
+        for (const k of own) build(k.s.id, depth + 1);
+    };
+    build(rootId, 0);
+    const breadth = new Map();
+    const measure = id => {
+        const ks = kids.get(id) || [];
+        const sum = ks.reduce((t, k) => t + measure(k), 0) + sib * Math.max(0, ks.length - 1);
+        const b = Math.max(along(shape(id)), sum);
+        breadth.set(id, b);
+        return b;
+    };
+    measure(rootId);
+    const start = [0];
+    for (let i = 1; i < levels.length; i++) start[i] = start[i - 1] + levels[i - 1] + lvl;
+    const moves = new Map();
+    const base = down ? root.y : root.x;
+    const place = (id, depth, from) => {
+        const x = shape(id), B = breadth.get(id);
+        const b = from + (B - along(x)) / 2, d = base + start[depth] + (levels[depth] - deep(x)) / 2;
+        moves.set(id, [Math.round(down ? b : d) - x.x, Math.round(down ? d : b) - x.y]);
+        const ks = kids.get(id) || [];
+        const total = ks.reduce((t, k) => t + breadth.get(k), 0) + sib * Math.max(0, ks.length - 1);
+        let at = from + (B - total) / 2;
+        for (const k of ks) { place(k, depth + 1, at); at += breadth.get(k) + sib; }
+    };
+    place(rootId, 0, (down ? root.x + root.w / 2 : root.y + root.h / 2) - breadth.get(rootId) / 2);
+    moves.set(rootId, [0, 0]);
+    change(() => {
+        for (const [id, [dx, dy]] of moves) {
+            if (!dx && !dy) continue;
+            for (const x of [shape(id), ...notesOf(p, [id])]) { x.x += dx; x.y += dy; }
+        }
+        if (opt.reglue) for (const c of edges) {
+            delete c.fromPt; delete c.toPt;
+            c.fromAt = down ? 'b:0.5000' : 'r:0.5000';
+            c.toAt = down ? 't:0.5000' : 'l:0.5000';
+        }
+    });
+    status(`Arranged ${moves.size} shape(s) as a tree`);
+    return moves.size;
+}
+
+function treeDialog(id) {
+    const dlg = $('dw-tree-dialog'), o = treeSettings();
+    $('dw-tree-dir').value = o.dir; $('dw-tree-level').value = o.level; $('dw-tree-sibling').value = o.sibling; $('dw-tree-reglue').checked = !!o.reglue;
+    dlg.returnValue = '';
+    dlg.showModal();
+    dlg.addEventListener('close', () => {
+        if (dlg.returnValue !== 'ok') return;
+        const opt = { dir: $('dw-tree-dir').value, level: Number($('dw-tree-level').value) || 0,
+                      sibling: Number($('dw-tree-sibling').value) || 0, reglue: $('dw-tree-reglue').checked };
+        try { localStorage.setItem(KEY_TREE, JSON.stringify(opt)); } catch (e) { /* private window */ }
+        arrangeTree(id, opt);
+    }, { once: true });
+}
+
+// SFM-311: a note (a text box in a light frame) attached to the shape: it moves, copies and goes with it
+function addNote() {
+    const s = selected()[0];
+    if (!s || ONE_D.has(s.type) || s.attach) return;
+    let made = null;
+    change(() => {
+        const p = page();
+        const n = { id: nextShapeId(p), type: 'text', x: snap(s.x + s.w + 2 * GRID), y: snap(s.y), w: 140, h: 40, attach: s.id,
+                    style: { fill: '#fffbe6', line: '#d4b106', size: 9, align: 'left', valign: 'top' } };
+        p.shapes.push(n);
+        S.sel = [n.id];
+        made = n;
+    });
+    if (made) startText(made.id);
+}
+
+// ---- Grid view (SFM-308) ------------------------------------------------------------------------
+
+const KIND_NAMES = { rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line', text: 'Text', connector: 'Connector', image: 'Picture' };
+const kindName = s => (s.attach ? 'Note' : KIND_NAMES[s.type] || s.type);
+
+function gridRows() {
+    const all = $('dw-grid-all').checked, words = searchWords($('dw-grid-filter').value);
+    const rows = [];
+    for (const { p } of pageOrder()) {
+        if (!all && p.id !== page().id) continue;
+        for (const s of p.shapes) {
+            const hay = [p.name, s.id, kindName(s), s.text || '', s.link || '', s.attach || ''].join(' ');
+            if (words.every(re => re.test(hay))) rows.push({ p, s });
+        }
+    }
+    return rows;
+}
+
+function connectionsText(p, s) {
+    if (ONE_D.has(s.type)) return `${s.from || '·'} → ${s.to || '·'}`;
+    const out = p.shapes.filter(c => ONE_D.has(c.type) && c.from === s.id && c.to).map(c => c.to);
+    const inc = p.shapes.filter(c => ONE_D.has(c.type) && c.to === s.id && c.from).map(c => c.from);
+    return [inc.length ? `← ${inc.join(', ')}` : '', out.length ? `→ ${out.join(', ')}` : ''].filter(Boolean).join('; ');
+}
+
+function renderGrid() {
+    const rows = gridRows(), models = S.store.models;
+    $('dw-grid-count').textContent = `${rows.length} shape(s)`;
+    $('dw-grid-body').innerHTML = rows.map(({ p, s }) => {
+        const editable = s.type !== 'image';
+        return `<tr data-page="${esc(p.id)}" data-id="${esc(s.id)}"><td>${esc(p.name)}</td><td><code>${esc(s.id)}</code></td><td>${esc(kindName(s))}</td>`
+            + `<td class="dw-grid-text">${editable ? `<textarea rows="1" spellcheck="false" aria-label="Text of ${esc(s.id)}">${esc(s.text || '')}</textarea>` : ''}</td>`
+            + `<td>${esc(connectionsText(p, s))}</td><td>${s.attach ? `<code>${esc(s.attach)}</code>` : ''}</td>`
+            + (models ? `<td>${s.link ? `<code>${esc(s.link)}</code>` : ''}</td>` : '')
+            + `<td><button type="button" class="secondary dw-grid-show" title="Show it on its page">Show</button></td></tr>`;
+    }).join('') || `<tr><td colspan="8" class="dw-muted">No shapes${$('dw-grid-filter').value ? ' match' : ''}.</td></tr>`;
+}
+
+function setGrid(open) {
+    S.grid = open;
+    $('dw-gridview').hidden = !open;
+    $('dw-canvas').hidden = open;
+    $('dw-grid-toggle').classList.toggle('on', open);
+    if (S.editing) finishText();
+    if (open) { renderGrid(); $('dw-grid-filter').focus(); } else render();
+}
+
+function wireGrid() {
+    $('dw-grid-filter').addEventListener('input', renderGrid);
+    $('dw-grid-all').addEventListener('change', renderGrid);
+    $('dw-grid-close').addEventListener('click', () => setGrid(false));
+    $('dw-grid-body').addEventListener('change', e => {
+        const ta = e.target.closest('textarea'), tr = e.target.closest('tr');
+        if (!ta || !tr) return;
+        const p = pageById(tr.dataset.page), s = p && p.shapes.find(x => x.id === tr.dataset.id);
+        if (s && (s.text || '') !== ta.value) change(() => { s.text = ta.value; });
+    });
+    $('dw-grid-body').addEventListener('click', e => {
+        if (!e.target.closest('.dw-grid-show')) return;
+        const tr = e.target.closest('tr');
+        setGrid(false);
+        goToShape(tr.dataset.page, tr.dataset.id);
+    });
+}
+
+// ---- search across all pages (SFM-309) ---------------------------------------------------------
+
+// every word must match (case ignored); * = any characters, ? = one character
+function searchWords(q) {
+    return String(q || '').trim().split(/\s+/).filter(Boolean)
+        .map(w => new RegExp(w.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.'), 'i'));
+}
+
+function goToShape(pageId, id) {
+    if (S.editing) finishText();
+    if (pageId !== page().id) {
+        S.pageId = pageId;
+        try { localStorage.setItem(KEY_PAGE, pageId); } catch (e) { /* private window */ }
+    }
+    const p = page(), s = shape(id);
+    S.sel = s ? [id] : [];
+    if (s) {
+        const box = $('dw-svg').getBoundingClientRect(), b = bbox(p, s);
+        if (box.width) S.pan = { x: box.width / 2 - (b.x + b.w / 2) * S.zoom, y: box.height / 2 - (b.y + b.h / 2) * S.zoom };
+    }
+    render();
+}
+
+function runSearch() {
+    const q = $('dw-search').value, words = searchWords(q);
+    if (!words.length) { S.search = null; $('dw-search-count').textContent = ''; render(); return; }
+    const hits = [];
+    for (const { p } of pageOrder()) for (const s of p.shapes)
+        if (words.every(re => re.test([s.id, s.text || '', s.link || ''].join(' ')))) hits.push({ page: p.id, id: s.id });
+    S.search = { q, hits, i: -1 };
+    $('dw-search-count').textContent = hits.length ? `${hits.length} found` : 'nothing found';
+    render();
+}
+
+function searchStep(step) {
+    if (!S.search || S.search.q !== $('dw-search').value) runSearch();
+    const r = S.search;
+    if (!r || !r.hits.length) return;
+    r.i = (r.i + step + r.hits.length) % r.hits.length;
+    const h = r.hits[r.i];
+    $('dw-search-count').textContent = `${r.i + 1} of ${r.hits.length}`;
+    goToShape(h.page, h.id);
+}
+
+function wireSearch() {
+    $('dw-search').addEventListener('input', runSearch);
+    $('dw-search').addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); searchStep(e.shiftKey ? -1 : 1); }
+        else if (e.key === 'Escape') { e.preventDefault(); $('dw-search').value = ''; runSearch(); $('dw-search').blur(); }
+        e.stopPropagation();
+    });
+    $('dw-search-prev').addEventListener('click', () => searchStep(-1));
+    $('dw-search-next').addEventListener('click', () => searchStep(1));
+}
+
+// ---- revisions (SFM-310, like the Manual FTA's version control) ----------------------------------
+
+const MAX_CHANGES = 500;
+const short = t => { const v = String(t || '').replace(/\s+/g, ' ').trim(); return v.length > 40 ? v.slice(0, 39) + '…' : v; };
+const shapeName = s => `${kindName(s).toLowerCase()} ${s.id}${short(s.text) ? ` '${short(s.text)}'` : ''}`;
+
+// What changed from document `a` (null: nothing before) to `b`, page by page and shape by shape: [{kind, text}]
+// with kind added / removed / changed. A connector glued at both ends counts as changed only when it is glued
+// elsewhere (its points follow its shapes).
+function diffDocs(a, b) {
+    const out = [], add = (kind, text) => out.push({ kind, text });
+    const before = new Map((a ? a.pages : []).map(p => [p.id, p])), after = new Map(b.pages.map(p => [p.id, p]));
+    const nameOf = id => (after.get(id) || before.get(id) || { name: id }).name;
+    for (const p of b.pages) {
+        const o = before.get(p.id);
+        if (!o) { add('added', `Page '${p.name}' added (${p.shapes.length} shape(s))`); continue; }
+        if (o.name !== p.name) add('changed', `Page '${o.name}' renamed to '${p.name}'`);
+        if ((o.parent || '') !== (p.parent || '')) add('changed', `Page '${p.name}' moved ${p.parent ? `below '${nameOf(p.parent)}'` : 'to the top level'}`);
+        if (o.width !== p.width || o.height !== p.height) add('changed', `Page '${p.name}': size ${o.width} x ${o.height} -> ${p.width} x ${p.height}`);
+        const old = new Map(o.shapes.map(s => [s.id, s])), now = new Set(p.shapes.map(s => s.id));
+        for (const s of p.shapes) {
+            const x = old.get(s.id);
+            if (!x) { add('added', `Page '${p.name}': ${shapeName(s)} added`); continue; }
+            const what = [];
+            if ((x.text || '') !== (s.text || '')) what.push(`text '${short(x.text)}' -> '${short(s.text)}'`);
+            if (ONE_D.has(s.type)) {
+                if (['from', 'to', 'fromAt', 'toAt', 'fromPt', 'toPt'].some(k => (x[k] ?? '') !== (s[k] ?? ''))) what.push('connected differently');
+                if ((!s.from && (x.x1 !== s.x1 || x.y1 !== s.y1)) || (!s.to && (x.x2 !== s.x2 || x.y2 !== s.y2))) what.push('moved');
+                if ((x.route || '') !== (s.route || '')) what.push('routing');
+            } else {
+                if (x.x !== s.x || x.y !== s.y) what.push('moved');
+                if (x.w !== s.w || x.h !== s.h) what.push('resized');
+                if (JSON.stringify(x.cps || []) !== JSON.stringify(s.cps || [])) what.push('connection points');
+            }
+            if (JSON.stringify(styleOf(x)) !== JSON.stringify(styleOf(s))) what.push('style');
+            if ((x.link || '') !== (s.link || '')) what.push(`model link ${x.link || 'none'} -> ${s.link || 'none'}`);
+            if ((x.attach || '') !== (s.attach || '')) what.push(s.attach ? `note of ${s.attach}` : 'no note any more');
+            if (x.img !== s.img) what.push('picture');
+            if (what.length) add('changed', `Page '${p.name}': ${shapeName(s)} ${what.join(', ')}`);
+        }
+        for (const s of o.shapes) if (!now.has(s.id)) add('removed', `Page '${p.name}': ${shapeName(s)} removed`);
+    }
+    for (const o of (a ? a.pages : [])) if (!after.has(o.id)) add('removed', `Page '${o.name}' removed (${o.shapes.length} shape(s))`);
+    return out;
+}
+
+function changeSummary(changes) {
+    const n = k => changes.filter(c => c.kind === k).length;
+    return [['added', n('added')], ['removed', n('removed')], ['changed', n('changed')]].filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ') || 'no change';
+}
+
+async function lastRevision() {
+    const list = await S.store.versions();
+    if (!list.length) return { list, last: null, doc: null };
+    let doc = null;
+    try { doc = parseXml(await S.store.version(list[0].n)); } catch (e) { doc = null; }
+    return { list, last: list[0], doc };
+}
+
+// Saves the drawing as a new revision with what changed since the last one; none when nothing changed.
+async function saveRevision(note) {
+    if (!S.store.versions) return null;
+    if (S.editing) finishText();
+    await flushSave();
+    const { last, doc } = await lastRevision();
+    const changes = diffDocs(doc, S.doc);
+    if (last && !changes.length) { status(`No change since revision ${last.n} -- no new revision`); return null; }
+    const v = await S.store.saveVersion(toXml(S.doc), { note: note || '', summary: changeSummary(changes),
+                                                        changes: changes.slice(0, MAX_CHANGES).map(c => c.text) });
+    status(`Saved revision ${v.n}`);
+    updateFolderUi();
+    return v;
+}
+
+async function restoreRevision(n) {
+    if (!confirm(`Restore revision ${n}? The drawing becomes as it was then (all pages). Changes since the last revision are saved as a revision first, so nothing is lost.`)) return;
+    try {
+        await flushSave();
+        const { last, doc } = await lastRevision();
+        if (!last || diffDocs(doc, S.doc).length) await saveRevision(`Saved before restoring revision ${n}`);
+        const old = parseXml(await S.store.version(n));
+        const before = snapshot();
+        S.doc = { pages: old.pages, images: { ...S.doc.images, ...old.images } };
+        pushUndo(before);
+        S.pageId = S.doc.pages.some(p => p.id === S.pageId) ? S.pageId : S.doc.pages[0].id;
+        S.sel = [];
+        render();
+        fit();
+        saveNow();
+        await saveRevision(`Restored revision ${n}`);
+        await revisionsDialog(true);
+    } catch (e) { status(e.message, true); alert(e.message); }
+}
+
+async function revisionsDialog(refresh) {
+    const dlg = $('dw-rev-dialog');
+    let list = [];
+    try { list = await S.store.versions(); } catch (e) { status(e.message, true); }
+    $('dw-rev-list').innerHTML = list.length ? list.map(v => `<details class="dw-rev" data-n="${v.n}"><summary><b>Revision ${v.n}</b> `
+        + `<span class="dw-muted">${esc(String(v.saved || '').replace('T', ' ').replace(/(\.\d+)?Z$/, ' UTC'))}</span> -- ${esc(v.summary || '')}`
+        + `${v.note ? ` <i>${esc(v.note)}</i>` : ''} <button type="button" class="secondary dw-rev-restore" data-n="${v.n}">Restore</button></summary>`
+        + `<ul>${(v.changes || []).map(c => `<li>${esc(c)}</li>`).join('') || '<li class="dw-muted">no change lines</li>'}</ul></details>`).join('')
+        : '<p class="dw-muted">No revision yet -- <b>Save revision</b> keeps the drawing as it is now, with the time and what changed.</p>';
+    if (!refresh && !dlg.open) { $('dw-rev-note').value = ''; dlg.showModal(); }
+}
+
+function wireRevisions() {
+    $('dw-rev-save').addEventListener('click', async () => {
+        try { if (await saveRevision($('dw-rev-note').value.trim())) $('dw-rev-note').value = ''; await revisionsDialog(true); }
+        catch (e) { status(e.message, true); alert(e.message); }
+    });
+    $('dw-rev-note').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('dw-rev-save').click(); } });
+    $('dw-rev-list').addEventListener('click', e => {
+        const b = e.target.closest('.dw-rev-restore');
+        if (b) { e.preventDefault(); restoreRevision(Number(b.dataset.n)); }
+    });
+}
+
+// ---- a folder on this computer (SFM-312, standalone only: the store has it) ----------------------------
+
+async function updateFolderUi() {
+    const st = S.store && S.store.folderState ? await S.store.folderState().catch(() => null) : null;
+    const item = $('dw-folder'), stop = $('dw-folder-stop'), label = $('dw-folder-status');
+    if (!item) return;
+    item.hidden = !st;
+    stop.hidden = !st || !st.name;
+    label.hidden = !st || !st.name;
+    if (!st) return;
+    item.disabled = !st.api;
+    item.title = st.api ? 'Keep the drawing and its revisions in a folder on this computer (written on every change)'
+                        : 'Needs Chrome or Edge -- use Import / Export > Export XML';
+    item.textContent = st.name ? (st.granted ? `Folder on this computer: ${st.name}…` : `Reconnect the folder ${st.name}…`) : 'Keep on this computer (folder)…';
+    label.textContent = st.name ? (st.granted ? `Folder: ${st.name}` : `Folder ${st.name}: not connected -- File > Reconnect`) : '';
+    label.classList.toggle('error', !!st.name && !st.granted);
+}
+
 function nudge(dx, dy) {
     if (!S.sel.length) return;
-    change(() => { for (const s of selected()) { if (ONE_D.has(s.type)) { if (!s.from) { s.x1 += dx; s.y1 += dy; } if (!s.to) { s.x2 += dx; s.y2 += dy; } } else { s.x += dx; s.y += dy; } } });
+    change(() => { for (const s of withNotes(page(), selected())) { if (ONE_D.has(s.type)) { if (!s.from) { s.x1 += dx; s.y1 += dy; } if (!s.to) { s.x2 += dx; s.y2 += dy; } } else { s.x += dx; s.y += dy; } } });
 }
 
 function order(front) {
@@ -1430,24 +1999,22 @@ async function importXml(file) {
         if (!same) S.doc.images[remap[id]] = im;
     }
     for (const p of imported.pages) for (const s of p.shapes) if (s.type === 'image') s.img = remap[s.img];
+    const ids = {};
     change(() => {
         for (const p of imported.pages) {
             const copy = { ...p, id: nextPageId(), name: uniquePageName(p.name) };
+            ids[p.id] = copy.id;
             S.doc.pages.push(copy);
             added.push(copy);
         }
+        for (const p of added) { if (p.parent && ids[p.parent]) p.parent = ids[p.parent]; else delete p.parent; }   // SFM-313
     });
     if (added.length) { openPage(added[0].id); status(`Imported ${added.length} page(s) from ${file.name}`); }
 }
 
 const ACTIONS = {
-    'dw-page-new': async () => {
-        const name = await askText('New page', uniquePageName('Page ' + (S.doc.pages.length + 1)));
-        if (!name) return;
-        const p = { id: nextPageId(), name: uniquePageName(name), width: page().width, height: page().height, shapes: [] };
-        change(() => { S.doc.pages.push(p); });
-        openPage(p.id);
-    },
+    'dw-page-new': () => newPage(page().parent || '')(),
+    'dw-page-sub': () => newPage(page().id)(),
     'dw-page-rename': async () => {
         const p = page();
         const name = await askText('Rename page', p.name);
@@ -1456,19 +2023,15 @@ const ACTIONS = {
     'dw-page-copy': () => {
         const p = page();
         const copy = { ...JSON.parse(JSON.stringify(p)), id: nextPageId(), name: uniquePageName(p.name + ' (copy)') };
-        change(() => { S.doc.pages.push(copy); });
+        change(() => { S.doc.pages.splice(S.doc.pages.indexOf(p) + 1, 0, copy); });     // next to it, same parent
         openPage(copy.id);
     },
-    'dw-page-delete': () => {
-        const p = page();
-        if (!confirm(`Delete the page "${p.name}" with its ${p.shapes.length} shape(s)?`)) return;
-        change(() => {
-            S.doc.pages = S.doc.pages.filter(x => x !== p);
-            if (!S.doc.pages.length) S.doc.pages.push({ id: 'P1', name: 'Page 1', width: 1123, height: 794, shapes: [] });
-            S.pageId = S.doc.pages[0].id;
-        });
-        openPage(S.pageId);
-    },
+    'dw-page-delete': () => deletePage(page().id),
+    'dw-rev-save-now': () => saveRevision('').catch(e => { status(e.message, true); alert(e.message); }),
+    'dw-revisions': () => revisionsDialog(false),
+    'dw-grid-toggle': () => setGrid(!S.grid),
+    'dw-folder': async () => { try { await S.store.chooseFolder(); } catch (e) { alert(e.message); } updateFolderUi(); },
+    'dw-folder-stop': async () => { await S.store.stopFolder(); updateFolderUi(); },
     'dw-export-png': () => withControl(`Drawing page "${page().name}", PNG`, c => exportPng(c && c.line)),
     'dw-export-svg': () => withControl(`Drawing page "${page().name}", SVG`, c => download(
         new Blob([pageSvg(c && c.line)], { type: 'image/svg+xml' }), fileBase() + '.svg')),
@@ -1568,18 +2131,20 @@ function wire() {
         e.stopPropagation();
     });
     $('dw-text').addEventListener('blur', () => finishText());
-    $('dw-tabs').addEventListener('click', e => {
-        const t = e.target.closest('.dw-tab');
-        if (!t) return;
-        if (t.id === 'dw-page-add') ACTIONS['dw-page-new']();
-        else if (t.dataset.page !== page().id) openPage(t.dataset.page);
-    });
-    $('dw-tabs').addEventListener('dblclick', e => { if (e.target.closest('.dw-tab[data-page]')) ACTIONS['dw-page-rename'](); });
+    wirePages();
+    wireGrid();
+    wireSearch();
+    wireRevisions();
     $('dw-import-file').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importXml(f); });
     $('dw-text-dialog-input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('dw-text-dialog').close('ok'); } });
 
     document.addEventListener('keydown', e => {
         if (e.key === ' ' && !e.target.closest('input, textarea, select')) { S.spaceDown = true; }
+        const ctrlKey = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
+        if (ctrlKey && key === 'f' && !S.editing && !document.querySelector('dialog[open]')) {      // SFM-309
+            e.preventDefault(); $('dw-search').focus(); $('dw-search').select(); return;
+        }
+        if (ctrlKey && key === 's' && !document.querySelector('dialog[open]')) { e.preventDefault(); if (S.editing) finishText(); ACTIONS['dw-rev-save-now'](); return; }   // SFM-310
         if (document.querySelector('dialog[open]') || e.target.closest('input, textarea, select') || S.editing) return;
         const k = e.key.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
         const map = { z: 'dw-undo', y: 'dw-redo', a: 'dw-select-all', b: 'dw-bold', i: 'dw-italic', u: 'dw-underline' };
@@ -1615,8 +2180,13 @@ function contextMenu(evt) {
     if (S.sel.length) {
         items.push(['Edit text', () => startText(S.sel[0]), S.sel.length !== 1 || selected()[0].type === 'image'], ['Cut', () => copySelected(true)], ['Copy', () => copySelected(false)]);
         if (S.clipboard) items.push(['Paste', () => paste()]);
-        if (S.sel.length === 1 && !ONE_D.has(selected()[0].type))       // SFM-305
+        const one = S.sel.length === 1 ? selected()[0] : null;
+        if (one && !ONE_D.has(one.type)) {                                // SFM-305
             for (const dir of Object.keys(CONNECT_DIRS)) items.push([`Add connected shape ${dir}`, () => addConnected(dir), false, 'dw-add-connected']);
+            if (treeChildren(page(), one.id).length) items.push(['Arrange as tree…', () => treeDialog(one.id)]);       // SFM-307
+            if (one.attach) items.push(['Detach note', () => change(() => { delete one.attach; })], [`Select ${one.attach}`, () => select([one.attach])]);
+            else items.push(['Add note', addNote]);                                                                       // SFM-311
+        }
         items.push(['Bring to front', () => order(true)], ['Send to back', () => order(false)]);
         if (S.store.models && S.sel.length === 1) {
             items.push(['Link to model object…', linkDialog]);
@@ -1627,13 +2197,19 @@ function contextMenu(evt) {
         if (S.clipboard) items.push(['Paste', () => paste()]);
         items.push(['Select all', ACTIONS['dw-select-all']], ['Fit to window', fit]);
     }
+    showMenu(items, evt.clientX, evt.clientY);
+}
+
+// The right-click menu at a screen point (fixed position: also for the pages panel); items [label, fn, disabled, class]
+function showMenu(items, x, y) {
     const menu = $('dw-menu');
     menu.innerHTML = items.map(([label, , disabled, cls], i) => `<button type="button" class="context-menu-item ${cls || ''}" data-i="${i}"${disabled ? ' disabled' : ''}>${esc(label)}</button>`).join('');
     menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { menu.hidden = true; items[+b.dataset.i][1](); }));
-    const host = $('dw-canvas').getBoundingClientRect();
-    menu.style.left = evt.clientX - host.left + 'px';
-    menu.style.top = evt.clientY - host.top + 'px';
+    menu.style.position = 'fixed';
     menu.hidden = false;
+    const w = menu.offsetWidth, h = menu.offsetHeight;
+    menu.style.left = Math.max(0, Math.min(x, window.innerWidth - w - 4)) + 'px';
+    menu.style.top = Math.max(0, Math.min(y, window.innerHeight - h - 4)) + 'px';
     const hide = e => { if (!menu.contains(e.target)) { menu.hidden = true; document.removeEventListener('pointerdown', hide, true); } };
     document.addEventListener('pointerdown', hide, true);
 }
@@ -1647,8 +2223,13 @@ async function init(store) {
     let saved = null;
     try { saved = localStorage.getItem(KEY_PAGE); } catch (e) { /* private window */ }
     S.pageId = S.doc.pages.some(p => p.id === saved) ? saved : S.doc.pages[0].id;
+    try { S.collapsed = new Set(JSON.parse(localStorage.getItem(KEY_COLLAPSED) || '[]')); } catch (e) { S.collapsed = new Set(); }
+    let panel = '1';
+    try { panel = localStorage.getItem(KEY_PANEL) ?? '1'; } catch (e) { /* private window */ }
     document.querySelectorAll('.dw-model-only').forEach(el => { el.hidden = !S.store.models; });
     wire();
+    setPagesPanel(panel !== '0');
+    updateFolderUi();
     await loadObjects();
     setTool('pointer');
     requestAnimationFrame(fit);                // after the page layout has settled
@@ -1657,6 +2238,23 @@ async function init(store) {
 
 const serverStore = {
     models: true,
+    // revisions (SFM-310): model/drawing_versions of the open project, see app/services/drawing_versions.py
+    async versions() {
+        const r = await fetch('/api/drawings/versions', { cache: 'no-store' });
+        if (!r.ok) throw new Error(`Loading the revisions failed (${r.status})`);
+        return (await r.json()).versions;
+    },
+    async version(n) {
+        const r = await fetch(`/api/drawings/versions/${n}`, { cache: 'no-store' });
+        if (!r.ok) throw new Error(`Revision ${n} could not be read (${r.status})`);
+        return r.text();
+    },
+    async saveVersion(xml, meta) {
+        const r = await fetch('/api/drawings/versions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ xml, ...meta }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `Saving the revision failed (${r.status})`);
+        return d;
+    },
     async load() {
         const r = await fetch('/api/drawings', { cache: 'no-store' });
         if (!r.ok) throw new Error(`Loading failed (${r.status})`);
@@ -1669,5 +2267,6 @@ const serverStore = {
 };
 
 window.Drawing = { init, parseXml, toXml, checkDoc, connectorPoints, pageSvg, state: S, get page() { return page(); },
-                   setTool, select, startText, finishText, insertPicture };
+                   setTool, select, startText, finishText, insertPicture, render, diffDocs, branchOf, arrangeTree, saveRevision,
+                   flushSave, pageOrder, goToShape };
 })();
