@@ -115,7 +115,7 @@ const putRecord = rec => db.putFile(rec)
     .catch(storageFailed);
 
 function forgetFileIfUnused(id) {
-    if (!id || desk.windows.some(w => w.fileId === id)) return;
+    if (!id || desk.windows.some(w => w.fileId === id) || layoutFiles().has(id)) return;     // a saved layout keeps it (SFM-317)
     files.delete(id);
     db.deleteFile(id).catch(() => {});
 }
@@ -200,6 +200,7 @@ function mount(w) {
         <button type="button" data-act="app" title="Show a tool in this window instead: Text from screenshot, Manual FTA">🧰</button>
         <button type="button" data-act="save" title="Save the changes into the file (Ctrl+S)">💾</button>
         <button type="button" data-act="reveal" title="Show the file in Windows Explorer (its folder opens with the file selected)">📂</button>
+        <button type="button" data-act="markup" hidden>✎</button>
         <button type="button" data-act="hl" title="Highlight: select text on the page (a comment is optional) -- written into the PDF">🖍</button><button type="button" data-act="note" title="Note: click on the page where it goes -- written into the PDF">📝</button><button type="button" data-act="link" title="Link to a page of another PDF on the desk: click on the page or select text, then choose the window and the page -- written into the PDF (Acrobat follows it too)">🔗</button><button type="button" data-act="notes" title="The notes, highlights and links of this PDF: list, edit, delete">💬</button>
         <button type="button" data-act="out" title="Zoom out (Ctrl + mouse wheel, Ctrl + −)">−</button><button type="button" data-act="zoom" class="dd-zoom" title="Zoom: a level, fit width or fit page"></button><button type="button" data-act="in" title="Zoom in (Ctrl + mouse wheel, Ctrl + +)">+</button>
         <button type="button" data-act="fit" title="Fit the width once (the zoom then stays as it is)">↔</button>
@@ -265,6 +266,7 @@ function labelWindow(w) {
     rt.head.querySelector('[data-act="hl"]').hidden = rt.head.querySelector('[data-act="note"]').hidden =
         rt.head.querySelector('[data-act="link"]').hidden = w.kind !== 'pdf' || !NOTES_ON;
     if (w.kind !== 'pdf') { rt.notes = []; rt.noteTool = null; }
+    rt.head.querySelector('[data-act="markup"]').hidden = true;     // shown by applyMarkup() for a Word file with markup
     rt.info.textContent = '';
     rt.tabs.hidden = true;
 }
@@ -389,6 +391,7 @@ function toggleMax(w) {
 const ACTIONS = {
     save: w => saveFile(w),
     reveal: w => revealInExplorer(w),
+    markup: w => toggleMarkup(w),
     hl: w => setNoteTool(w, 'highlight'),
     note: w => setNoteTool(w, 'note'),
     link: w => setNoteTool(w, 'link'),
@@ -733,44 +736,84 @@ function fillLayouts(selected = '') {
     sel.value = selected in desk.layouts ? selected : '';
 }
 
+// A layout keeps the windows as they were (SFM-317): place, size, lock, on top, minimized, zoom, view, Markup -- and the
+// document itself (its stored copy stays in the browser while a layout uses it), so applying it opens them again.
+const LAYOUT_KEYS = ['fileId', 'name', 'kind', 'app', 'libId', 'x', 'y', 'w', 'h', 'zoom', 'view', 'markup', 'notesOpen'];
+const layoutFiles = () => new Set(Object.values(desk.layouts).flat().map(e => e && e.fileId).filter(Boolean));
+
 function saveLayout() {
     if (!desk.windows.length) { status('Nothing to save: the desk is empty.', true); return; }
     const name = (prompt('Name of the layout (e.g. "Review: plan left, FMEA right"):', $('dd-layouts').value) || '').trim();
     if (!name) return;
-    desk.layouts[name] = [...desk.windows].sort((a, b) => a.z - b.z).map(w => ({
-        fileId: w.fileId, name: w.name, kind: w.kind, x: w.x, y: w.y, w: w.w, h: w.h, zoom: w.zoom,
-        locked: w.locked, onTop: w.onTop, min: !!w.min}));
+    const old = desk.layouts[name] || [];
+    desk.layouts[name] = [...desk.windows].sort((a, b) => a.z - b.z).map(w => {
+        const e = {};
+        for (const k of LAYOUT_KEYS) if (w[k] !== undefined) e[k] = JSON.parse(JSON.stringify(w[k]));
+        return Object.assign(e, {locked: !!w.locked, onTop: !!w.onTop, min: !!w.min, keep: true});
+    });
+    old.forEach(e => forgetFileIfUnused(e.fileId));
     fillLayouts(name);
     saveSoon();
-    status(`Layout "${name}" saved (${desk.layouts[name].length} windows).`);
+    const dirty = desk.windows.filter(w => w.dirty).length;
+    status(`Layout "${name}" saved (${desk.layouts[name].length} windows with their documents).`
+        + (dirty ? ` ${dirty} window${dirty === 1 ? ' has' : 's have'} changes not saved into the file -- the layout keeps the file as it was opened.` : ''), !!dirty);
 }
 
-// Puts the windows back: a window takes the entry of the same file (else the same name, else the same kind of
-// document, else the next one left) -- so a layout also works for the next set of documents.
-function applyLayout(name) {
+async function storedFile(id) {
+    if (!id) return null;
+    if (files.has(id)) return files.get(id);
+    const rec = await db.getFile(id).catch(() => null);
+    if (rec) files.set(rec.id, rec);
+    return rec;
+}
+
+// Puts the layout's windows back. Saved with their documents (SFM-317): a window still on the desk with the same
+// document is moved to its place, a closed one is opened again from the kept copy, every other window goes into the
+// Minimized tray (nothing is closed). An entry without a kept document (layouts from before) takes a window with the
+// same name, else the same kind of document, else the next one left -- as before.
+async function applyLayout(name) {
     const entries = desk.layouts[name];
     if (!entries) return;
-    const free = [...desk.windows].sort((a, b) => a.z - b.z), pairs = [];
-    const take = test => { for (const e of entries) {
-        if (e.taken) continue;
-        const w = free.find(o => test(o, e));
-        if (w) { e.taken = true; free.splice(free.indexOf(w), 1); pairs.push([w, e]); }
-    } };
-    take((o, e) => o.fileId === e.fileId);
-    take((o, e) => o.name === e.name);
-    take((o, e) => o.kind === e.kind);
-    take(() => true);
-    entries.forEach(e => delete e.taken);
+    const free = [...desk.windows].sort((a, b) => a.z - b.z), pairs = [], reopen = [], rest = [];
+    for (const e of entries) {
+        const w = e.fileId ? free.find(o => o.fileId === e.fileId) : null;
+        if (w) { free.splice(free.indexOf(w), 1); pairs.push([w, e]); } else rest.push(e);
+    }
+    for (const e of rest) {
+        if (e.keep && (e.kind === 'app' ? APPS[e.app] : await storedFile(e.fileId))) reopen.push(e);
+        else {
+            const w = free.find(o => o.name === e.name) || free.find(o => o.kind === e.kind) || free[0];
+            if (w) { free.splice(free.indexOf(w), 1); pairs.push([w, e]); }
+        }
+    }
+    if (!desk.layouts[name]) return;
     for (const [w, e] of pairs) {
         Object.assign(w, {x: e.x, y: e.y, w: e.w, h: e.h, locked: !!e.locked, onTop: !!e.onTop, max: null, z: desk.z++, min: !!e.min});
+        if (e.keep && w.fileId === e.fileId && w.kind === 'word' && !!w.markup !== !!e.markup) toggleMarkup(w);
         if (e.zoom) setZoom(w, e.zoom);
         paint(w);
     }
+    const added = reopen.map(e => {
+        const w = {...JSON.parse(JSON.stringify(e)), id: desk.nextId++, z: desk.z++, max: null, dirty: false};
+        delete w.keep;
+        if (w.kind === 'app') w.fileId = null;
+        return w;
+    });
+    desk.windows.push(...added);
+    added.forEach(mount);
+    if (entries.some(e => e.keep)) free.forEach(w => { if (!w.min) { w.min = true; paint(w); } });
+    const top = [...desk.windows].filter(w => !w.min).sort((a, b) => b.z - a.z)[0];
+    activeId = null;
+    if (top) activate(top);
     renderTray();
+    refreshEmpty();
     desk.arrange = '';
     markArrange();
     saveSoon();
-    status(`Layout "${name}" applied to ${pairs.length} window${pairs.length === 1 ? '' : 's'}.`);
+    findDocsChanged();
+    const n = pairs.length + added.length;
+    status(`Layout "${name}": ${n} window${n === 1 ? '' : 's'}` + (added.length ? ` (${added.length} opened again)` : '')
+        + (entries.some(e => e.keep) && free.length ? `; ${free.length} other${free.length === 1 ? '' : 's'} minimized` : '') + '.');
 }
 
 // ---------------------------------------------------------------- opening a document
@@ -1570,28 +1613,100 @@ function cleanWord(...roots) {
     }
 }
 
+// Moved text (w:moveFrom / w:moveTo) is not read by docx-preview: it would be missing at both places. As a deletion
+// (old place) / insertion (new place) Markup shows the move and Final shows the text once, at its new place (SFM-316).
+const MOVE = /<(\/?)w:move(From|To)(?=[\s>/])/g;
+async function movesAsChanges(blob) {
+    const zip = await window.JSZip.loadAsync(blob);
+    let changed = false;
+    for (const f of Object.values(zip.files).filter(f => !f.dir && /^word\/[^/]+\.xml$/i.test(f.name))) {
+        const xml = await f.async('string');
+        if (!MOVE.test(xml)) continue;
+        MOVE.lastIndex = 0;
+        zip.file(f.name, xml.replace(MOVE, (m, end, k) => `<${end}w:${k === 'From' ? 'del' : 'ins'}`));
+        changed = true;
+    }
+    MOVE.lastIndex = 0;
+    return changed ? zip.generateAsync({type: 'arraybuffer', compression: 'STORE'}) : blob.arrayBuffer();
+}
+
+// Tracked changes (SFM-316): the renderer writes only the date of a change into its <ins> / <del>; each change's
+// date is replaced by a numbered mark here and put back with author and date after drawing
+function tagChanges(doc) {
+    const list = [], seen = new Set();
+    const walk = el => {
+        if (!el || typeof el !== 'object' || seen.has(el)) return;
+        seen.add(el);
+        if (Array.isArray(el)) { el.forEach(walk); return; }
+        if (el.type === 'inserted' || el.type === 'deleted') {
+            list.push({author: el.author || '', date: el.date || '', kind: el.type});
+            el.date = `#ddc${list.length - 1}`;
+        }
+        walk(el.children);
+    };
+    for (const part of doc.parts || []) for (const k of ['body', 'rootElement', 'notes', 'comments']) walk(part[k]);
+    return list;
+}
+
+const AUTHOR_COLOURS = ['#b42318', '#1d4ed8', '#047857', '#7c3aed', '#b45309', '#be185d'];
+const wordDate = d => { const t = d ? new Date(d) : null; return t && !isNaN(t) ? t.toLocaleString() : ''; };
+
+function showChanges(body, changes) {
+    const authors = [...new Set(changes.map(c => c.author))];
+    body.querySelectorAll('ins, del').forEach(el => {
+        const m = /^#ddc(\d+)$/.exec(el.getAttribute('datetime') || el.dateTime || '');
+        const c = m && changes[+m[1]];
+        if (!c) return;
+        el.removeAttribute('datetime');
+        if (c.date) el.setAttribute('datetime', c.date);
+        el.classList.add('dd-change');
+        el.style.setProperty('--dd-author', AUTHOR_COLOURS[authors.indexOf(c.author) % AUTHOR_COLOURS.length]);
+        el.title = `${c.kind === 'inserted' ? 'Inserted' : 'Deleted'}${c.author ? ` by ${c.author}` : ''}${c.date ? `, ${wordDate(c.date)}` : ''}`;
+    });
+    body.querySelectorAll('[class$="-comment-date"]').forEach(el => { if (el.textContent === 'Invalid Date') el.textContent = ''; });
+    body.querySelectorAll('[class$="-comment-ref"]').forEach(el => el.classList.add('dd-cref'));          // own names: the
+    body.querySelectorAll('[class$="-comment-popover"]').forEach(el => el.classList.add('dd-cpop'));      // library's carry the window
+}
+
 const wordViewer = {
     async open(w, rt, blob, gen) {
         const docx = await loadDocx();
         const body = document.createElement('div'), styles = document.createElement('div');
-        await docx.renderAsync(await blob.arrayBuffer(), body, styles, {
+        const options = {
             className: `ddw${w.id}`,              // the document's styles apply to this window only
             inWrapper: true, ignoreWidth: false, ignoreHeight: false, ignoreFonts: false, breakPages: true,
             ignoreLastRenderedPageBreak: true, renderHeaders: true, renderFooters: true, renderFootnotes: true,
-            renderEndnotes: true, renderComments: false, renderChanges: false, useBase64URL: true,
+            // always drawn; Final (the default) hides them with CSS, so the switch needs no new drawing (SFM-316)
+            renderEndnotes: true, renderComments: true, renderChanges: true, useBase64URL: true,
             renderAltChunks: false,               // embedded HTML would run in a frame of this page (vendor/docx/README.md)
             experimental: false, debug: false,
-        });
+        };
+        const doc = await docx.parseAsync(await movesAsChanges(blob), options);
+        const changes = tagChanges(doc);
+        for (const n of await docx.renderDocument(doc, options)) (n.nodeName === 'STYLE' ? styles : body).append(n);
         if (gen !== rt.gen) return;
         cleanWord(styles, body);
+        showChanges(body, changes);
         const box = document.createElement('div');
         box.className = 'dd-wordbox';
-        box.append(styles, body);
+        const hlName = `ddw${w.id}-comments`, hl = window.CSS && CSS.highlights ? CSS.highlights.get(hlName) || null : null;
+        const hlStyle = document.createElement('style');       // the commented text (CSS Custom Highlight)
+        hlStyle.textContent = `::highlight(${hlName}) { background-color: #fde68a; }`;
+        box.append(hlStyle, styles, body);
+        // a click on 💬 keeps the comment open (hover shows it for a moment) -- for screen sharing
+        box.addEventListener('click', e => {
+            const ref = e.target.closest('.dd-cref');
+            if (ref) ref.classList.toggle('pinned');
+        });
         rt.body.replaceChildren(box);
-        rt.word = {box, body};
+        const comments = (doc.commentsPart && doc.commentsPart.comments || []).length;
+        rt.word = {box, body, hl, hlName, changes: changes.length, comments};
         rt.wordText = null;
         const pages = body.querySelectorAll('section').length;
-        rt.info.textContent = `${pages} page${pages === 1 ? '' : 's'}`;
+        const plural = (n, s) => `${n} ${s}${n === 1 ? '' : 's'}`;
+        rt.info.textContent = [plural(pages, 'page'), changes.length && plural(changes.length, 'change'),
+                               comments && plural(comments, 'comment')].filter(Boolean).join(' · ');
+        applyMarkup(w, rt);
         body.style.zoom = 1;
         const first = body.querySelector('section');
         rt.natural = [Math.max(200, body.scrollWidth || 0, first ? first.offsetWidth + 60 : 0) || 860,
@@ -1607,13 +1722,45 @@ const wordViewer = {
         restoreScroll(w, rt);
     },
     track: (w, rt, save = true) => trackScroll(w, rt, {}, save),
-    close(rt) { rt.word = rt.wordText = null; },
+    close(rt) {
+        if (rt.word && rt.word.hl && CSS.highlights.get(rt.word.hlName) === rt.word.hl) CSS.highlights.delete(rt.word.hlName);
+        rt.word = rt.wordText = null;
+    },
 };
+
+// Markup / Final (SFM-316): Markup shows the tracked changes (inserted underlined, deleted struck through, a colour per
+// author) and the comments (💬, the commented text highlighted); Final shows the document as if every change were
+// accepted, without comments -- as before
+function applyMarkup(w, rt) {
+    const btn = rt.head.querySelector('[data-act="markup"]');
+    const has = w.kind === 'word' && !!rt.word && (rt.word.changes + rt.word.comments > 0);
+    btn.hidden = !has;
+    btn.classList.toggle('on', has && !!w.markup);
+    btn.title = w.markup ? 'Markup is on: tracked changes and comments are shown -- click for Final (as if every change were accepted, no comments)'
+                         : 'Final: as if every change were accepted, no comments -- click for Markup (tracked changes and comments)';
+    if (!rt.word) return;
+    rt.word.box.classList.toggle('markup', !!w.markup);
+    if (rt.word.hl) {
+        if (w.markup) CSS.highlights.set(rt.word.hlName, rt.word.hl);
+        else if (CSS.highlights.get(rt.word.hlName) === rt.word.hl) CSS.highlights.delete(rt.word.hlName);
+    }
+}
+
+function toggleMarkup(w) {
+    const rt = live.get(w.id);
+    w.markup = !w.markup;
+    if (rt) applyMarkup(w, rt);
+    saveSoon();
+}
+
+// Not searched: deleted text and the comments (SFM-316)
+const NOT_SEARCHED = 'del, .dd-cref, .dd-cpop';
+const searchedText = {acceptNode: n => (n.parentElement && n.parentElement.closest(NOT_SEARCHED) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT)};
 
 // The text of every paragraph (search, SFM-267): its text nodes joined, with each node's start
 function wordText(rt) {
     if (!rt.wordText) rt.wordText = [...rt.word.body.querySelectorAll('p')].map(p => {
-        const nodes = [], walk = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+        const nodes = [], walk = document.createTreeWalker(p, NodeFilter.SHOW_TEXT, searchedText);
         let text = '';
         for (let n = walk.nextNode(); n; n = walk.nextNode()) { nodes.push({n, s: text.length}); text += n.data; }
         return {text, nodes};
@@ -3286,7 +3433,9 @@ $('dd-delete-layout').addEventListener('click', () => {
     const name = $('dd-layouts').value;
     if (!name) { status('Choose the saved layout to delete first.', true); return; }
     if (!confirm(`Delete the saved layout "${name}"?`)) return;
+    const gone = desk.layouts[name];
     delete desk.layouts[name];
+    gone.forEach(e => forgetFileIfUnused(e.fileId));
     fillLayouts();
     saveSoon();
 });
@@ -3297,7 +3446,7 @@ $('dd-present').addEventListener('click', () => {
     stage.requestFullscreen().catch(e => status('Full screen refused: ' + e.message, true));
 });
 $('dd-clear').addEventListener('click', () => {
-    if (!desk.windows.length || !confirm('Close all windows and forget their files? Saved layouts stay.')) return;
+    if (!desk.windows.length || !confirm('Close all windows and forget their files? Saved layouts stay (with their documents).')) return;
     [...desk.windows].forEach(w => closeWindow(w, true));
     desk.arrange = '';
     markArrange();
@@ -3354,9 +3503,10 @@ function renderLibrary() {
             <span class="dd-kind">${KIND_LABEL[d.kind]}</span>
             <span class="dd-lib-text"><div class="dd-lib-title">${esc(d.title || d.name)}</div>
                 <div class="dd-lib-path">${esc(d.shown_path || d.path || d.name)}</div></span>
+            ${d.modified ? `<span class="dd-lib-date" title="Changed ${esc(d.modified)}">${esc(d.modified.slice(0, 10))}</span>` : ''}
             <span class="dd-lib-id">${esc(d.id)}</span>
         </label>`).join('')
-        : `<div class="dd-msg">${lib.docs && lib.docs.length ? 'No document matches.' : 'No PDF, Excel, CSV or image in the Library.'}</div>`;
+        : `<div class="dd-msg">${lib.docs && lib.docs.length ? 'No document matches.' : 'No PDF, Word, Excel, CSV or image in the Library.'}</div>`;
     lib.shown = shown.length;
     libFooter();
 }

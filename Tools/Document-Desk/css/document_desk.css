@@ -164,6 +164,16 @@ body.dd-clean > header.topbar, body.dd-clean main.dd-main > h1 { display: none; 
 /* image */
 /* Word (SFM-314): docx-preview's pages; its wrapper brings the grey background and the page shadows */
 .dd-wordbox { width: max-content; min-width: 100%; }
+/* Final (default, SFM-316): as if every change were accepted, no comments */
+.dd-wordbox:not(.markup) ins { text-decoration: none; }
+.dd-wordbox:not(.markup) del, .dd-wordbox:not(.markup) .dd-cref { display: none; }
+/* Markup: inserted underlined, deleted struck through, a colour per author; 💬 = a comment (hover / click) */
+.dd-wordbox.markup ins.dd-change { color: var(--dd-author); text-decoration: underline; text-decoration-color: var(--dd-author); }
+.dd-wordbox.markup del.dd-change { color: var(--dd-author); text-decoration: line-through; text-decoration-color: var(--dd-author); }
+.dd-wordbox.markup .dd-cref { cursor: pointer; font-size: 0.85em; padding: 0 2px; border-radius: 3px; background: #fde68a; }
+.dd-wordbox.markup .dd-cref.pinned { box-shadow: 0 0 0 2px #d97706; }
+.dd-wordbox.markup .dd-cref.pinned ~ .dd-cpop { display: block; }
+.dd-wordbox .dd-cpop { color: #111827; text-align: left; text-indent: 0; font-weight: normal; font-style: normal; white-space: normal; border-left: 3px solid #d97706; }
 .dd-wordbox > div > [class$="-wrapper"] { padding: 10px; background: #e5e7eb; }
 .dd-win[data-kind="word"] .dd-kind, .dd-tray .dd-kind[data-kind="word"] { background: #2b579a; }
 /* minimized windows (SFM-315) */
@@ -246,6 +256,7 @@ body.dd-clean > header.topbar, body.dd-clean main.dd-main > h1 { display: none; 
 /* the app's general label / input rules (block labels, full-width inputs) undone for the list rows */
 .dd-lib-item { display: flex; align-items: center; gap: 8px; margin: 0; padding: 5px 12px; cursor: pointer;
     font-size: 13px; color: var(--text); border-bottom: 1px solid #f0f1f3; }
+.dd-lib-date { flex: none; color: #6b7280; font-size: 11px; font-variant-numeric: tabular-nums; }   /* SFM-318 */
 .dd-lib-item:hover { background: #f3f6fb; }
 .dd-lib-item.on { background: #e8f0fe; }
 .dd-lib-item input { flex: none; width: auto; margin: 0; padding: 0; }

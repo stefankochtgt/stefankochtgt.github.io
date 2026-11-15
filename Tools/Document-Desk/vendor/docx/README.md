@@ -20,5 +20,12 @@ Reviewed before use (2026-11-15): pictures, fonts and embedded parts are read on
 `@import`) before it is put on the page. JSZip's `new Function` sits in its setImmediate polyfill for string callbacks,
 which it never passes.
 
+Comments and tracked changes (SFM-316, 2026-11-15): the Desk passes `renderComments: true` / `renderChanges: true`
+(both off by default in the library) and hides them with CSS in Final. Comment text is document content drawn by the
+same renderer, so it goes through `cleanWord()` like the body; authors / dates are put in as text or `title`. The
+comments use the browser's CSS Custom Highlight API (`CSS.highlights`, named `ddw<window>-comments`) -- the Desk
+removes it in Final and when the window closes. docx-preview does not read `w:moveFrom` / `w:moveTo`: the Desk turns
+them into `w:del` / `w:ins` in a copy of the file in memory (`movesAsChanges()`) before reading it.
+
 To update: download the exact versions again, check the registry integrity, read the changes for the points above,
 and update this table.
