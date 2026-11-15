@@ -6,6 +6,11 @@
 // a reload; they are never uploaded. Exception: a note or highlight put into a PDF (SFM-271) -- the app on this PC
 // writes it into the PDF (the desk's copy is sent to it and comes back; a Library document is written in its folder).
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.js';
+// the PDF's own links (SFM-319, from the library plugin like pdf.js), relative to this script as well
+import {drawLinks, resolveDest, namedPage} from './pdf_links.js';
+// how a sheet looks as in Excel: fills, borders, table styles, conditional formats (SFM-320)
+import {KEY, tint, fillOf, fontOf, borderOf, dxfOf, readTableStyles, readConditionalFormats, indexRules, cellFacts,
+        edgeCss, backgroundCss, fontCss, rotationCss} from './sheet_look.js';
 
 // pdf.js files relative to this script, so the same file works in the app (/static/js/) and in the standalone
 // Document Desk (SFM-262, js/ next to vendor/)
@@ -78,9 +83,20 @@ function storageFailed(e) {
     status('This browser does not keep the desk (storage blocked) -- it is gone after a reload.', true);
 }
 
-let saveTimer = 0;
-const saveNow = () => { clearTimeout(saveTimer); saveTimer = 0; db.putState(JSON.parse(JSON.stringify(desk))).catch(storageFailed); };
-const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 250); };
+// A change is saved 250 ms after the last one, but never later than 1 s after the first unsaved one: steady
+// scrolling / zooming / typing must not keep postponing it (a reload then would lose the desk)
+let saveTimer = 0, unsavedSince = 0;
+const saveNow = () => {
+    clearTimeout(saveTimer);
+    saveTimer = 0;
+    unsavedSince = 0;
+    db.putState(JSON.parse(JSON.stringify(desk))).catch(storageFailed);
+};
+const saveSoon = () => {
+    clearTimeout(saveTimer);
+    if (!unsavedSince) unsavedSince = Date.now();
+    saveTimer = setTimeout(saveNow, Math.max(0, Math.min(250, unsavedSince + 1000 - Date.now())));
+};
 window.addEventListener('pagehide', () => { if (saveTimer) saveNow(); });
 
 function status(msg, warn = false) {
@@ -136,7 +152,7 @@ async function addFiles(list, replaceId = null, handles = []) {
         const [f, kind] = accepted.shift();
         replaced = await replaceDocument(target, f, kind, handleOf(f));
     }
-    if (!accepted.length) { saveSoon(); return replaced; }
+    if (!accepted.length) { saveNow(); return replaced; }
     const added = [];
     for (const [f, kind] of accepted) {
         added.push({id: desk.nextId++, fileId: await keepFile(f, handleOf(f)), name: f.name, kind, x: 0, y: 0, w: 0.5, h: 0.6,
@@ -149,7 +165,7 @@ async function addFiles(list, replaceId = null, handles = []) {
     if (desk.arrange) arrange(desk.arrange, added);
     activate(added[added.length - 1]);
     refreshEmpty();
-    saveSoon();
+    saveNow();                                // new windows are kept at once (a reload right after keeps them)
     return replaced;
 }
 
@@ -194,8 +210,9 @@ function mount(w) {
     const el = document.createElement('div');
     el.className = 'dd-win';
     el.dataset.id = w.id;
-    el.innerHTML = `<div class="dd-head"><span class="dd-kind"></span><span class="dd-name"></span><span class="dd-info"></span>
+    el.innerHTML = `<div class="dd-head"><span class="dd-kind"></span><span class="dd-name"></span><button type="button" class="dd-pageno" hidden title="Go to a page: click, type the number, Enter"></button><span class="dd-info"></span>
         <span class="dd-tools">
+        <button type="button" data-act="back" hidden>←</button>
         <button type="button" data-act="lib" title="Show a document of the Library in this window instead">📚</button>
         <button type="button" data-act="app" title="Show a tool in this window instead: Text from screenshot, Manual FTA">🧰</button>
         <button type="button" data-act="save" title="Save the changes into the file (Ctrl+S)">💾</button>
@@ -226,8 +243,18 @@ function mount(w) {
     labelWindow(w);
 
     el.addEventListener('pointerdown', () => activate(w), true);
-    rt.head.addEventListener('pointerdown', e => { if (!e.target.closest('button')) startDrag(e, w, 'move'); });
-    rt.head.addEventListener('dblclick', e => { if (!e.target.closest('button')) toggleMax(w); });
+    // the page number (SFM-319) is part of the title bar to drag by: a click without moving opens its page box
+    rt.head.addEventListener('pointerdown', e => {
+        if (e.target.closest('.dd-pageno')) rt.pageDown = [e.clientX, e.clientY];
+        if (!e.target.closest('button:not(.dd-pageno), input')) startDrag(e, w, 'move');
+    });
+    rt.head.addEventListener('dblclick', e => { if (!e.target.closest('button, input')) toggleMax(w); });
+    rt.head.querySelector('.dd-pageno').addEventListener('click', e => {
+        const d = rt.pageDown;
+        rt.pageDown = null;
+        if (d && Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 4) return;      // it was a drag
+        pageJump(w);
+    });
     el.querySelectorAll('.dd-rs').forEach(h => h.addEventListener('pointerdown', e => startDrag(e, w, h.dataset.dir)));
     rt.head.querySelector('.dd-tools').addEventListener('click', e => {
         const act = e.target.closest('button')?.dataset.act;
@@ -269,6 +296,9 @@ function labelWindow(w) {
     rt.head.querySelector('[data-act="markup"]').hidden = true;     // shown by applyMarkup() for a Word file with markup
     rt.info.textContent = '';
     rt.tabs.hidden = true;
+    rt.back = [];                                  // where ← goes back to after a link (SFM-319)
+    showBack(w, rt);
+    showPageNo(rt, 0, 0);
 }
 
 function paint(w) {
@@ -303,6 +333,7 @@ function paint(w) {
     rt.el.classList.toggle('notes-open', notesOpen);
     rt.notesBox.hidden = !notesOpen;
     rt.body.classList.toggle('tool-note', rt.noteTool === 'note');
+    rt.body.classList.toggle('tool-any', !!rt.noteTool);        // the PDF's own links rest while a tool is on (SFM-319)
 }
 
 function activate(w) {
@@ -329,7 +360,7 @@ function closeWindow(w, force = false) {
     if (activeId === w.id) activeId = null;
     refreshEmpty();
     renderTray();
-    saveSoon();
+    saveNow();
     findDocsChanged();
 }
 
@@ -392,6 +423,7 @@ const ACTIONS = {
     save: w => saveFile(w),
     reveal: w => revealInExplorer(w),
     markup: w => toggleMarkup(w),
+    back: w => goBackIn(w),
     hl: w => setNoteTool(w, 'highlight'),
     note: w => setNoteTool(w, 'note'),
     link: w => setNoteTool(w, 'link'),
@@ -934,7 +966,7 @@ const pdfViewer = {
         const top = rt.body.scrollTop, n = this.pageAt(rt, top + 1), div = rt.pages[n].div;
         w.view = {page: n, frac: Math.max(0, (top - div.offsetTop) / div.offsetHeight),
                   left: rt.body.scrollWidth ? rt.body.scrollLeft / rt.body.scrollWidth : 0};
-        rt.info.textContent = `p. ${this.pageAt(rt, top + rt.body.clientHeight / 3)} / ${rt.pages.length - 1}`;
+        showPageNo(rt, this.pageAt(rt, top + rt.body.clientHeight / 3), rt.pages.length - 1);
         if (save) saveSoon();
     },
     async render(w, rt, n) {
@@ -972,6 +1004,11 @@ const pdfViewer = {
             await layer.render();
             if (gen !== rt.renderGen || !p.shown) return;
             p.layer = layer;
+            const links = document.createElement('div');   // the PDF's own links (SFM-319)
+            links.className = 'dd-links';
+            p.div.appendChild(links);
+            await drawLinks(page, viewport, links, rt.pdf, link => followPdfLink(w, rt, link));
+            if (gen !== rt.renderGen || !p.shown) return;
             p.div.dataset.drawn = '1';
             markPdfPage(w, rt, n);
         } catch (e) {
@@ -1477,7 +1514,12 @@ function writeCellXml(sh, r, c, val) {
 
 function afterEdit(w, rt, rows) {
     const sh = sheetOf(rt);
-    for (const r of new Set(rows)) {
+    if (sh.cf.length) {                       // a conditional format may look at other cells: everything drawn again
+        const st = rt.body.scrollTop, sl = rt.body.scrollLeft;
+        drawSheet(w, rt, st / w.zoom);
+        rt.body.scrollTop = st;
+        rt.body.scrollLeft = sl;
+    } else for (const r of new Set(rows)) {
         const tr = rt.body.querySelector(`tr[data-r="${r}"]`);
         if (tr) tr.outerHTML = rowHtml(sh, rt.book, r, r <= sh.freezeR ? sh.freezeR : rt.range.b);
     }
@@ -1683,6 +1725,7 @@ const wordViewer = {
         };
         const doc = await docx.parseAsync(await movesAsChanges(blob), options);
         const changes = tagChanges(doc);
+        fieldLinks(doc);                          // cross-references as links (SFM-319)
         for (const n of await docx.renderDocument(doc, options)) (n.nodeName === 'STYLE' ? styles : body).append(n);
         if (gen !== rt.gen) return;
         cleanWord(styles, body);
@@ -1697,6 +1740,8 @@ const wordViewer = {
         box.addEventListener('click', e => {
             const ref = e.target.closest('.dd-cref');
             if (ref) ref.classList.toggle('pinned');
+            const a = e.target.closest('a[href^="#"]');        // contents, cross-references (SFM-319)
+            if (a) { e.preventDefault(); followWordLink(w, rt, decodeURIComponent(a.getAttribute('href').slice(1))); }
         });
         rt.body.replaceChildren(box);
         const comments = (doc.commentsPart && doc.commentsPart.comments || []).length;
@@ -1704,8 +1749,12 @@ const wordViewer = {
         rt.wordText = null;
         const pages = body.querySelectorAll('section').length;
         const plural = (n, s) => `${n} ${s}${n === 1 ? '' : 's'}`;
-        rt.info.textContent = [plural(pages, 'page'), changes.length && plural(changes.length, 'change'),
+        rt.info.textContent = [changes.length && plural(changes.length, 'change'),
                                comments && plural(comments, 'comment')].filter(Boolean).join(' · ');
+        rt.word.pages = pages;
+        body.querySelectorAll('a[href^="#"]').forEach(a => {
+            a.title = a.title || 'Go to this place of the document (← returns)';
+        });
         applyMarkup(w, rt);
         body.style.zoom = 1;
         const first = body.querySelector('section');
@@ -1713,6 +1762,7 @@ const wordViewer = {
                       first ? first.offsetHeight + 60 : 1150];
         if (!w.zoom) w.zoom = Math.min(1, this.fit(w, rt));
         this.rezoom(w, rt);
+        this.track(w, rt, false);
     },
     ready: rt => !!rt.word,
     fit: (w, rt) => clampZoom((rt.body.clientWidth - 20) / rt.natural[0]),
@@ -1721,12 +1771,196 @@ const wordViewer = {
         rt.word.body.style.zoom = w.zoom;
         restoreScroll(w, rt);
     },
-    track: (w, rt, save = true) => trackScroll(w, rt, {}, save),
+    track(w, rt, save = true) {
+        trackScroll(w, rt, {}, save);
+        const secs = rt.word.body.querySelectorAll('section'), mark = rt.body.getBoundingClientRect().top + rt.body.clientHeight / 3;
+        let n = 1;
+        for (let i = 0; i < secs.length; i++) if (secs[i].getBoundingClientRect().top <= mark) n = i + 1; else break;
+        showPageNo(rt, n, secs.length);
+    },
     close(rt) {
         if (rt.word && rt.word.hl && CSS.highlights.get(rt.word.hlName) === rt.word.hl) CSS.highlights.delete(rt.word.hlName);
         rt.word = rt.wordText = null;
     },
 };
+
+// ---- pages and links (SFM-319): the page number in the title bar is a button -- click, type a page, Enter. A link of
+// the document itself (PDF: contents, cross-references, footnote marks; Word: contents, cross-references, links to
+// bookmarks) goes to its place in the same window; ← in the title bar (or Backspace) goes back to where it was.
+
+function showPageNo(rt, n, total) {
+    const b = rt.head.querySelector('.dd-pageno');
+    if (!b) return;
+    b.hidden = !total || !!rt.head.querySelector('.dd-pagebox');
+    b.textContent = total ? `p. ${n} / ${total}` : '';
+    b.dataset.page = n;
+    b.dataset.total = total;
+}
+
+function pageJump(w) {
+    const rt = live.get(w.id), b = rt && rt.head.querySelector('.dd-pageno');
+    if (!b || b.hidden || rt.head.querySelector('.dd-pagebox')) return;
+    activate(w);
+    const total = +b.dataset.total;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = 1;
+    input.max = total;
+    input.value = b.dataset.page;
+    input.className = 'dd-pagebox';
+    input.title = `Page 1 to ${total}: Enter goes there, Esc cancels`;
+    b.hidden = true;
+    b.after(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const end = go => {
+        if (done) return;
+        done = true;
+        const n = Math.round(+input.value);
+        input.remove();
+        b.hidden = false;
+        if (go && n >= 1) { remember(w, rt); goToPage(w, rt, Math.min(n, total)); }
+    };
+    input.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); end(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); end(false); }
+    });
+    input.addEventListener('blur', () => end(false));
+    input.addEventListener('pointerdown', e => e.stopPropagation());
+}
+
+// Page n (1-based) at the top of the window, `y` px further down
+function goToPage(w, rt, n, y = 0) {
+    if (w.kind === 'pdf' && pdfViewer.ready(rt)) {
+        const p = rt.pages[Math.max(1, Math.min(n, rt.pages.length - 1))];
+        rt.body.scrollTop = p.div.offsetTop + y - 6;
+    } else if (w.kind === 'word' && rt.word) {
+        const secs = rt.word.body.querySelectorAll('section'), sec = secs[Math.max(0, Math.min(n, secs.length) - 1)];
+        if (sec) scrollToEl(rt, sec, 6);
+    } else return;
+    VIEWERS[w.kind].track(w, rt);
+}
+
+function scrollToEl(rt, el, margin) {
+    rt.body.scrollTop += el.getBoundingClientRect().top - rt.body.getBoundingClientRect().top - margin;
+}
+
+// The place before a jump, for ←
+function remember(w, rt) {
+    rt.back = rt.back || [];
+    const b = rt.head.querySelector('.dd-pageno');
+    rt.back.push({top: rt.body.scrollTop, left: rt.body.scrollLeft, page: +(b && b.dataset.page) || 0});
+    if (rt.back.length > 50) rt.back.shift();
+    showBack(w, rt);
+}
+
+function showBack(w, rt) {
+    const btn = rt.head.querySelector('[data-act="back"]'), last = rt.back && rt.back[rt.back.length - 1];
+    btn.hidden = !last;
+    if (last) {
+        btn.textContent = last.page ? `← p. ${last.page}` : '←';
+        btn.title = `Back to where you were before the link / page jump${last.page ? ' (p. ' + last.page + ')' : ''} -- Backspace`;
+    }
+}
+
+function goBackIn(w) {
+    const rt = live.get(w.id), last = rt && rt.back && rt.back.pop();
+    if (!last) return;
+    rt.body.scrollTop = last.top;
+    rt.body.scrollLeft = last.left;
+    showBack(w, rt);
+    if (VIEWERS[w.kind].ready(rt)) VIEWERS[w.kind].track(w, rt);
+}
+
+async function followPdfLink(w, rt, link) {
+    const pdf = rt.pdf;
+    if (!pdf || !rt.pages) return;
+    const target = link.named ? {page: namedPage(link.named, pdfViewer.pageAt(rt, rt.body.scrollTop + 1), pdf.numPages), x: null, y: null}
+                              : await resolveDest(pdf, link.dest);
+    if (pdf !== rt.pdf) return;
+    if (!target) { status('The link\'s target is not in this PDF.', true); return; }
+    let y = 0;
+    if (target.y != null) {
+        const vp = (await pdf.getPage(target.page)).getViewport({scale: w.zoom * PT});
+        y = Math.max(0, vp.convertToViewportPoint(target.x || 0, target.y)[1] - 6);
+    }
+    if (pdf !== rt.pdf) return;
+    remember(w, rt);
+    goToPage(w, rt, target.page, y);
+}
+
+function followWordLink(w, rt, name) {
+    const body = rt.word && rt.word.body;
+    if (!body || !name) return;
+    let el = null;
+    try { el = body.querySelector('#' + CSS.escape(name)); } catch { el = null; }
+    if (!el) { status(`The link's target ("${name}") is not in this document.`, true); return; }
+    remember(w, rt);
+    // a bookmark is an empty <span>: its paragraph is what is seen
+    scrollToEl(rt, el.closest('p, td, h1, h2, h3, h4, h5, h6') || el, 12);
+    VIEWERS[w.kind].track(w, rt);
+}
+
+// Word cross-references (REF / PAGEREF / NOTEREF fields: "see section 4.2", "on page 7") become links to their
+// bookmark: the field's shown result (the runs between its separate and end marks) is put into a hyperlink element of
+// the parsed document, so docx-preview draws it as <a href="#bookmark"> like the links of a table of contents. A field
+// inside a hyperlink (the page numbers of a table of contents) is already a link and stays as it is.
+function fieldLinks(doc) {
+    const isLink = el => !!el && el.type === 'hyperlink';
+    const visit = parent => {
+        const list = parent && parent.children;
+        if (!Array.isArray(list)) return;
+        const out = [], stack = [];               // the fields being read: {instr, sep, anchor}
+        let group = null;                         // the hyperlink taking the runs of a field's shown result
+        const flush = () => { if (group) { out.push(group); group = null; } };
+        for (const el of list) {
+            const marks = el && el.type === 'run' && Array.isArray(el.children)
+                ? el.children.filter(c => c && (c.type === 'complexField' || c.type === 'instruction')) : [];
+            if (marks.length) {
+                flush();
+                out.push(el);
+                for (const m of marks) {
+                    if (m.type === 'instruction') { if (stack.length) stack[stack.length - 1].instr += m.text || ''; }
+                    else if (m.charType === 'begin') stack.push({instr: '', sep: false, anchor: null});
+                    else if (m.charType === 'separate' && stack.length) {
+                        const f = stack[stack.length - 1];
+                        f.sep = true;
+                        const ref = /^\s*(?:REF|PAGEREF|NOTEREF)\s+("?)([^\s"\\]+)\1/i.exec(f.instr);
+                        if (ref && !isLink(parent) && stack.length === 1) f.anchor = ref[2];
+                    } else if (m.charType === 'end') stack.pop();
+                }
+                continue;
+            }
+            const f = stack[stack.length - 1];
+            if (f && f.sep && f.anchor && el && el.type === 'run') {
+                if (!group) group = {type: 'hyperlink', parent, children: [], anchor: f.anchor};
+                group.children.push(el);
+                el.parent = group;
+                continue;
+            }
+            flush();
+            out.push(el);
+            if (el && Array.isArray(el.children) && !isLink(el)) visit(el);
+        }
+        flush();
+        parent.children = out;
+    };
+    const roots = new Set();
+    for (const part of Object.values(doc.parts || {}).concat(doc.documentPart ? [doc.documentPart] : []))
+        for (const key of ['body', 'rootElement']) if (part && part[key]) roots.add(part[key]);
+    roots.forEach(visit);
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Backspace' || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    const w = activeWindow(), rt = w && live.get(w.id);
+    if (!rt || !rt.back || !rt.back.length || w.kind === 'sheet' || w.kind === 'csv') return;
+    e.preventDefault();
+    goBackIn(w);
+});
 
 // Markup / Final (SFM-316): Markup shows the tracked changes (inserted underlined, deleted struck through, a colour per
 // author) and the comments (💬, the commented text highlighted); Final shows the document as if every change were
@@ -1976,24 +2210,6 @@ function readTheme(doc) {
     });
 }
 
-function tint(hex, t) {
-    let [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
-    const max = Math.max(r, g, b), min = Math.min(r, g, b);
-    let h = 0, s = 0, l = (max + min) / 2;
-    if (max !== min) {
-        const d = max - min;
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-        h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
-        h /= 6;
-    }
-    l = t < 0 ? l * (1 + t) : l * (1 - t) + t;
-    const f = n => {
-        const k = (n + h * 12) % 12, a = s * Math.min(l, 1 - l);
-        return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, '0');
-    };
-    return f(0) + f(8) + f(4);
-}
-
 function colorOf(el, theme) {
     if (!el || el.getAttribute('auto') === '1') return null;
     let hex = null;
@@ -2005,39 +2221,25 @@ function colorOf(el, theme) {
     return '#' + (t ? tint(hex, t) : hex);
 }
 
-const BORDER_CSS = {thin: '1px double', hair: '1px dotted', dotted: '1px dotted', dashed: '1px dashed',
-    dashDot: '1px dashed', dashDotDot: '1px dashed', medium: '2px solid', mediumDashed: '2px dashed',
-    mediumDashDot: '2px dashed', mediumDashDotDot: '2px dashed', slantDashDot: '2px dashed', thick: '3px solid',
-    double: '3px double'};
-
 function readStyles(doc, theme) {
-    const st = {fmts: {}, fonts: [], fills: [], borders: [], xfs: []};
+    const st = {fmts: {}, fonts: [], fills: [], borders: [], xfs: [], dxfs: [], tableStyles: {}};
     if (!doc) return st;
+    const color = el => colorOf(el, theme);
     for (const f of all(doc, 'numFmt')) st.fmts[f.getAttribute('numFmtId')] = f.getAttribute('formatCode');
-    const on = (f, n) => { const e = kid(f, n); return !!e && !/^(0|false|none)$/.test(e.getAttribute('val') || ''); };
-    for (const f of kids(all(doc, 'fonts')[0] || doc, 'font')) {
-        st.fonts.push({b: on(f, 'b'), i: on(f, 'i'), u: on(f, 'u'), strike: on(f, 'strike'),
-                       size: parseFloat(kid(f, 'sz')?.getAttribute('val') || '0'),
-                       name: kid(f, 'name')?.getAttribute('val') || '', color: colorOf(kid(f, 'color'), theme)});
-    }
-    for (const f of kids(all(doc, 'fills')[0] || doc, 'fill')) {
-        const p = kid(f, 'patternFill');
-        st.fills.push(p && p.getAttribute('patternType') === 'solid' ? colorOf(kid(p, 'fgColor'), theme) : null);
-    }
-    for (const b of kids(all(doc, 'borders')[0] || doc, 'border')) {
-        const side = name => {
-            const e = kid(b, name), style = e && e.getAttribute('style');
-            return style && style !== 'none' ? `${BORDER_CSS[style] || '1px solid'} ${colorOf(kid(e, 'color'), theme) || '#000'}` : null;
-        };
-        st.borders.push({left: side('left') || side('start'), right: side('right') || side('end'), top: side('top'), bottom: side('bottom')});
-    }
+    for (const f of kids(all(doc, 'fonts')[0] || doc, 'font')) st.fonts.push(fontOf(f, color));
+    for (const f of kids(all(doc, 'fills')[0] || doc, 'fill')) st.fills.push(fillOf(f, color));
+    for (const b of kids(all(doc, 'borders')[0] || doc, 'border')) st.borders.push(borderOf(b, color));
     for (const x of kids(all(doc, 'cellXfs')[0] || doc, 'xf')) {
         const a = kid(x, 'alignment');
         st.xfs.push({fmt: x.getAttribute('numFmtId') || '0', font: +(x.getAttribute('fontId') || 0),
                      fill: +(x.getAttribute('fillId') || 0), border: +(x.getAttribute('borderId') || 0),
                      h: a?.getAttribute('horizontal') || '', v: a?.getAttribute('vertical') || '',
-                     wrap: /^(1|true)$/.test(a?.getAttribute('wrapText') || ''), indent: +(a?.getAttribute('indent') || 0)});
+                     wrap: /^(1|true)$/.test(a?.getAttribute('wrapText') || ''), indent: +(a?.getAttribute('indent') || 0),
+                     rot: +(a?.getAttribute('textRotation') || 0)});
     }
+    // conditional formats and table styles (SFM-320)
+    for (const d of kids(all(doc, 'dxfs')[0] || doc, 'dxf')) st.dxfs.push(dxfOf(d, color));
+    st.tableStyles = readTableStyles(doc, st.dxfs);
     return st;
 }
 
@@ -2053,7 +2255,6 @@ function colName(c) {
     for (; c > 0; c = Math.floor((c - 1) / 26)) s = String.fromCharCode(65 + (c - 1) % 26) + s;
     return s;
 }
-const KEY = 20000;                     // cell key = row * KEY + column (Excel has 16384 columns)
 
 async function readXlsx(buffer) {
     const read = await unzip(buffer);
@@ -2075,12 +2276,16 @@ async function readXlsx(buffer) {
     const part = (type, fallback) => rels.find(r => r.type.endsWith('/' + type))?.target || fallback;
     const theme = readTheme(await parse(part('theme', 'xl/theme/theme1.xml')));
     const book = {...readStyles(await parse(part('styles', 'xl/styles.xml')), theme), sheets: [], css: [],
-                  read, parse, wbPath, wbDoc: wb, rels};
+                  read, parse, wbPath, wbDoc: wb, rels, theme};
+    const color = el => colorOf(el, theme);
     const pr = all(wb, 'workbookPr')[0];
     book.date1904 = /^(1|true)$/.test(pr?.getAttribute('date1904') || '');
     const ss = await parse(part('sharedStrings', 'xl/sharedStrings.xml'));
-    const strings = ss ? all(ss, 'si').map(si => all(si, 't').filter(t => t.parentNode.localName !== 'rPh')
-                                                      .map(t => t.textContent).join('')) : [];
+    const strings = [], rich = [];         // the text; its parts with their own font (SFM-320), else null
+    for (const si of ss ? all(ss, 'si') : []) {
+        strings.push(all(si, 't').filter(t => t.parentNode.localName !== 'rPh').map(t => t.textContent).join(''));
+        rich.push(richRuns(si, color));
+    }
     for (const s of all(wb, 'sheet')) {
         if (/hidden/i.test(s.getAttribute('state') || '')) continue;
         const rid = Array.from(s.attributes).find(a => a.localName === 'id' && a.prefix)?.value;
@@ -2088,14 +2293,33 @@ async function readXlsx(buffer) {
         if (!rel || !/\/worksheet$/.test(rel.type)) continue;          // chart sheets, dialog sheets: not shown
         const doc = await parse(rel.target);
         if (!doc) continue;
-        const sh = readSheet(doc, s.getAttribute('name') || 'Sheet', strings, book);
+        const sh = readSheet(doc, s.getAttribute('name') || 'Sheet', strings, book, rich, color);
         sh.path = rel.target;
-        for (const tr of (await relsOf(rel.target)).filter(r => r.type.endsWith('/table'))) {
+        const sheetRels = await relsOf(rel.target);
+        for (const tr of sheetRels.filter(r => r.type.endsWith('/table'))) {
             const tdoc = await parse(tr.target), el = tdoc && tdoc.documentElement;
             const [a, b] = (el?.getAttribute('ref') || '').split(':').map(parseRef);
             if (!a || !b) continue;
+            const si = all(tdoc, 'tableStyleInfo')[0], on = n => /^(1|true)$/.test(si?.getAttribute(n) || '');
             sh.tables.push({path: tr.target, doc: tdoc, r1: a[0], c1: a[1], r2: b[0], c2: b[1],
-                            header: el.getAttribute('headerRowCount') !== '0', cols: all(tdoc, 'tableColumn')});
+                            header: el.getAttribute('headerRowCount') !== '0', cols: all(tdoc, 'tableColumn'),
+                            totals: +(el.getAttribute('totalsRowCount') || 0),
+                            style: si ? {name: si.getAttribute('name') || '', rowStripes: on('showRowStripes'),
+                                         colStripes: on('showColumnStripes'), firstCol: on('showFirstColumn'),
+                                         lastCol: on('showLastColumn')} : null});
+        }
+        // comments (SFM-320): the red mark in the cell's corner, the text when pointing at it
+        for (const cr of sheetRels.filter(r => r.type.endsWith('/comments'))) {
+            const cdoc = await parse(cr.target);
+            if (!cdoc) continue;
+            const authors = all(cdoc, 'author').map(a => a.textContent);
+            for (const cm of all(cdoc, 'comment')) {
+                const ref = parseRef(cm.getAttribute('ref'));
+                if (!ref) continue;
+                const t = all(kid(cm, 'text') || cm, 't').filter(x => x.parentNode.localName !== 'rPh').map(x => x.textContent).join('');
+                const who = authors[+(cm.getAttribute('authorId') || 0)] || '';
+                sh.comments.set(ref[0] * KEY + ref[1], (who && !t.startsWith(who) ? who + ': ' : '') + t.trim());
+            }
         }
         book.sheets.push(sh);
     }
@@ -2104,10 +2328,18 @@ async function readXlsx(buffer) {
 
 function blankSheet(name) {
     return {name, cells: new Map(), rows: {}, colW: {}, merges: [], maxR: 0, maxC: 0, freezeR: 0, freezeC: 0,
-            grid: true, defColW: 64, defRowH: 20, note: '', width: 0, tables: [], rowEls: new Map(), cellEls: new Map()};
+            grid: true, defColW: 64, defRowH: 20, note: '', width: 0, tables: [], rowEls: new Map(), cellEls: new Map(),
+            cf: [], comments: new Map(), rowStyle: {}, colStyle: {}};
 }
 
-function readSheet(doc, name, strings, book) {
+// A shared string's parts with their own font (rich text), or null when it is one text in the cell's font
+function richRuns(si, color) {
+    const runs = kids(si, 'r');
+    if (!runs.length || !runs.some(r => kid(r, 'rPr'))) return null;
+    return runs.map(r => ({t: kids(r, 't').map(t => t.textContent).join(''), font: kid(r, 'rPr') ? fontOf(kid(r, 'rPr'), color) : null}));
+}
+
+function readSheet(doc, name, strings, book, rich = [], color = () => null) {
     const sh = blankSheet(name);
     sh.doc = doc;
     const fp = all(doc, 'sheetFormatPr')[0];
@@ -2130,6 +2362,7 @@ function readSheet(doc, name, strings, book) {
         const px = /^(1|true)$/.test(col.getAttribute('hidden') || '') ? 0
             : col.getAttribute('width') != null ? Math.round(+col.getAttribute('width') * 7) : null;
         if (px != null) for (let c = min; c <= max; c++) sh.colW[c] = px;
+        if (col.getAttribute('style')) for (let c = min; c <= max; c++) sh.colStyle[c] = +col.getAttribute('style');
     }
     const visible = s => {                      // an empty cell still counts when it has a fill or a border
         const xf = book.xfs[s];
@@ -2143,6 +2376,7 @@ function readSheet(doc, name, strings, book) {
         sh.rowEls.set(r, row);
         const hidden = /^(1|true)$/.test(row.getAttribute('hidden') || '');
         if (hidden || row.getAttribute('ht')) sh.rows[r] = {hidden, h: Math.round(+(row.getAttribute('ht') || 15) * PT)};
+        if (/^(1|true)$/.test(row.getAttribute('customFormat') || '') && row.getAttribute('s')) sh.rowStyle[r] = +row.getAttribute('s');
         let c = 0;
         for (const cell of kids(row, 'c')) {
             const ref = parseRef(cell.getAttribute('r'));
@@ -2152,14 +2386,15 @@ function readSheet(doc, name, strings, book) {
             const t = cell.getAttribute('t') || 'n', s = +(cell.getAttribute('s') || 0);
             const raw = kid(cell, 'v')?.textContent, f = kid(cell, 'f')?.textContent || null;
             let v = null;
-            if (t === 's') v = raw != null ? strings[+raw] ?? '' : null;
-            else if (t === 'inlineStr') v = all(cell, 't').map(x => x.textContent).join('');
+            let runs = null;
+            if (t === 's') { v = raw != null ? strings[+raw] ?? '' : null; runs = raw != null ? rich[+raw] || null : null; }
+            else if (t === 'inlineStr') { v = all(cell, 't').map(x => x.textContent).join(''); runs = kid(cell, 'is') ? richRuns(kid(cell, 'is'), color) : null; }
             else if (t === 'b') v = raw === '1' || raw === 'true';
             else if (t === 'n') v = raw != null && raw !== '' ? +raw : null;
             else v = raw ?? null;               // str, e, d
             const empty = v === null || v === '';
             if (empty && !f && !visible(s)) continue;
-            sh.cells.set(r * KEY + c, {v: empty ? null : v, t, s, f});
+            sh.cells.set(r * KEY + c, runs && !empty ? {v, t, s, f, rich: runs} : {v: empty ? null : v, t, s, f});
             sh.maxR = Math.max(sh.maxR, r);
             sh.maxC = Math.max(sh.maxC, c);
         }
@@ -2169,6 +2404,7 @@ function readSheet(doc, name, strings, book) {
         if (!a || !b) continue;
         sh.merges.push({r1: Math.min(a[0], b[0]), c1: Math.min(a[1], b[1]), r2: Math.max(a[0], b[0]), c2: Math.max(a[1], b[1])});
     }
+    sh.cf = readConditionalFormats(doc, book, color);       // SFM-320
     return sh;
 }
 
@@ -2349,6 +2585,7 @@ function formatNumber(v, code, date1904 = false) {
     else if (v === 0 && sections.length > 2 && sections[2] !== '') sec = sections[2];
     let color;
     sec = sec.replace(/\[(red|blue|green|black|white|yellow|magenta|cyan)\]/gi, (m, c) => { color = c.toLowerCase(); return ''; })
+             .replace(/\[color\s*(\d+)\]/gi, (m, n) => { color = INDEXED[+n + 7] ? '#' + INDEXED[+n + 7] : color; return ''; })
              .replace(/\[\$([^\]-]*)(-[0-9a-f]+)?\]/gi, '$1')
              .replace(/\[(?!h+\]|m+\]|s+\])[^\]]*\]/gi, '');
     if (/^general$/i.test(sec.trim())) return {text: general(val), color};
@@ -2368,14 +2605,12 @@ function cellStyle(book, s) {
     if (font.size && font.size !== base.size) css.push(`font-size:${(font.size * PT).toFixed(2)}px`);
     if (font.name && font.name !== base.name) css.push(`font-family:"${font.name.replace(/"/g, '')}",Calibri,Arial,sans-serif`);
     if (font.color && font.color !== base.color) css.push(`color:${font.color}`);
-    const fill = book.fills[xf.fill];
-    if (fill) css.push(`background:${fill}`);
-    const b = book.borders[xf.border];
-    if (b) for (const side of ['left', 'right', 'top', 'bottom']) if (b[side]) css.push(`border-${side}:${b[side]}`);
+    if (font.va === 'superscript' || font.va === 'subscript') css.push(`vertical-align:${font.va === 'superscript' ? 'super' : 'sub'}`);
     if (xf.v === 'top') css.push('vertical-align:top');
     else if (xf.v === 'center') css.push('vertical-align:middle');
     if (xf.indent) css.push(`padding-left:${2 + xf.indent * 9}px`);
-    return (book.css[s] = {css: css.join(';'), h: xf.h || '', wrap: !!xf.wrap,
+    return (book.css[s] = {css: css.join(';'), h: xf.h || '', wrap: !!xf.wrap, rot: xf.rot || 0,
+                           explicitColor: !!(font.color && font.color !== base.color),
                            fmt: book.fmts[xf.fmt] ?? BUILTIN_FMT[xf.fmt] ?? 'General'});
 }
 
@@ -2421,6 +2656,7 @@ function sheetLayout(sh) {
     for (let r = 1; r <= lastR + 1; r++) { yOf[r] = y; if (r > sh.freezeR && r <= lastR) y += rowH(r); }
     sh.width = width;
     sh.stale = false;
+    indexRules(sh, lastR);                    // conditional formats by row; their statistics are read again (SFM-320)
     return (sh.layout = {lastR, lastC, colW, rowH, spans, covered, leftOf, tops, headW, width, yOf, bodyH: y,
                          cols: [...Array(lastC).keys()].filter(i => colW(i + 1)).length});
 }
@@ -2471,32 +2707,54 @@ function sheetHtml(sh, book, a, b) {
     }
     out.push('</tr></thead><tbody>');
     const pad = h => h > 0 ? `<tr class="dd-pad" style="height:${h}px"><td colspan="${L.cols + 1}"></td></tr>` : '';
-    for (let r = 1; r <= Math.min(sh.freezeR, L.lastR); r++) out.push(rowHtml(sh, book, r, sh.freezeR));
+    const memo = new Map();
+    for (let r = 1; r <= Math.min(sh.freezeR, L.lastR); r++) out.push(rowHtml(sh, book, r, sh.freezeR, memo));
     out.push(pad(L.yOf[Math.min(a, L.lastR + 1)]));
-    for (let r = a; r <= b; r++) out.push(rowHtml(sh, book, r, b));
+    for (let r = a; r <= b; r++) out.push(rowHtml(sh, book, r, b, memo));
     out.push(pad(L.bodyH - L.yOf[Math.min(b + 1, L.lastR + 1)]));
     out.push('</tbody></table>');
     return out.join('');
 }
 
-function rowHtml(sh, book, r, upto) {
+// One row of the sheet. Its cells' look (SFM-320): the table style below the cell's own format, the number format's
+// colour, then the conditional formats; fill, data bar and diagonal lines as the background; each edge decided
+// with the neighbour cell (sheet_look.js :: edgeCss), so both cells draw the same line. `memo` keeps what one
+// drawing has worked out about a cell (its neighbours ask again).
+function rowHtml(sh, book, r, upto, memo = new Map()) {
     const L = sh.layout, h = L.rowH(r);
     if (!h) return '';
     const top = L.tops.get(r), frozenRow = top !== undefined;
     const hasValue = k => { const cell = sh.cells.get(k); return !!cell && (cell.v !== null || !!cell.f); };
+    const styleOf = s => cellStyle(book, s);
+    const facts = (rr, cc) => cellFacts(book, sh, rr, cc, memo, styleOf);
+    const nextC = (c, d) => { for (c += d; c >= 1 && c <= L.lastC + 1; c += d) if (L.colW(c)) return c; return null; };
+    const nextR = (rr, d) => { for (rr += d; rr >= 1 && rr <= L.lastR + 1; rr += d) if (L.rowH(rr)) return rr; return null; };
+    const near = (rr, cc) => (rr == null || cc == null ? null : facts(rr, cc));
     const out = [`<tr data-r="${r}" style="height:${h}px"><th${frozenRow ? ` style="top:${top}px;z-index:4"` : ''}>${r}</th>`];
     for (let c = 1; c <= L.lastC; c++) {
         const w = L.colW(c), k = r * KEY + c;
         if (!w || L.covered.has(k)) continue;
         const cell = sh.cells.get(k), m = L.spans.get(k);
-        const st = cell ? cellStyle(book, cell.s) : {css: '', h: '', wrap: false};
+        const F = facts(r, c), st = F.style;
         let [text, align, color] = cell ? cellText(cell, st, book) : ['', 'left'];
-        const css = [st.css], cls = [];
+        const css = [], cls = [];
+        if (F.tl) { const tf = {...F.tl.font}; if (st.explicitColor) delete tf.color; css.push(fontCss(tf)); }
+        css.push(st.css);
         if (cell && cell.v === null && cell.f) { text = '=' + cell.f; align = 'left'; cls.push('fx'); }   // calculated by Excel
         let attrs = ` data-k="${k}"`;
         const hAlign = st.h && st.h !== 'general' ? ({centerContinuous: 'center', fill: 'left', distributed: 'center'}[st.h] || st.h) : align;
         if (hAlign !== 'left') css.push(`text-align:${hAlign}`);
         if (color) css.push(`color:${color}`);
+        if (F.cf) css.push(fontCss(F.cf.font));
+        css.push(backgroundCss(F));
+        // the edges: a merged cell's right / bottom edge are those of its last column / row
+        const r2 = m ? Math.min(m.r2, L.lastR) : r, c2 = m ? Math.min(m.c2, L.lastC) : c;
+        const edges = {top: [F, near(nextR(r, -1), c)], left: [F, near(r, nextC(c, -1))],
+                       right: [m ? facts(r, c2) : F, near(r, nextC(c2, 1))], bottom: [m ? facts(r2, c) : F, near(nextR(r2, 1), c)]};
+        for (const s of ['top', 'right', 'bottom', 'left']) {
+            const e = edgeCss(edges[s][0], edges[s][1], s);
+            if (e) css.push(`border-${s}:${e}`);
+        }
         if (m) {
             let rows = 0, cols = 0;
             for (let rr = m.r1; rr <= Math.min(m.r2, upto); rr++) if (L.rowH(rr)) rows++;
@@ -2510,8 +2768,28 @@ function rowHtml(sh, book, r, upto) {
             if (c <= sh.freezeC) css.push(`left:${L.leftOf[c]}px`);
             if (frozenRow && c <= sh.freezeC) css.push('z-index:2');
         }
-        let inner = esc(text);
-        if (text && st.wrap) {
+        const comment = sh.comments.get(k);
+        if (comment) { cls.push('cm'); attrs += ` title="${esc(comment)}"`; }
+        const cf = F.cf;
+        if (cf && ((cf.bar && cf.bar.hide) || (cf.icon && cf.icon.hide))) text = '';
+        // the text: its parts in their own font (rich text), as written
+        let inner = cell && cell.rich && typeof cell.v === 'string' && text === cell.v
+            ? cell.rich.map(run => {
+                const f = run.font, rc = [];
+                if (f) {
+                    rc.push(fontCss({b: f.b, i: f.i, u: f.u, strike: f.strike, color: f.color || undefined}));
+                    if (f.size) rc.push(`font-size:${(f.size * PT).toFixed(2)}px`);
+                    if (f.name) rc.push(`font-family:"${f.name.replace(/"/g, '')}",Calibri,Arial,sans-serif`);
+                    if (f.va === 'superscript' || f.va === 'subscript') rc.push(`vertical-align:${f.va === 'superscript' ? 'super' : 'sub'};font-size:smaller`);
+                }
+                const style = rc.filter(Boolean).join(';');
+                return style ? `<span style="${style}">${esc(run.t)}</span>` : esc(run.t);
+            }).join('')
+            : esc(text);
+        if (cf && cf.icon) inner = `<span class="dd-icon" style="color:${cf.icon.color}">${esc(cf.icon.glyph)}</span>${inner}`;
+        if (text && st.rot) {
+            inner = `<span class="dd-rot" style="${rotationCss(st.rot)}">${inner}</span>`;
+        } else if (text && st.wrap) {
             cls.push('wrap');
         } else if (text && !m && hAlign === 'left' && !(c <= sh.freezeC)) {
             // text runs on over the empty cells to its right, as in Excel

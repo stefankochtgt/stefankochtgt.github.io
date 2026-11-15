@@ -188,8 +188,9 @@ body.dd-clean > header.topbar, body.dd-clean main.dd-main > h1 { display: none; 
 .dd-imgbox { padding: 10px; width: max-content; min-width: 100%; box-sizing: border-box; text-align: center; }
 .dd-imgbox img { display: inline-block; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); }
 
-/* sheet: an Excel-like grid. Explicit thin cell borders are written as 1px "double" (drawn solid at 1px) so they win
-   over the grid lines of the neighbour cells in the collapsed border model. */
+/* sheet: an Excel-like grid. The grid line is every cell's default border; each edge that is not a grid line (a
+   border, a table style line, a filled cell) is written into both cells it separates the same way (sheet_look.js ::
+   edgeCss), so the collapsed border model never has to choose between them (SFM-320). */
 .dd-sheet { border-collapse: collapse; table-layout: fixed; background: #fff; color: #000;
     font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; font-size: 14.67px; }
 .dd-sheet td { box-sizing: border-box; border: 1px solid #e1e1e1; padding: 0 2px; white-space: nowrap; overflow: hidden;
@@ -280,3 +281,22 @@ body.dd-clean > header.topbar, body.dd-clean main.dd-main > h1 { display: none; 
 
 /* rows not drawn (only the rows near the view are) */
 .dd-sheet tr.dd-pad td { border: 0; padding: 0; background: transparent; }
+
+/* pages and links (SFM-319): the page number in the title bar is a button; the PDF's own links over the text */
+.dd-info:empty { display: none; }
+.dd-pageno { flex: none; border: 0; background: transparent; color: var(--muted); padding: 0 2px; min-width: 0; font: inherit; cursor: pointer; border-radius: 3px; }
+.dd-pageno[hidden] { display: none; }
+.dd-pageno:hover { background: #e2e8f0; color: #0f172a; }
+.dd-pagebox { flex: none; width: 64px; font: inherit; padding: 0 3px; height: 20px; }
+.dd-links { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.dd-links .pdf-link { position: absolute; pointer-events: auto; cursor: pointer; border-radius: 2px; }
+.dd-links .pdf-link:hover { background: rgb(59 130 246 / .14); box-shadow: 0 0 0 1px rgb(59 130 246 / .55); }
+.dd-body.tool-any .dd-links .pdf-link { pointer-events: none; }
+.dd-wordbox a[href^="#"] { cursor: pointer; }
+/* sheet look (SFM-320): comment mark, icon sets, rotated text */
+.dd-sheet td.cm { position: relative; }
+.dd-sheet td.cm::after { content: ""; position: absolute; top: 0; right: 0; border-style: solid; border-width: 0 6px 6px 0;
+    border-color: transparent #e00 transparent transparent; }
+.dd-sheet td.fz.cm { position: sticky; }
+.dd-sheet .dd-icon { float: left; margin-right: 3px; font-size: 0.95em; line-height: inherit; }
+.dd-sheet .dd-rot { white-space: nowrap; }
