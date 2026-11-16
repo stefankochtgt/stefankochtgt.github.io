@@ -8,6 +8,8 @@
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.js';
 // the PDF's own links (SFM-319, from the library plugin like pdf.js), relative to this script as well
 import {drawLinks, resolveDest, namedPage} from './pdf_links.js';
+// password-protected PDFs (SFM-321): the dialog, the password only in this tab's memory
+import {openPdf, PasswordCancelled, passwordFor} from './pdf_password.js';
 // how a sheet looks as in Excel: fills, borders, table styles, conditional formats (SFM-320)
 import {KEY, tint, fillOf, fontOf, borderOf, dxfOf, readTableStyles, readConditionalFormats, indexRules, cellFacts,
         edgeCss, backgroundCss, fontCss, rotationCss} from './sheet_look.js';
@@ -330,6 +332,7 @@ function paint(w) {
     btn('hl').classList.toggle('on', rt.noteTool === 'highlight');
     btn('note').classList.toggle('on', rt.noteTool === 'note');
     btn('link').classList.toggle('on', rt.noteTool === 'link');
+    btn('hl').hidden = btn('note').hidden = btn('link').hidden = w.kind !== 'pdf' || !NOTES_ON || !!rt.locked;    // SFM-321
     rt.el.classList.toggle('notes-open', notesOpen);
     rt.notesBox.hidden = !notesOpen;
     rt.body.classList.toggle('tool-note', rt.noteTool === 'note');
@@ -880,6 +883,12 @@ async function openDocument(w) {
         findDocsChanged();
     } catch (e) {
         if (gen !== rt.gen) return;
+        if (e instanceof PasswordCancelled) {
+            rt.body.innerHTML = '<div class="dd-msg">This PDF is password protected. <button type="button" class="dd-password">Enter the password</button></div>';
+            rt.body.querySelector('.dd-password').addEventListener('click', () => openDocument(w));
+            rt.el.dataset.state = 'locked';
+            return;
+        }
         rt.body.innerHTML = `<div class="dd-msg">This file can't be shown: ${esc(e.message || e)}</div>`;
         rt.el.dataset.state = 'error';
     }
@@ -892,13 +901,15 @@ const releaseCanvases = el => el.querySelectorAll('canvas').forEach(c => { c.wid
 
 const pdfViewer = {
     async open(w, rt, blob, gen) {
-        const pdf = await pdfjsLib.getDocument({
+        const {pdf, locked, encrypted} = await openPdf(pdfjsLib, {
             data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false,
             cMapUrl: PDFJS + 'cmaps/', cMapPacked: true,
             standardFontDataUrl: PDFJS + 'standard_fonts/',
-        }).promise;
+        }, {name: w.name, key: w.fileId});
         if (gen !== rt.gen) { pdf.destroy(); return; }
         rt.pdf = pdf;
+        rt.locked = encrypted;                        // notes shown, never written (the app can't write into it)
+        rt.pwLocked = locked;                         // a copy without the password can be made (SFM-322)
         const n = pdf.numPages;
         const size = async i => { const v = (await pdf.getPage(i)).getViewport({scale: 1}); return [v.width, v.height]; };
         const first = await size(1);
@@ -1034,6 +1045,7 @@ const pdfViewer = {
         this.stopAll(rt);
         if (rt.pdf) rt.pdf.destroy();
         rt.pdf = rt.pages = rt.sizes = rt.textCache = null;
+        rt.locked = rt.pwLocked = false;
     },
 };
 
@@ -2994,28 +3006,34 @@ function renderNotes(w, rt) {
     if (!box || w.kind !== 'pdf' || !w.notesOpen) return;
     const notes = [...rt.notes].sort((a, b) => a.page - b.page || (b.rect[3] || 0) - (a.rect[3] || 0));
     const color = desk.noteColor || 'yellow';
+    const canWrite = NOTES_ON && !rt.locked;
     const one = n => `<div class="dd-note${n.replyTo ? ' reply' : ''}${rt.activeNote && rt.activeNote === n.key ? ' active' : ''}" data-key="${esc(n.key)}" style="--c:${n.color}">
         <div class="meta"><span>p. ${n.page}</span><span>${esc(n.replyTo ? 'Reply' : NOTE_LABEL[n.kind] || n.kind)}</span><span class="grow"></span><span>${esc(n.author)}</span><span>${esc(n.date)}</span></div>
         ${n.kind === 'link' ? `<div class="target">→ ${esc(targetLabel(n.target))}</div>` : ''}
         <div class="text${n.text ? '' : ' empty'}">${n.text ? esc(n.text) : '(no comment)'}</div>`
-        + (n.kind === 'link' || (NOTES_ON && OBJECT_KEY.test(n.key)) ? '<div class="acts">'
+        + (n.kind === 'link' || (canWrite && OBJECT_KEY.test(n.key)) ? '<div class="acts">'
             + (n.kind === 'link' ? '<button type="button" data-note-act="open">Open</button>' : '')
-            + (NOTES_ON && OBJECT_KEY.test(n.key) ? '<button type="button" class="secondary" data-note-act="edit">Edit</button><button type="button" class="secondary" data-note-act="delete">Delete</button>' : '')
+            + (canWrite && OBJECT_KEY.test(n.key) ? '<button type="button" class="secondary" data-note-act="edit">Edit</button><button type="button" class="secondary" data-note-act="delete">Delete</button>' : '')
             + '</div>' : '')
         + '</div>';
     box.innerHTML = `<div class="dd-notes-head"><b>Notes (${notes.length})</b>`
-        + (NOTES_ON ? `<select class="dd-note-color" title="Colour of new notes and highlights">${Object.keys(NOTE_COLORS).map(c =>
+        + (canWrite ? `<select class="dd-note-color" title="Colour of new notes and highlights">${Object.keys(NOTE_COLORS).map(c =>
             `<option value="${c}"${c === color ? ' selected' : ''}>${c}</option>`).join('')}</select>` : '') + '</div>'
-        + (notes.length ? notes.map(one).join('') : `<div class="dd-notes-none">${NOTES_ON
+        + (rt.locked ? `<div class="dd-notes-none dd-locked">${LOCKED_TEXT}${NOTES_ON && rt.pwLocked
+            ? '<br><button type="button" class="dd-unlock" title="The window then shows a copy without the password -- 💾 saves it as a new file (from the Library: saved next to the file there)">Save a copy without password</button>' : ''}</div>` : '')
+        + (notes.length ? notes.map(one).join('') : `<div class="dd-notes-none">${canWrite
             ? 'No notes yet. 🖍 highlights text you select, 📝 puts a note where you click, 🔗 links to a page of another PDF on the desk -- written into the PDF, so Acrobat shows them too.'
             : 'No notes in this PDF.'}</div>`)
-        + (NOTES_ON ? (w.libId ? `<div class="dd-notes-none">Written into the Library's file (${esc(w.libId)}).</div>` : '')
+        + (rt.locked ? '' : NOTES_ON ? (w.libId ? `<div class="dd-notes-none">Written into the Library's file (${esc(w.libId)}).</div>` : '')
             : '<div class="dd-notes-none">Shown here; writing notes needs the Integrity Workbench app.</div>');
 }
+
+const LOCKED_TEXT = "Protected PDF (password or restrictions): its notes are shown, but new notes can't be written into it (the file stays as it is).";
 
 function setNoteTool(w, tool) {
     const rt = live.get(w.id);
     if (!rt || w.kind !== 'pdf' || !NOTES_ON) return;
+    if (rt.locked) { rt.noteTool = null; paint(w); status(LOCKED_TEXT, true); return; }
     rt.noteTool = rt.noteTool === tool ? null : tool;
     paint(w);
     status({note: 'Click on the page where the note goes (📝 again or Esc: off).',
@@ -3320,9 +3338,49 @@ function editInList(w, rt, item, key) {
 }
 
 // One change written into the PDF; true when done. The window then shows the new PDF at the same place.
+// SFM-322: the window gets a copy without the password. From the Library: the copy is saved next to the file there and
+// shown (a new Library document); else the desk's copy, changed -- 💾 asks where to save it (never over the original).
+async function unlockCopy(w, rt) {
+    if (!NOTES_ON || !rt.pwLocked) return;
+    const password = await passwordFor(w.fileId, w.name);
+    if (!password) return;
+    status('Removing the password …');
+    const failed = async r => { let m = `HTTP ${r.status}`; try { const j = await r.json(); m = j.error || j.detail || m; } catch { /* not JSON */ } return m; };
+    try {
+        let file, restricted;
+        if (w.libId) {
+            const r = await fetch(`/api/library/documents/${encodeURIComponent(w.libId)}/unlock`, {method: 'POST',
+                headers: {'Content-Type': 'application/json'}, body: JSON.stringify({password})});
+            if (!r.ok) throw new Error(await failed(r));
+            const res = await r.json();
+            if (!res.id) throw new Error(`saved as ${res.name}, but it is not in the Library list`);
+            const f = await fetch(`/library/file/${encodeURIComponent(res.id)}`, {cache: 'no-store'});
+            if (!f.ok) throw new Error(await failed(f));
+            file = new File([await f.blob()], res.name, {type: 'application/pdf'});
+            file.libId = res.id;
+            restricted = res.restricted;
+        } else {
+            const form = new FormData();
+            form.append('file', files.get(w.fileId).blob, w.name);
+            form.append('password', password);
+            const r = await fetch('/mini-tools/api/pdf-unlock', {method: 'POST', body: form});
+            if (!r.ok) throw new Error(await failed(r));
+            restricted = r.headers.get('X-Restricted') === '1';
+            file = new File([await r.blob()], w.name.replace(/(\.pdf)?$/i, ' (no password).pdf'), {type: 'application/pdf'});
+        }
+        const libId = file.libId;
+        if (!await replaceDocument(w, file, 'pdf')) return;
+        if (!libId) { w.dirty = true; paint(w); }
+        saveSoon();
+        status((libId ? `Saved in the Library as ${file.name} (${libId}).` : `${file.name}: a copy without the password -- 💾 saves it as a new file.`)
+            + (restricted ? ' It keeps the restrictions of the original, so it takes no notes either.' : ''));
+    } catch (e) { status(`No copy without password: ${e.message}`, true); }
+}
+
 async function writeNote(w, rt, op) {
     const rec = files.get(w.fileId);
     if (!rec) return false;
+    if (rt.locked) { status(LOCKED_TEXT, true); return false; }
     status('Writing into the PDF …');
     const before = new Set(rt.notes.map(n => n.key));
     const failed = async r => { let m = `HTTP ${r.status}`; try { const j = await r.json(); m = j.error || j.detail || m; } catch { /* not JSON */ } return m; };
@@ -3402,6 +3460,7 @@ function wireNotes(w, rt) {
         if (e.target.matches('.dd-note-color')) { desk.noteColor = e.target.value; saveSoon(); }
     });
     rt.notesBox.addEventListener('click', async e => {
+        if (e.target.closest('.dd-unlock')) { unlockCopy(w, rt); return; }
         const item = e.target.closest('.dd-note');
         if (!item || e.target.closest('.dd-note-edit')) return;
         const key = item.dataset.key, act = e.target.closest('[data-note-act]');
