@@ -1635,7 +1635,7 @@ function lineMenu() {
     const dashes = Object.entries(DASHES).map(([k, v]) => `<button type="button" class="dw-dd-item" data-value="d:${k}"><svg width="60" height="10"><path d="M2 5 H58" stroke="#000" stroke-width="1.5" stroke-dasharray="${v.split(' ').map(x => x * 1.5).join(' ')}"/></svg> ${k}</button>`).join('');
     return palette(null, 'No line') + '<hr><div class="dw-dd-title">Weight</div>' + w + '<hr><div class="dw-dd-title">Dashes</div>' + dashes
         + '<hr><div class="dw-dd-title">Arrows</div>'
-        + '<button type="button" class="dw-dd-item" data-value="a:end">Arrow at the end</button><button type="button" class="dw-dd-item" data-value="a:start">Arrow at the start</button><button type="button" class="dw-dd-item" data-value="a:none">No arrows</button>'
+        + '<button type="button" class="dw-dd-item" data-value="a:end">Arrow at the end</button><button type="button" class="dw-dd-item" data-value="a:start">Arrow at the start</button><button type="button" class="dw-dd-item" data-value="a:both">Arrows at both ends</button><button type="button" class="dw-dd-item" data-value="a:none">No arrows</button>'
         + '<hr><div class="dw-dd-title">Corners / routing</div>'
         + '<button type="button" class="dw-dd-item" data-value="r:0">Square corners</button><button type="button" class="dw-dd-item" data-value="r:8">Rounded corners</button>'
         + '<button type="button" class="dw-dd-item" data-value="route:orthogonal">Connector: right angles</button><button type="button" class="dw-dd-item" data-value="route:straight">Connector: straight</button>';
@@ -1648,7 +1648,7 @@ function applyLine(value) {
     if (k === 'w') setStyle('lineWidth', Number(v));
     else if (k === 'd') setStyle('dash', v);
     else if (k === 'r') setStyle('radius', Number(v));
-    else if (k === 'a') change(() => { for (const s of selected()) s.style = { ...s.style, arrowEnd: v === 'end' ? true : v === 'none' ? false : styleOf(s).arrowEnd, arrowStart: v === 'start' ? true : v === 'none' ? false : styleOf(s).arrowStart }; });
+    else if (k === 'a') change(() => { for (const s of selected()) s.style = { ...s.style, arrowEnd: v === 'end' || v === 'both' ? true : v === 'none' ? false : styleOf(s).arrowEnd, arrowStart: v === 'start' || v === 'both' ? true : v === 'none' ? false : styleOf(s).arrowStart }; });
     else if (k === 'route') change(() => { for (const s of selected()) if (s.type === 'connector') s.route = v; });
 }
 
@@ -2187,6 +2187,7 @@ function contextMenu(evt) {
             if (one.attach) items.push(['Detach note', () => change(() => { delete one.attach; })], [`Select ${one.attach}`, () => select([one.attach])]);
             else items.push(['Add note', addNote]);                                                                       // SFM-311
         }
+        if (selected().every(s => ONE_D.has(s.type))) items.push(...lineItems(selected()));       // SFM-323
         items.push(['Bring to front', () => order(true)], ['Send to back', () => order(false)]);
         if (S.store.models && S.sel.length === 1) {
             items.push(['Link to model object…', linkDialog]);
@@ -2198,6 +2199,38 @@ function contextMenu(evt) {
         items.push(['Select all', ACTIONS['dw-select-all']], ['Fit to window', fit]);
     }
     showMenu(items, evt.clientX, evt.clientY);
+}
+
+// SFM-323: right-click on lines / connectors -- routing (connectors), which ends carry an arrow, reverse the direction.
+// The current choice carries a tick (when all selected lines agree).
+const ARROW_CHOICES = [['Arrow at the end', false, true], ['Arrow at the start', true, false], ['Arrows at both ends', true, true], ['No arrows', false, false]];
+
+function lineItems(lines) {
+    const tick = (on, label) => (on ? '✓ ' : '') + label;
+    const items = [];
+    const conns = lines.filter(s => s.type === 'connector');
+    if (conns.length) {
+        const route = s => (s.route === 'straight' ? 'straight' : 'orthogonal');
+        for (const [r, label] of [['straight', 'Straight arrow'], ['orthogonal', 'Right-angle arrow']])
+            items.push([tick(conns.every(s => route(s) === r), label), () => change(() => { for (const s of conns) s.route = r; }), false, 'dw-line-item']);
+    }
+    for (const [label, start, end] of ARROW_CHOICES) {
+        const on = lines.every(s => !!styleOf(s).arrowStart === start && !!styleOf(s).arrowEnd === end);
+        items.push([tick(on, label), () => change(() => { for (const s of lines) s.style = { ...s.style, arrowStart: start, arrowEnd: end }; }), false, 'dw-line-item']);
+    }
+    items.push(['Reverse direction', () => change(() => lines.forEach(reverseLine)), false, 'dw-line-item']);
+    return items;
+}
+
+// Swaps a line's / connector's two ends (points and glue): the arrow then points the other way and the tree
+// direction (from -> to, SFM-307) follows it.
+function reverseLine(s) {
+    [s.x1, s.y1, s.x2, s.y2] = [s.x2, s.y2, s.x1, s.y1];
+    for (const [a, b] of [['from', 'to'], ['fromAt', 'toAt'], ['fromPt', 'toPt']]) {
+        const va = s[a], vb = s[b];
+        if (vb === undefined) delete s[a]; else s[a] = vb;
+        if (va === undefined) delete s[b]; else s[b] = va;
+    }
 }
 
 // The right-click menu at a screen point (fixed position: also for the pages panel); items [label, fn, disabled, class]
