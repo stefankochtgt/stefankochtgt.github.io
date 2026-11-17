@@ -2898,7 +2898,7 @@ document.addEventListener('paste', e => { const rt = sheetTarget(); if (rt && rt
 // real annotations (Acrobat shows them). The notes are read by pdf.js from the desk's copy (every markup annotation,
 // also Acrobat's), drawn over the pages and listed in the window's 💬 panel. Writing is the app's (pdf_notes): a
 // window from the Library writes into the Library's file (its routes) and shows the new file; any other PDF goes to
-// /mini-tools/api/pdf-notes and comes back with the change -- the window is then "changed" and 💾 saves it into the
+// /document-desk/api/pdf-notes and comes back with the change -- the window is then "changed" and 💾 saves it into the
 // file. A note is named by pdf.js's object id ("12R"), which the app finds too.
 // Links (SFM-300, 🔗): a link to a page of another PDF on the desk, written into the PDF as a real link to that file
 // (GoToR: the file name -- for two Library documents the path from one to the other -- and the page). Clicked (also in
@@ -3363,7 +3363,7 @@ async function unlockCopy(w, rt) {
             const form = new FormData();
             form.append('file', files.get(w.fileId).blob, w.name);
             form.append('password', password);
-            const r = await fetch('/mini-tools/api/pdf-unlock', {method: 'POST', body: form});
+            const r = await fetch('/document-desk/api/pdf-unlock', {method: 'POST', body: form});
             if (!r.ok) throw new Error(await failed(r));
             restricted = r.headers.get('X-Restricted') === '1';
             file = new File([await r.blob()], w.name.replace(/(\.pdf)?$/i, ' (no password).pdf'), {type: 'application/pdf'});
@@ -3401,7 +3401,7 @@ async function writeNote(w, rt, op) {
             const form = new FormData();
             form.append('file', rec.blob, w.name);
             form.append('op', JSON.stringify(op));
-            const r = await fetch('/mini-tools/api/pdf-notes', {method: 'POST', body: form});
+            const r = await fetch('/document-desk/api/pdf-notes', {method: 'POST', body: form});
             if (!r.ok) throw new Error(await failed(r));
             blob = await r.blob();
             w.dirty = true;
@@ -3816,7 +3816,7 @@ async function openLibrary(w = null) {
         if (data.error) throw new Error(data.error);
         lib.docs = (data.documents || []).filter(d => d.name && !d.missing && !d.bib_only)
             .map(d => ({...d, kind: kindOf({name: d.name, type: ''})})).filter(d => d.kind)
-            .sort((a, b) => (a.title || a.name).localeCompare(b.title || b.name, undefined, {numeric: true}));
+            .sort((a, b) => (a.title || a.name).localeCompare(b.title || b.name, undefined, {numeric: true}));     // inside a folder
     } catch (e) {
         lib.docs = [];
         libNote(`Library not read: ${e.message}.`, true);
@@ -3829,20 +3829,45 @@ function libNote(msg, warn = false) {
     $('dd-lib-note').classList.toggle('warn', warn);
 }
 
+// The list looks like the Library's (SFM-326): a folder tree whose top branches are the library folders of this PC
+// (library.json -- where each document comes from), then its subfolders; per document ID, title, alternative
+// references and the file's date.
+function sourceOf(d) {
+    return d.root_label || (d.root || '').split(/[\\/]/).filter(Boolean).pop() || d.root || '';
+}
+
 function renderLibrary() {
     // every word must occur; * and ? as in the desk's search (SFM-267)
     const words = $('dd-lib-q').value.split(/\s+/).filter(Boolean).map(w => { try { return findPattern(w, 'i'); } catch { return null; } });
-    const hay = d => [d.id, d.title, d.name, d.path, d.folder, ...(d.aliases || [])].join(' ');
+    const hay = d => [d.id, d.title, d.name, d.path, sourceOf(d), ...(d.aliases || [])].join(' ');
     const shown = (lib.docs || []).filter(d => words.every(re => !re || re.test(hay(d))));
-    $('dd-lib-list').innerHTML = shown.length ? shown.map(d => `
-        <label class="dd-lib-item${lib.chosen.has(d.id) ? ' on' : ''}" data-id="${esc(d.id)}" data-kind="${d.kind}" title="${esc(d.shown_path || d.path || d.name)}">
+    const top = {folders: new Map(), docs: [], n: 0};
+    for (const d of shown) {
+        let node = top;
+        const parts = (d.path || '').split('/').slice(0, -1);
+        for (const [i, part] of [sourceOf(d), ...parts].entries()) {
+            if (!part) continue;
+            if (!node.folders.has(part)) node.folders.set(part, {folders: new Map(), docs: [], n: 0, root: i === 0 ? d.root : ''});
+            node = node.folders.get(part);
+            node.n += 1;
+        }
+        node.docs.push(d);
+    }
+    const item = d => `
+        <label class="dd-lib-item${lib.chosen.has(d.id) ? ' on' : ''}" data-id="${esc(d.id)}" data-kind="${d.kind}"
+               title="${esc(sourceOf(d))}: ${esc(d.path || d.name)}${d.modified ? ` -- changed ${esc(d.modified)}` : ''}">
             <input type="checkbox" value="${esc(d.id)}"${lib.chosen.has(d.id) ? ' checked' : ''}>
             <span class="dd-kind">${KIND_LABEL[d.kind]}</span>
-            <span class="dd-lib-text"><div class="dd-lib-title">${esc(d.title || d.name)}</div>
-                <div class="dd-lib-path">${esc(d.shown_path || d.path || d.name)}</div></span>
-            ${d.modified ? `<span class="dd-lib-date" title="Changed ${esc(d.modified)}">${esc(d.modified.slice(0, 10))}</span>` : ''}
             <span class="dd-lib-id">${esc(d.id)}</span>
-        </label>`).join('')
+            <span class="dd-lib-title">${esc(d.title || d.name)}${(d.aliases || []).map(a => `<span class="dd-lib-alias">[${esc(a)}]</span>`).join('')}</span>
+            ${d.modified ? `<span class="dd-lib-date" title="Changed ${esc(d.modified)}">${esc(d.modified.slice(0, 10))}</span>` : ''}
+        </label>`;
+    const tree = (node, depth) => [...node.folders.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true}))
+        .map(([name, sub]) => `<details open class="dd-lib-folder${depth ? '' : ' dd-lib-source'}">
+            <summary${depth ? '' : ` title="Library folder ${esc((sub.root || '').replace(/\//g, '\\'))}"`}>${depth ? '' : '📁 '}${esc(name)} <span class="dd-lib-n">${sub.n}</span></summary>
+            ${tree(sub, depth + 1)}</details>`).join('')
+        + node.docs.map(item).join('');
+    $('dd-lib-list').innerHTML = shown.length ? tree(top, 0)
         : `<div class="dd-msg">${lib.docs && lib.docs.length ? 'No document matches.' : 'No PDF, Word, Excel, CSV or image in the Library.'}</div>`;
     lib.shown = shown.length;
     libFooter();
