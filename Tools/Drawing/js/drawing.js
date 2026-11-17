@@ -24,7 +24,8 @@ const GRID = 10;
 const UNDO_LIMIT = 150;
 const KEY_PAGE = 'drawingPage';
 const ONE_D = new Set(['line', 'connector']);
-const SHAPE_TYPES = ['rect', 'ellipse', 'line', 'text', 'connector', 'image'];
+const SHAPE_TYPES = ['rect', 'ellipse', 'line', 'text', 'connector', 'image', 'person'];
+const DRAW_KINDS = ['rect', 'ellipse', 'line', 'person'];       // the shape button's choices (person: SFM-336)
 // a picture as stored: PNG, JPEG, GIF or WebP as a base64 data URI -- nothing that can run code (no SVG)
 const IMG_RE = /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
 const IMG_KEEP = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
@@ -86,7 +87,7 @@ function parseXml(text) {
         for (const el of p.children) {
             if (el.tagName !== 'shape') continue;
             const s = { id: el.getAttribute('id') || '', type: el.getAttribute('type') || '', style: {}, cps: [] };
-            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt']) if (el.hasAttribute(a)) s[a] = num(el, a);
+            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt', 'midX', 'midY']) if (el.hasAttribute(a)) s[a] = num(el, a);
             for (const a of ['from', 'to', 'fromAt', 'toAt', 'route', 'link', 'img', 'attach']) if (el.getAttribute(a)) s[a] = el.getAttribute(a);
             for (const c of el.children) {
                 if (c.tagName === 'text') s.text = c.textContent;
@@ -119,7 +120,7 @@ function toXml(doc) {
         out.push(head + '>');
         for (const s of p.shapes) {
             let attrs = `id="${xmlEsc(s.id)}" type="${s.type}"`;
-            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2']) if (s[a] !== undefined) attrs += ` ${a}="${r1(s[a])}"`;
+            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'midX', 'midY']) if (s[a] !== undefined) attrs += ` ${a}="${r1(s[a])}"`;
             for (const a of ['from', 'fromPt', 'fromAt', 'to', 'toPt', 'toAt', 'route', 'link', 'img', 'attach']) if (s[a] !== undefined && s[a] !== '' && s[a] !== null) attrs += ` ${a}="${xmlEsc(s[a])}"`;
             const parts = [];
             if (s.text) parts.push(`<text>${xmlEsc(s.text)}</text>`);
@@ -161,7 +162,7 @@ function checkDoc(doc) {
         for (const s of p.shapes) {
             if (!ID_RE.test(s.id) || byId.has(s.id)) throw new Error(`Page "${p.name}": shape id "${s.id}" is invalid or used twice.`);
             if (!SHAPE_TYPES.includes(s.type)) throw new Error(`Page "${p.name}": ${s.id} has an unknown type "${s.type}".`);
-            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt'])
+            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt', 'midX', 'midY'])
                 if (s[a] !== undefined && !Number.isFinite(s[a])) throw new Error(`Page "${p.name}": ${s.id} ${a} is not a number.`);
             const needed = ONE_D.has(s.type) ? ['x1', 'y1', 'x2', 'y2'] : ['x', 'y', 'w', 'h'];
             const missing = needed.filter(a => s[a] === undefined);
@@ -279,9 +280,29 @@ function freeDir(p, other) {
 }
 
 // The connector's path: right angles (Visio's default) or straight.
+// Right angles (SFM-337, user 2026-11-17: "when using right angles for arrows make sure multiple arrows dont overlap,
+// let me move the right angles manually if required"): a connector with `midX` / `midY` runs its middle line there
+// (moved by hand: drag a line of the selected arrow); without, the route is chosen automatically and the middle
+// lines of automatic arrows that would lie on each other (same direction, within SPREAD_TOL, overlapping) are put
+// SPREAD_GAP apart, centred on where they were (spreadOf(), worked out once per drawing of the page).
+const SPREAD_TOL = 6, SPREAD_GAP = 12;
+let routeVersion = 0;                        // render() counts up: the spread is worked out again
+const spreadMemo = new Map();                // page id -> {ver, at: Map(connector id -> coordinate)}
+
 function connectorPoints(page, c) {
+    if (c.type === 'line' || c.route === 'straight') return resolveEnds(page, c);
+    const r = orthoRoute(page, c);
+    if (c.midX === undefined && c.midY === undefined && r.mid) {
+        const at = spreadOf(page).get(c.id);
+        if (at !== undefined && Math.abs(at - r.mid.at) > 0.01) return cleanPath(zRoute(r, r.mid.axis, at));
+    }
+    return cleanPath(r.pts);
+}
+
+// The route of an orthogonal connector before the spread: {pts, mid: {axis 'x' | 'y', at, lo, hi} | null (the
+// middle line of a Z shape), p1, p2, a, b}
+function orthoRoute(page, c) {
     const [p1, p2] = resolveEnds(page, c);
-    if (c.type === 'line' || c.route === 'straight') return [p1, p2];
     const [d1x, d1y] = p1.dx || p1.dy ? [p1.dx, p1.dy] : freeDir(p1, p2);
     const [d2x, d2y] = p2.dx || p2.dy ? [p2.dx, p2.dy] : freeDir(p2, p1);
     const stub = 15;
@@ -293,6 +314,9 @@ function connectorPoints(page, c) {
     const cuts = (u, v) => boxes.some(bx => (Math.abs(u.y - v.y) < 0.01
         ? u.y > bx.y1 && u.y < bx.y2 && Math.max(u.x, v.x) > bx.x1 && Math.min(u.x, v.x) < bx.x2
         : u.x > bx.x1 && u.x < bx.x2 && Math.max(u.y, v.y) > bx.y1 && Math.min(u.y, v.y) < bx.y2));
+    const r = { p1, p2, a, b };
+    if (c.midX !== undefined) return { ...r, pts: zRoute(r, 'x', c.midX), mid: null };
+    if (c.midY !== undefined) return { ...r, pts: zRoute(r, 'y', c.midY), mid: null };
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
     let best = null, bestScore = Infinity;
     for (const mid of [[{ x: b.x, y: a.y }], [{ x: a.x, y: b.y }], [{ x: mx, y: a.y }, { x: mx, y: b.y }], [{ x: a.x, y: my }, { x: b.x, y: my }]]) {
@@ -307,8 +331,27 @@ function connectorPoints(page, c) {
         if ((b.x - last.x) * d2x + (b.y - last.y) * d2y > 0.01) score += 5000;                  // arrives from inside
         if (score < bestScore) { bestScore = score; best = path; }
     }
-    const pts = [p1, ...best, p2];
-    // drop zero-length and straight-through points
+    let mid = null;
+    if (best.length === 4) {
+        const [m1, m2] = [best[1], best[2]];
+        mid = Math.abs(m1.x - m2.x) < 0.01 ? { axis: 'x', at: m1.x, lo: Math.min(m1.y, m2.y), hi: Math.max(m1.y, m2.y) }
+                                           : { axis: 'y', at: m1.y, lo: Math.min(m1.x, m2.x), hi: Math.max(m1.x, m2.x) };
+        if (mid.hi - mid.lo < 0.01) mid = null;
+    } else if (best.length === 3) {          // an L: its vertical line (at a.x or b.x) is the one that can move
+        const c1 = best[1];
+        mid = { axis: 'x', at: c1.x, lo: Math.min(a.y, b.y), hi: Math.max(a.y, b.y) };
+        if (mid.hi - mid.lo < 0.01) mid = null;
+    }
+    return { ...r, pts: [p1, ...best, p2], mid };
+}
+
+function zRoute(r, axis, at) {
+    const { p1, p2, a, b } = r;
+    return axis === 'x' ? [p1, a, { x: at, y: a.y }, { x: at, y: b.y }, b, p2] : [p1, a, { x: a.x, y: at }, { x: b.x, y: at }, b, p2];
+}
+
+// drop zero-length and straight-through points
+function cleanPath(pts) {
     const clean = [pts[0]];
     for (let i = 1; i < pts.length; i++) {
         const prev = clean[clean.length - 1], p = pts[i];
@@ -320,6 +363,32 @@ function connectorPoints(page, c) {
         clean.push(p);
     }
     return clean;
+}
+
+// Middle lines of automatic arrows that lie on each other, spread apart (see connectorPoints)
+function spreadOf(page) {
+    const memo = spreadMemo.get(page.id);
+    if (memo && memo.ver === routeVersion) return memo.at;
+    const segs = [];
+    for (const c of page.shapes) {
+        if (c.type !== 'connector' || c.route === 'straight' || c.midX !== undefined || c.midY !== undefined) continue;
+        const r = orthoRoute(page, c);
+        if (r.mid) segs.push({ id: c.id, ...r.mid });
+    }
+    const groups = [];
+    for (const g of segs.sort((u, v) => u.at - v.at || u.lo - v.lo || (u.id < v.id ? -1 : 1))) {
+        const near = groups.find(gr => gr.some(o => o.axis === g.axis && Math.abs(o.at - g.at) < SPREAD_TOL && o.lo < g.hi - 0.5 && g.lo < o.hi - 0.5));
+        if (near) near.push(g); else groups.push([g]);
+    }
+    const at = new Map();
+    for (const gr of groups) {
+        if (gr.length < 2) continue;
+        const centre = gr.reduce((t, g) => t + g.at, 0) / gr.length;
+        gr.sort((u, v) => u.lo - v.lo || u.hi - v.hi || (u.id < v.id ? -1 : 1));
+        gr.forEach((g, i) => at.set(g.id, centre + (i - (gr.length - 1) / 2) * SPREAD_GAP));
+    }
+    spreadMemo.set(page.id, { ver: routeVersion, at });
+    return at;
 }
 
 function bbox(page, s) {
@@ -380,6 +449,17 @@ function imageHref(id, embed) {
 
 // One shape as SVG markup (also used for the PNG / SVG export -- `embed`: pictures as data URIs --, so no
 // editor-only parts here).
+// A person (SFM-336, user 2026-11-17: "a user shape (just little person made out of lines)"): a stick figure in the
+// shape's box -- head (filled with the fill colour), body, arms, legs in the line colour and width.
+function personSvg(s, stroke, fill, sw, dash) {
+    const r = Math.max(2, Math.min(s.w * 0.3, s.h * 0.13));
+    const cx = s.x + s.w / 2, neck = s.y + 2 * r, hip = s.y + s.h * 0.62, arms = neck + (hip - neck) * 0.3;
+    const line = `stroke="${esc(stroke)}" stroke-width="${Math.max(sw, 1)}"${dash} stroke-linecap="round" fill="none"`;
+    return `<circle cx="${r1(cx)}" cy="${r1(s.y + r)}" r="${r1(r)}" fill="${fill === 'none' ? 'none' : esc(fill)}" stroke="${esc(stroke)}" stroke-width="${Math.max(sw, 1)}"${dash}/>`
+        + `<path d="M${r1(cx)},${r1(neck)} L${r1(cx)},${r1(hip)} M${r1(s.x)},${r1(arms)} L${r1(s.x + s.w)},${r1(arms)}`
+        + ` M${r1(cx)},${r1(hip)} L${r1(s.x + s.w * 0.1)},${r1(s.y + s.h)} M${r1(cx)},${r1(hip)} L${r1(s.x + s.w * 0.9)},${r1(s.y + s.h)}" ${line}/>`;
+}
+
 function shapeSvg(page, s, embed) {
     const st = styleOf(s);
     const stroke = st.line === 'none' ? 'none' : st.line;
@@ -399,6 +479,8 @@ function shapeSvg(page, s, embed) {
         if (name) geo += `<title>${esc(name)}</title>`;
     } else if (s.type === 'ellipse') {
         geo = `<ellipse cx="${s.x + s.w / 2}" cy="${s.y + s.h / 2}" rx="${s.w / 2}" ry="${s.h / 2}" ${common}/>`;
+    } else if (s.type === 'person') {
+        geo = personSvg(s, stroke === 'none' ? '#000000' : stroke, st.fill, sw, dash);
     } else {
         const pts = connectorPoints(page, s);
         const d = pts.map((p, i) => `${i ? 'L' : 'M'}${r1(p.x)},${r1(p.y)}`).join(' ');
@@ -415,7 +497,12 @@ function shapeSvg(page, s, embed) {
         else geo += `<rect class="dw-hit" x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" ${band}/>`;
     }
     let text = '';
-    if (s.text && !ONE_D.has(s.type)) {
+    if (s.text && s.type === 'person') {           // SFM-336: the name below the figure
+        const { css, body } = textHtml(s, st);
+        const bw = Math.max(s.w, 160);
+        text = `<foreignObject x="${s.x + (s.w - bw) / 2}" y="${s.y + s.h}" width="${bw}" height="40" style="overflow:visible;">`
+            + `<div xmlns="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:${bw}px;padding:2px 4px;text-align:center;overflow:visible;${css}">${body}</div></foreignObject>`;
+    } else if (s.text && !ONE_D.has(s.type)) {
         const { css, body } = textHtml(s, st);
         const jc = { top: 'flex-start', middle: 'center', bottom: 'flex-end' }[st.valign] || 'center';
         const rot = st.textRotate ? `transform:rotate(${-st.textRotate}deg);` : '';
@@ -459,9 +546,45 @@ function saveNow() {
     clearTimeout(S.saveTimer);
     S.saveTimer = null;
     const xml = toXml(S.doc);
-    S.saving = S.saving.then(() => S.store.save(xml)).then(() => { status('Saved'); updateFolderUi(); })
+    S.saving = S.saving.then(() => S.store.save(xml)).then(() => { status('Saved'); updateFolderUi(); schedulePictures(); })
         .catch(e => { status(e.message, true); alert(e.message); });
     return S.saving;
+}
+
+// SFM-335: after a save the server says which pages have no current picture (GET /api/drawings/pictures/stale);
+// each is drawn here as PNG (the same drawing as Export PNG) and stored for the LaTeX documents' Drawing block.
+// Only with a store that keeps pictures (the workbench); a second save meanwhile starts it again.
+function pagePng(p, scale = Math.max(1, Math.min(2, 4000 / Math.max(p.width, p.height)))) {
+    const svg = pageSvg(null, p);
+    return new Promise((ok, fail) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(p.width * scale); canvas.height = Math.round(p.height * scale);
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            canvas.toBlob(b => b ? ok(b) : fail(new Error('no PNG')), 'image/png');
+        };
+        img.onerror = () => fail(new Error('the page could not be drawn'));
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    });
+}
+
+let pictureRun = Promise.resolve(), pictureTimer = null;
+function schedulePictures() {
+    if (!S.store.pictures) return;
+    clearTimeout(pictureTimer);
+    pictureTimer = setTimeout(() => { pictureRun = pictureRun.then(updatePictures).catch(() => {}); }, 1500);
+}
+async function updatePictures() {
+    const stale = await S.store.stalePictures();
+    for (const id of stale) {
+        const p = S.doc.pages.find(x => x.id === id);
+        if (!p) continue;
+        try { await S.store.savePicture(id, await pagePng(p)); }
+        catch (e) { status(`The picture of page "${p.name}" for the documents was not stored: ${e.message}`, true); }
+    }
 }
 
 async function flushSave() {                // a change still waiting for its save is written now
@@ -506,6 +629,7 @@ function nextShapeId(p = page()) {
 }
 
 function render() {
+    routeVersion += 1;                       // the arrows' spread is worked out again (SFM-337)
     const p = page();
     const svg = $('dw-svg');
     const view = `translate(${S.pan.x},${S.pan.y}) scale(${S.zoom})`;
@@ -553,6 +677,17 @@ function overlaySvg(p) {
             const glued = [s.from, s.to];
             [[s.x1, s.y1], [s.x2, s.y2]].forEach(([x, y], i) => out.push(
                 `<g class="dw-handle end" data-end="${i}"><rect x="${x - 5 / z}" y="${y - 5 / z}" width="${10 / z}" height="${10 / z}" fill="${glued[i] ? '#16a34a' : '#fff'}" stroke="#1d4ed8" stroke-width="${1 / z}"/>${handleHit(x, y, z)}</g>`));
+            // SFM-337: a right-angle arrow's lines (not those at its ends) can be dragged sideways
+            if (S.sel.length === 1 && s.type === 'connector' && s.route !== 'straight') {
+                const pts = connectorPoints(p, s);
+                for (let i = 1; i < pts.length - 2; i++) {
+                    const u = pts[i], v = pts[i + 1], vertical = Math.abs(u.x - v.x) < 0.01;
+                    if (Math.hypot(v.x - u.x, v.y - u.y) < 16 / z) continue;
+                    const cx = (u.x + v.x) / 2, cy = (u.y + v.y) / 2;
+                    out.push(`<g class="dw-handle bend" data-bend="${vertical ? 'x' : 'y'}" style="cursor:${vertical ? 'ew' : 'ns'}-resize"><title>Drag to move this line of the arrow (right-click: automatic right angles)</title>`
+                        + `<rect x="${cx - (vertical ? 3 : 7) / z}" y="${cy - (vertical ? 7 : 3) / z}" width="${(vertical ? 6 : 14) / z}" height="${(vertical ? 14 : 6) / z}" rx="${2 / z}" fill="#fde68a" stroke="#b45309" stroke-width="${1 / z}"/>${handleHit(cx, cy, z)}</g>`);
+                }
+            }
         } else {
             out.push(`<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="none" stroke="#1d4ed8" stroke-width="${1 / z}" stroke-dasharray="${4 / z} ${3 / z}" pointer-events="none"/>`);
             if (S.sel.length === 1) for (const [h, fx, fy] of HANDLES)
@@ -757,8 +892,8 @@ function updateRibbon() {
     $('dw-fill-bar').style.background = common('fill') === 'none' ? 'transparent' : (common('fill') || '#ffffff');
     $('dw-line-bar').style.background = common('line') === 'none' ? 'transparent' : (common('line') || '#000000');
     document.querySelectorAll('.dw-tool').forEach(b => b.classList.toggle('on', b.dataset.tool === S.tool));
-    $('dw-shape-tool').classList.toggle('on', ['rect', 'ellipse', 'line'].includes(S.tool));
-    $('dw-shape-icon').innerHTML = { rect: ICON_RECT, ellipse: ICON_ELLIPSE, line: ICON_LINE }[S.shapeKind];
+    $('dw-shape-tool').classList.toggle('on', DRAW_KINDS.includes(S.tool));
+    $('dw-shape-icon').innerHTML = { rect: ICON_RECT, ellipse: ICON_ELLIPSE, line: ICON_LINE, person: ICON_PERSON }[S.shapeKind];
     $('dw-undo').disabled = !S.undo.length;
     $('dw-redo').disabled = !S.redo.length;
     const link = S.sel.length === 1 && selected()[0].link;
@@ -773,6 +908,8 @@ function updateRibbon() {
 const ICON_RECT = '<svg viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="10" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
 const ICON_ELLIPSE = '<svg viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="7" ry="5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
 const ICON_LINE = '<svg viewBox="0 0 20 20"><path d="M3 16 L17 4" stroke="currentColor" stroke-width="1.4"/></svg>';
+const ICON_PERSON = '<svg viewBox="0 0 20 20"><circle cx="10" cy="4.2" r="2.4" fill="none" stroke="currentColor" stroke-width="1.3"/>'
+    + '<path d="M10 6.6 V12.5 M5 8.6 H15 M10 12.5 L6 18 M10 12.5 L14 18" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
 
 // ---- editing ---------------------------------------------------------------------------------
 
@@ -862,7 +999,8 @@ function onPointerDown(evt) {
     const handle = target.closest('.dw-handle');
     if (handle && S.sel.length) {
         const s = selected()[0];
-        S.drag = handle.dataset.end !== undefined
+        S.drag = handle.dataset.bend ? { mode: 'bend', id: s.id, axis: handle.dataset.bend, before: snapshot() }
+            : handle.dataset.end !== undefined
             ? { mode: 'end', id: s.id, end: +handle.dataset.end, before: snapshot() }
             : { mode: 'resize', id: s.id, handle: handle.dataset.handle, orig: { x: s.x, y: s.y, w: s.w, h: s.h }, start: m, before: snapshot() };
         $('dw-svg').setPointerCapture(evt.pointerId);
@@ -897,7 +1035,7 @@ function onPointerDown(evt) {
         render();
         return;
     }
-    if (S.tool === 'rect' || S.tool === 'ellipse' || S.tool === 'text') {
+    if (S.tool === 'rect' || S.tool === 'ellipse' || S.tool === 'text' || S.tool === 'person') {
         const start = { x: snap(m.x), y: snap(m.y) };
         const s = { id: nextShapeId(), type: S.tool, x: start.x, y: start.y, w: 0, h: 0, style: {} };
         const before = snapshot();
@@ -988,8 +1126,11 @@ function onPointerMove(evt) {
         dx = snap(ref + dx) - ref; dy = snap(refY + dy) - refY;
         for (const o of d.orig) {
             const s = shape(o.id);
-            if (ONE_D.has(s.type)) { s.x1 = o.x1 + dx; s.y1 = o.y1 + dy; s.x2 = o.x2 + dx; s.y2 = o.y2 + dy; }
-            else { s.x = o.x + dx; s.y = o.y + dy; }
+            if (ONE_D.has(s.type)) {
+                s.x1 = o.x1 + dx; s.y1 = o.y1 + dy; s.x2 = o.x2 + dx; s.y2 = o.y2 + dy;
+                if (o.midX !== undefined) s.midX = o.midX + dx;
+                if (o.midY !== undefined) s.midY = o.midY + dy;
+            } else { s.x = o.x + dx; s.y = o.y + dy; }
         }
         render();
     } else if (d.mode === 'create') {
@@ -1009,6 +1150,10 @@ function onPointerMove(evt) {
         // a corner handle with Shift keeps the proportions -- a picture the other way round: always, Shift = free (SFM-291)
         if ((s.type === 'image' ? !evt.shiftKey : evt.shiftKey) && h.length === 2) { const ratio = o.w / o.h; if (w / hh > ratio) w = hh * ratio; else hh = w / ratio; if (h.includes('w')) x = o.x + o.w - w; if (h.includes('n')) y = o.y + o.h - hh; }
         Object.assign(s, { x, y, w, h: hh });
+        render();
+    } else if (d.mode === 'bend') {                 // SFM-337: the line moved by hand stays there
+        const s = shape(d.id);
+        if (d.axis === 'x') { s.midX = snap(m.x); delete s.midY; } else { s.midY = snap(m.y); delete s.midX; }
         render();
     } else if (d.mode === 'end') {
         const s = shape(d.id);
@@ -1048,7 +1193,7 @@ function onPointerUp(evt) {
     if (d.mode === 'create') {
         const s = shape(d.id);
         if (s.w < 4 && s.h < 4) {                      // a click: the default size
-            const size = s.type === 'text' ? [120, 30] : [120, 60];
+            const size = s.type === 'text' ? [120, 30] : s.type === 'person' ? [40, 80] : [120, 60];
             s.w = size[0]; s.h = size[1];
         }
         commitDrag(d);
@@ -1141,7 +1286,11 @@ function duplicate(shapes, offset) {
     const p = page(), map = new Map();
     const copies = shapes.map(s => { const c = JSON.parse(JSON.stringify(s)); c.id = nextShapeId(p); map.set(s.id, c.id); p.shapes.push(c); return c; });
     for (const c of copies) {
-        if (ONE_D.has(c.type)) { c.x1 += offset; c.y1 += offset; c.x2 += offset; c.y2 += offset; } else { c.x += offset; c.y += offset; }
+        if (ONE_D.has(c.type)) {
+            c.x1 += offset; c.y1 += offset; c.x2 += offset; c.y2 += offset;
+            if (c.midX !== undefined) c.midX += offset;
+            if (c.midY !== undefined) c.midY += offset;
+        } else { c.x += offset; c.y += offset; }
         for (const [i, end] of ['from', 'to'].entries()) if (c[end]) { if (map.has(c[end])) c[end] = map.get(c[end]); else setGlue(c, i, null); }
         if (c.attach) { if (map.has(c.attach)) c.attach = map.get(c.attach); else delete c.attach; }     // a note without its shape: a text
     }
@@ -1198,7 +1347,7 @@ function addConnected(dir) {
 
 // ---- branches, trees and notes (SFM-306, SFM-307, SFM-311) -------------------------------------
 
-function moveOrig(list) { return list.map(x => ({ id: x.id, x: x.x, y: x.y, x1: x.x1, y1: x.y1, x2: x.x2, y2: x.y2 })); }
+function moveOrig(list) { return list.map(x => ({ id: x.id, x: x.x, y: x.y, x1: x.x1, y1: x.y1, x2: x.x2, y2: x.y2, midX: x.midX, midY: x.midY })); }
 
 // The notes attached to the shapes `ids` (SFM-311) that are not among them: they move, copy and go with their shape.
 function notesOf(p, ids) {
@@ -1322,7 +1471,7 @@ function addNote() {
 
 // ---- Grid view (SFM-308) ------------------------------------------------------------------------
 
-const KIND_NAMES = { rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line', text: 'Text', connector: 'Connector', image: 'Picture' };
+const KIND_NAMES = { rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line', text: 'Text', connector: 'Connector', image: 'Picture', person: 'Person' };
 const kindName = s => (s.attach ? 'Note' : KIND_NAMES[s.type] || s.type);
 
 function gridRows() {
@@ -1578,7 +1727,10 @@ async function updateFolderUi() {
 
 function nudge(dx, dy) {
     if (!S.sel.length) return;
-    change(() => { for (const s of withNotes(page(), selected())) { if (ONE_D.has(s.type)) { if (!s.from) { s.x1 += dx; s.y1 += dy; } if (!s.to) { s.x2 += dx; s.y2 += dy; } } else { s.x += dx; s.y += dy; } } });
+    change(() => { for (const s of withNotes(page(), selected())) { if (ONE_D.has(s.type)) {
+        if (!s.from) { s.x1 += dx; s.y1 += dy; } if (!s.to) { s.x2 += dx; s.y2 += dy; }
+        if (!s.from && !s.to) { if (s.midX !== undefined) s.midX += dx; if (s.midY !== undefined) s.midY += dy; }   // SFM-337
+    } else { s.x += dx; s.y += dy; } } });
 }
 
 function order(front) {
@@ -1592,11 +1744,11 @@ function order(front) {
 
 function setTool(tool) {
     S.tool = tool;
-    if (['rect', 'ellipse', 'line'].includes(tool)) S.shapeKind = tool;
+    if (DRAW_KINDS.includes(tool)) S.shapeKind = tool;
     render();
     $('dw-hint').textContent = {
         pointer: '', rect: 'Drag on the page to draw a rectangle (Shift: square).', ellipse: 'Drag to draw an ellipse (Shift: circle).',
-        line: 'Drag to draw a line (Shift: horizontal / vertical).', text: 'Click or drag on the page for a text box, then type.',
+        line: 'Drag to draw a line (Shift: horizontal / vertical).', person: 'Click for a person, or drag its size; double-click it to write its name below it.', text: 'Click or drag on the page for a text box, then type.',
         connector: 'Drag from a shape to another: on a shape\'s line the end snaps to the raster dots (twelfths of a side), inside a shape it takes the nearest side; it stays glued when the shapes move.',
         cpoint: 'Click on a shape to add a connection point there; click an own point (×) again to remove it.',
     }[tool];
@@ -1961,8 +2113,7 @@ const FOOTER_SIZE = 9, FOOTER_GREY = '#9ca3af';
 
 // The page as a standalone SVG: the page area only, without grid, selection or link badges. `footer`
 // (optional): the document control (SFM-225), in light grey below the page, split to fit its width.
-function pageSvg(footer) {
-    const p = page();
+function pageSvg(footer, p = page()) {
     for (const s of p.shapes) if (ONE_D.has(s.type)) resolveEnds(p, s);
     const lines = footer ? exportControl.wrap(footer, Math.max(60, Math.floor(p.width / (FOOTER_SIZE * 0.52)))) : [];
     const h = p.height + (lines.length ? lines.length * (FOOTER_SIZE + 3) + 8 : 0);
@@ -2107,7 +2258,7 @@ function wire() {
     document.querySelectorAll('.dw-tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
     $('dw-shape-tool').addEventListener('click', () => setTool(S.shapeKind));
     $('dw-shape-dd').addEventListener('click', e => openDropdown(e.currentTarget,
-        `<button type="button" class="dw-dd-item" data-value="rect">${ICON_RECT} Rectangle</button><button type="button" class="dw-dd-item" data-value="ellipse">${ICON_ELLIPSE} Ellipse</button><button type="button" class="dw-dd-item" data-value="line">${ICON_LINE} Line</button>`,
+        `<button type="button" class="dw-dd-item" data-value="rect">${ICON_RECT} Rectangle</button><button type="button" class="dw-dd-item" data-value="ellipse">${ICON_ELLIPSE} Ellipse</button><button type="button" class="dw-dd-item" data-value="line">${ICON_LINE} Line</button><button type="button" class="dw-dd-item" data-value="person">${ICON_PERSON} Person</button>`,
         v => setTool(v)));
     $('dw-snap').addEventListener('change', e => { S.snap = e.target.checked; });
     $('dw-page-size').innerHTML = Object.keys(PAGE_SIZES).map(k => `<option>${k}</option>`).join('');
@@ -2212,13 +2363,15 @@ function lineItems(lines) {
     if (conns.length) {
         const route = s => (s.route === 'straight' ? 'straight' : 'orthogonal');
         for (const [r, label] of [['straight', 'Straight arrow'], ['orthogonal', 'Right-angle arrow']])
-            items.push([tick(conns.every(s => route(s) === r), label), () => change(() => { for (const s of conns) s.route = r; }), false, 'dw-line-item']);
+            items.push([tick(conns.every(s => route(s) === r), label), () => change(() => { for (const s of conns) { s.route = r; delete s.midX; delete s.midY; } }), false, 'dw-line-item']);
     }
     for (const [label, start, end] of ARROW_CHOICES) {
         const on = lines.every(s => !!styleOf(s).arrowStart === start && !!styleOf(s).arrowEnd === end);
         items.push([tick(on, label), () => change(() => { for (const s of lines) s.style = { ...s.style, arrowStart: start, arrowEnd: end }; }), false, 'dw-line-item']);
     }
     items.push(['Reverse direction', () => change(() => lines.forEach(reverseLine)), false, 'dw-line-item']);
+    const bent = conns.filter(s => s.midX !== undefined || s.midY !== undefined);
+    if (bent.length) items.push(['Automatic right angles', () => change(() => bent.forEach(s => { delete s.midX; delete s.midY; })), false, 'dw-line-item']);
     return items;
 }
 
@@ -2260,6 +2413,7 @@ async function init(store) {
     let panel = '1';
     try { panel = localStorage.getItem(KEY_PANEL) ?? '1'; } catch (e) { /* private window */ }
     document.querySelectorAll('.dw-model-only').forEach(el => { el.hidden = !S.store.models; });
+    schedulePictures();                       // pictures missing or out of date (SFM-335), e.g. drawn before
     wire();
     setPagesPanel(panel !== '0');
     updateFolderUi();
@@ -2297,9 +2451,20 @@ const serverStore = {
         const r = await fetch('/api/drawings', { method: 'PUT', headers: { 'Content-Type': 'application/xml' }, body: xml });
         if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || `Saving failed (${r.status})`); }
     },
+    // the pages' pictures for the LaTeX documents (SFM-335, app/services/drawing_pictures.py)
+    pictures: true,
+    async stalePictures() {
+        const r = await fetch('/api/drawings/pictures/stale', { cache: 'no-store' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return (await r.json()).stale;
+    },
+    async savePicture(pageId, blob) {
+        const r = await fetch(`/api/drawings/pictures/${encodeURIComponent(pageId)}`, { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: blob });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${r.status}`); }
+    },
 };
 
 window.Drawing = { init, parseXml, toXml, checkDoc, connectorPoints, pageSvg, state: S, get page() { return page(); },
                    setTool, select, startText, finishText, insertPicture, render, diffDocs, branchOf, arrangeTree, saveRevision,
-                   flushSave, pageOrder, goToShape };
+                   flushSave, pageOrder, goToShape, pagePng, get pictures() { return pictureRun; } };
 })();
