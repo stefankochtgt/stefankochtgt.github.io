@@ -78,6 +78,11 @@ button.secondary, .btn.secondary { background: #fff; color: var(--text); border-
 button.danger, .btn.danger { background: #fff; color: var(--error); border-color: var(--error); }
 
 .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; border: 1px solid var(--border); }
+/* SFM-353: the link mode badge keeps the width of its longer text, on one line, and its slot never shrinks -- switching
+   link mode (Ctrl) never changes the toolbar's height, so the graph below never moves */
+#link-mode-badge { display: inline-flex; flex-direction: column; white-space: nowrap; text-align: center; }
+#link-mode-badge::after { content: 'Link mode: ON — drag to connect'; height: 0; overflow: hidden; visibility: hidden; }
+div:has(> #link-mode-badge) { flex: 0 0 auto; }
 .badge.approved { background: #dcfce7; border-color: #86efac; color: #166534; }
 .badge.draft { background: #f1f5f9; color: #475569; }
 .badge.in_review { background: #fef9c3; border-color: #fde047; color: #854d0e; }

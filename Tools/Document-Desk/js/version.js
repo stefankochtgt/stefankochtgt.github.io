@@ -1,1 +1,1 @@
-window.FTA_VERSION = {"version": "2026.11.17", "build": "c0f84bd6d3ef"};
+window.FTA_VERSION = {"version": "2026.11.19", "build": "2c7b1187ba26"};
