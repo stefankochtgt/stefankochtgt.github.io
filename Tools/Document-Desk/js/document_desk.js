@@ -199,6 +199,7 @@ async function replaceDocument(w, file, kind, handle = null) {
     forgetFileIfUnused(old);
     paint(w);
     openDocument(w);
+    markSideOpen();
     return true;
 }
 
@@ -1119,6 +1120,7 @@ function setApp(w, id) {
     forgetFileIfUnused(old);
     openDocument(w);
     activate(w);
+    markSideOpen();
     saveSoon();
     findDocsChanged();
 }
@@ -2841,26 +2843,40 @@ function hideDrop() { dragDepth = 0; $('dd-drop').hidden = true; $('dd-drop').in
 // a drag that ended outside the page leaves no dragleave behind: the next mouse move clears the targets
 document.addEventListener('mousemove', () => { if (!$('dd-drop').hidden) hideDrop(); });
 
+// A document dragged from the Library list (SFM-357) gets the same targets -- also with files from this PC switched
+// off (it is a Library document, not a file of this PC); dropped outside the desk it does nothing.
+const deskDrag = e => hasFiles(e) || isLibDrag(e);
+const dropAllowed = e => LOCAL_FILES || isLibDrag(e);
 document.addEventListener('dragenter', e => {
-    if (!hasFiles(e)) return;
+    if (!deskDrag(e)) return;
     e.preventDefault();
-    if (!LOCAL_FILES) return;
+    if (!dropAllowed(e)) return;
     if (dragDepth++ === 0) showDrop();
 });
 document.addEventListener('dragleave', e => {
-    if (!hasFiles(e)) return;
+    if (!deskDrag(e)) return;
     if (--dragDepth <= 0) hideDrop();
 });
 document.addEventListener('dragover', e => {
-    if (!hasFiles(e)) return;
+    if (!deskDrag(e)) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = LOCAL_FILES ? 'copy' : 'none';
-    if (!LOCAL_FILES) return;
+    const onDesk = !isLibDrag(e) || !!(e.target.closest && e.target.closest('#dd-stage'));
+    e.dataTransfer.dropEffect = dropAllowed(e) && onDesk ? 'copy' : 'none';
+    if (!dropAllowed(e)) return;
     const target = e.target.closest && e.target.closest('[data-replace], [data-add]');
     $('dd-drop').querySelectorAll('.over').forEach(el => { if (el !== target) el.classList.remove('over'); });
     if (target) target.classList.add('over');
 });
 document.addEventListener('drop', e => {
+    if (isLibDrag(e)) {
+        e.preventDefault();
+        const id = e.dataTransfer.getData(LIB_DRAG);
+        const onDesk = e.target.closest && e.target.closest('#dd-stage');
+        const target = onDesk && e.target.closest('[data-replace]');
+        hideDrop();
+        if (onDesk && id) openFromSide([id], target ? +target.dataset.replace : null);
+        return;
+    }
     if (!hasFiles(e)) return;
     e.preventDefault();
     if (!LOCAL_FILES) { hideDrop(); status(LOCAL_OFF); return; }        // not read (SFM-284)
@@ -3744,7 +3760,7 @@ document.addEventListener('keydown', e => {
 
 // ---------------------------------------------------------------- toolbar
 
-function refreshEmpty() { $('dd-empty').hidden = desk.windows.length > 0; }
+function refreshEmpty() { $('dd-empty').hidden = desk.windows.length > 0; markSideOpen(); }
 
 function setSlim(on) { desk.slim = on; stage.classList.toggle('slim', on); $('dd-slim').classList.toggle('on', on); }
 function setClean(on) { desk.clean = on; document.body.classList.toggle('dd-clean', on); $('dd-clean').classList.toggle('on', on); }
@@ -3809,19 +3825,53 @@ async function openLibrary(w = null) {
     dlg.showModal();
     $('dd-lib-q').focus();
     try {
-        const r = await fetch('/api/library', {cache: 'no-store'});
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        if (!data.settings || !data.settings.folder) throw new Error('no Library folder set on this PC -- choose it on the Library page');
-        if (data.error) throw new Error(data.error);
-        lib.docs = (data.documents || []).filter(d => d.name && !d.missing && !d.bib_only)
-            .map(d => ({...d, kind: kindOf({name: d.name, type: ''})})).filter(d => d.kind)
-            .sort((a, b) => (a.title || a.name).localeCompare(b.title || b.name, undefined, {numeric: true}));     // inside a folder
+        lib.docs = await readLibrary();
     } catch (e) {
         lib.docs = [];
         libNote(`Library not read: ${e.message}.`, true);
     }
     renderLibrary();
+}
+
+// The documents the desk can show (PDF, Word, Excel, CSV, images), sorted by title inside a folder
+async function readLibrary() {
+    const r = await fetch('/api/library', {cache: 'no-store'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    if (!data.settings || !data.settings.folder) throw new Error('no Library folder set on this PC -- choose it on the Library page');
+    if (data.error) throw new Error(data.error);
+    return (data.documents || []).filter(d => d.name && !d.missing && !d.bib_only)
+        .map(d => ({...d, kind: kindOf({name: d.name, type: ''})})).filter(d => d.kind)
+        .sort((a, b) => (a.title || a.name).localeCompare(b.title || b.name, undefined, {numeric: true}));
+}
+
+// every word of the query must occur; * and ? as in the desk's search (SFM-267)
+function libMatches(docs, query) {
+    const words = query.split(/\s+/).filter(Boolean).map(w => { try { return findPattern(w, 'i'); } catch { return null; } });
+    const hay = d => [d.id, d.title, d.name, d.path, sourceOf(d), ...(d.aliases || [])].join(' ');
+    return docs.filter(d => words.every(re => !re || re.test(hay(d))));
+}
+
+// The folder tree of the dialog and the side list: top branches = the library folders, then the subfolders
+function libTree(shown, item) {
+    const top = {folders: new Map(), docs: [], n: 0};
+    for (const d of shown) {
+        let node = top;
+        const parts = (d.path || '').split('/').slice(0, -1);
+        for (const [i, part] of [sourceOf(d), ...parts].entries()) {
+            if (!part) continue;
+            if (!node.folders.has(part)) node.folders.set(part, {folders: new Map(), docs: [], n: 0, root: i === 0 ? d.root : ''});
+            node = node.folders.get(part);
+            node.n += 1;
+        }
+        node.docs.push(d);
+    }
+    const tree = (node, depth) => [...node.folders.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true}))
+        .map(([name, sub]) => `<details open class="dd-lib-folder${depth ? '' : ' dd-lib-source'}">
+            <summary${depth ? '' : ` title="Library folder ${esc((sub.root || '').replace(/\//g, '\\'))}"`}>${depth ? '' : '📁 '}${esc(name)} <span class="dd-lib-n">${sub.n}</span></summary>
+            ${tree(sub, depth + 1)}</details>`).join('')
+        + node.docs.map(item).join('');
+    return tree(top, 0);
 }
 
 function libNote(msg, warn = false) {
@@ -3837,22 +3887,7 @@ function sourceOf(d) {
 }
 
 function renderLibrary() {
-    // every word must occur; * and ? as in the desk's search (SFM-267)
-    const words = $('dd-lib-q').value.split(/\s+/).filter(Boolean).map(w => { try { return findPattern(w, 'i'); } catch { return null; } });
-    const hay = d => [d.id, d.title, d.name, d.path, sourceOf(d), ...(d.aliases || [])].join(' ');
-    const shown = (lib.docs || []).filter(d => words.every(re => !re || re.test(hay(d))));
-    const top = {folders: new Map(), docs: [], n: 0};
-    for (const d of shown) {
-        let node = top;
-        const parts = (d.path || '').split('/').slice(0, -1);
-        for (const [i, part] of [sourceOf(d), ...parts].entries()) {
-            if (!part) continue;
-            if (!node.folders.has(part)) node.folders.set(part, {folders: new Map(), docs: [], n: 0, root: i === 0 ? d.root : ''});
-            node = node.folders.get(part);
-            node.n += 1;
-        }
-        node.docs.push(d);
-    }
+    const shown = libMatches(lib.docs || [], $('dd-lib-q').value);
     const item = d => `
         <label class="dd-lib-item${lib.chosen.has(d.id) ? ' on' : ''}" data-id="${esc(d.id)}" data-kind="${d.kind}"
                title="${esc(sourceOf(d))}: ${esc(d.path || d.name)}${d.modified ? ` -- changed ${esc(d.modified)}` : ''}">
@@ -3862,12 +3897,7 @@ function renderLibrary() {
             <span class="dd-lib-title">${esc(d.title || d.name)}${(d.aliases || []).map(a => `<span class="dd-lib-alias">[${esc(a)}]</span>`).join('')}</span>
             ${d.modified ? `<span class="dd-lib-date" title="Changed ${esc(d.modified)}">${esc(d.modified.slice(0, 10))}</span>` : ''}
         </label>`;
-    const tree = (node, depth) => [...node.folders.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true}))
-        .map(([name, sub]) => `<details open class="dd-lib-folder${depth ? '' : ' dd-lib-source'}">
-            <summary${depth ? '' : ` title="Library folder ${esc((sub.root || '').replace(/\//g, '\\'))}"`}>${depth ? '' : '📁 '}${esc(name)} <span class="dd-lib-n">${sub.n}</span></summary>
-            ${tree(sub, depth + 1)}</details>`).join('')
-        + node.docs.map(item).join('');
-    $('dd-lib-list').innerHTML = shown.length ? tree(top, 0)
+    $('dd-lib-list').innerHTML = shown.length ? libTree(shown, item)
         : `<div class="dd-msg">${lib.docs && lib.docs.length ? 'No document matches.' : 'No PDF, Word, Excel, CSV or image in the Library.'}</div>`;
     lib.shown = shown.length;
     libFooter();
@@ -3884,7 +3914,11 @@ async function addFromLibrary(ids) {
     $('dd-lib').close();
     const replaceId = lib.replace != null && desk.windows.some(w => w.id === lib.replace) ? lib.replace : null;
     if (replaceId != null) ids = ids.slice(-1);
-    const picked = ids.map(id => lib.docs.find(d => d.id === id)).filter(Boolean);
+    await loadFromLibrary(ids.map(id => lib.docs.find(d => d.id === id)).filter(Boolean), replaceId);
+}
+
+// Library documents fetched from the app and added like dropped files (replaceId: into that window)
+async function loadFromLibrary(picked, replaceId = null) {
     if (!picked.length) return;
     status(`Loading ${picked.length === 1 ? picked[0].name : picked.length + ' documents'} from the Library…`);
     const got = [], failed = [];
@@ -3935,6 +3969,124 @@ if ($('dd-lib')) {
     $('dd-lib-cancel').addEventListener('click', () => $('dd-lib').close());
 }
 
+// ---------------------------------------------------------------- the Library beside the desk (SFM-357)
+// The Library's folder tree as a list left of the stage (same documents and search as the dialog): a click opens a
+// document as a new window -- or, when it is on the desk already, brings that window to the front (Ctrl+click opens it
+// once more); dragging one onto a window replaces that window's document, onto the free desk adds it. Shown / hidden
+// (`desk.side`, once the user chose; until then shown when the Library has documents) and its width are part of the
+// desk (IndexedDB). Only in the workbench with the Library plugin (no list in the standalone, which has no server).
+const side = {docs: null};
+const SIDE_MIN = 180;
+
+// save = the user's choice (kept in the desk); false = shown / hidden on the desk's own default, nothing stored
+function setSide(on, save = true) {
+    if (!$('dd-side')) return;
+    $('dd-side').hidden = !on;
+    $('dd-side-grip').hidden = !on;
+    $('dd-side-toggle').classList.toggle('on', on);
+    if (on && !side.docs) loadSide();
+    if (save) { desk.side = on; saveSoon(); }
+}
+
+function setSideWidth(px) {
+    const max = Math.max(SIDE_MIN, $('dd-side').parentElement.clientWidth * 0.6);
+    desk.sideW = Math.round(Math.min(max, Math.max(SIDE_MIN, px)));
+    $('dd-side').style.width = desk.sideW + 'px';
+}
+
+async function loadSide() {
+    $('dd-side-list').innerHTML = '<div class="dd-msg">Loading…</div>';
+    sideNote('');
+    try {
+        side.docs = await readLibrary();
+    } catch (e) {
+        side.docs = [];
+        sideNote(`Library not read: ${e.message}.`, true);
+    }
+    renderSide();
+}
+
+function sideNote(msg, warn = false) {
+    $('dd-side-note').textContent = msg;
+    $('dd-side-note').classList.toggle('warn', warn);
+}
+
+function renderSide() {
+    const shown = libMatches(side.docs || [], $('dd-side-q').value);
+    const item = d => `
+        <div class="dd-lib-item" draggable="true" data-id="${esc(d.id)}" data-kind="${d.kind}"
+             title="${esc(d.title || d.name)}&#10;${esc(sourceOf(d))}: ${esc(d.path || d.name)}${d.modified ? ` -- changed ${esc(d.modified)}` : ''}&#10;Click: open -- drag onto a window: replace its document">
+            <span class="dd-kind">${KIND_LABEL[d.kind]}</span>
+            <span class="dd-lib-id">${esc(d.id)}</span>
+            <span class="dd-lib-title">${esc(d.title || d.name)}${(d.aliases || []).map(a => `<span class="dd-lib-alias">[${esc(a)}]</span>`).join('')}</span>
+        </div>`;
+    $('dd-side-list').innerHTML = shown.length ? libTree(shown, item)
+        : `<div class="dd-msg">${side.docs && side.docs.length ? 'No document matches.' : 'No PDF, Word, Excel, CSV or image in the Library.'}</div>`;
+    markSideOpen();
+    if (!$('dd-side-note').classList.contains('warn'))
+        sideNote(side.docs && side.docs.length ? `${shown.length} of ${side.docs.length} documents` : '');
+}
+
+// documents with a window on the desk are marked (blue edge); called whenever windows come or go
+function markSideOpen() {
+    if (!$('dd-side')) return;
+    const open = new Set(desk.windows.map(w => w.libId).filter(Boolean));
+    $('dd-side-list').querySelectorAll('.dd-lib-item').forEach(el => el.classList.toggle('open', open.has(el.dataset.id)));
+}
+
+const LIB_DRAG = 'application/x-document-desk-library';
+const isLibDrag = e => !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes(LIB_DRAG);
+
+function openFromSide(ids, replaceId = null) {
+    return loadFromLibrary(ids.map(id => (side.docs || []).find(d => d.id === id)).filter(Boolean), replaceId);
+}
+
+if ($('dd-side')) {
+    $('dd-side-toggle').addEventListener('click', () => setSide($('dd-side').hidden));
+    $('dd-side-close').addEventListener('click', () => setSide(false));
+    $('dd-side-reload').addEventListener('click', loadSide);
+    $('dd-side-q').addEventListener('input', renderSide);
+    $('dd-side-q').addEventListener('keydown', e => {
+        if (e.key === 'Escape' && e.target.value) { e.preventDefault(); e.target.value = ''; renderSide(); return; }
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const only = $('dd-side-list').querySelectorAll('.dd-lib-item');
+        if (only.length === 1) openFromSide([only[0].dataset.id]);
+    });
+    $('dd-side-list').addEventListener('click', e => {
+        const item = e.target.closest('.dd-lib-item');
+        if (!item) return;
+        const w = !(e.ctrlKey || e.metaKey) && [...desk.windows].sort((a, b) => b.z - a.z).find(o => o.libId === item.dataset.id);
+        if (!w) { openFromSide([item.dataset.id]); return; }
+        if (w.min) restore(w); else activate(w);
+        status(`“${w.name}” is on the desk already -- Ctrl+click opens it once more.`);
+    });
+    $('dd-side-list').addEventListener('dragstart', e => {
+        const item = e.target.closest('.dd-lib-item');
+        if (!item) return;
+        e.dataTransfer.setData(LIB_DRAG, item.dataset.id);
+        e.dataTransfer.effectAllowed = 'copy';
+    });
+    $('dd-side-grip').addEventListener('pointerdown', e => {
+        e.preventDefault();
+        const grip = e.currentTarget, left = $('dd-side').getBoundingClientRect().left;
+        grip.setPointerCapture(e.pointerId);
+        grip.classList.add('on');
+        document.body.classList.add('dd-side-resizing');
+        const move = ev => setSideWidth(ev.clientX - left);
+        const up = () => {
+            grip.removeEventListener('pointermove', move);
+            grip.classList.remove('on');
+            document.body.classList.remove('dd-side-resizing');
+            saveSoon();
+        };
+        grip.addEventListener('pointermove', move);
+        grip.addEventListener('pointerup', up, {once: true});
+        grip.addEventListener('pointercancel', up, {once: true});
+    });
+    $('dd-side-grip').addEventListener('dblclick', () => { setSideWidth(300); saveSoon(); });
+}
+
 async function init() {
     let saved = null;
     try { saved = await db.getState(); } catch (e) { storageFailed(e); }
@@ -3944,6 +4096,11 @@ async function init() {
     if (top) { activeId = top.id; desk.windows.forEach(paint); }
     setSlim(!!desk.slim);
     setClean(!!desk.clean);
+    if ($('dd-side')) {
+        if (desk.sideW) setSideWidth(desk.sideW);
+        if (typeof desk.side === 'boolean') setSide(desk.side, false);     // the user's own choice
+        else loadSide().then(() => { if (typeof desk.side !== 'boolean') setSide(side.docs.length > 0, false); });
+    }
     fillLayouts();
     markArrange();
     refreshEmpty();

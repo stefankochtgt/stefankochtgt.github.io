@@ -83,8 +83,33 @@ body.dd-clean > header.topbar, body.dd-clean main.dd-main > h1 { display: none; 
 .dd-wordbox mark.dd-hit.cur { background: #fdba74; box-shadow: 0 0 0 2px #ea580c; }
 .dd-sheet td.dd-hit.cur { background-color: #fdba74 !important; outline: 2px solid #ea580c; outline-offset: -2px; }
 
-.dd-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #dfe3e9;
+/* stage + the Library list on its left (SFM-357) */
+.dd-work { flex: 1; min-height: 0; display: flex; }
+.dd-stage { position: relative; flex: 1; min-height: 0; min-width: 0; overflow: hidden; background: #dfe3e9;
     border: 1px solid var(--border); border-radius: 6px; }
+.dd-side { flex: none; width: 300px; min-width: 180px; max-width: 60%; display: flex; flex-direction: column; min-height: 0;
+    background: var(--panel, #fff); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.dd-side[hidden], .dd-side-grip[hidden] { display: none; }
+.dd-side-head { flex: none; display: flex; align-items: center; gap: 4px; padding: 5px 6px 5px 10px; border-bottom: 1px solid var(--border); }
+.dd-side-head b { flex: 1; font-size: 13px; }
+.dd-side-btn { padding: 1px 7px !important; font-size: 13px !important; line-height: 1.3; }
+.dd-side > input[type="search"] { flex: none; width: auto; margin: 6px; padding: 4px 7px; font-size: 12px; }
+.dd-side-list { flex: 1; height: auto; min-height: 0; border-top: 1px solid var(--border); }
+.dd-side-list .dd-lib-item { padding: 4px 8px; font-size: 12px; gap: 6px; cursor: pointer; }
+.dd-side-list .dd-lib-item[draggable="true"] { cursor: grab; }
+.dd-side-list .dd-lib-folder { margin-left: 10px; }
+.dd-side-list > .dd-lib-folder { margin-left: 0; }
+.dd-side-list .dd-lib-folder > summary { padding: 3px 8px 3px 4px; }
+/* a document that is on the desk already: a click brings its window to the front */
+.dd-side-list .dd-lib-item.open { box-shadow: inset 3px 0 0 #2563eb; background: #eff6ff; }
+.dd-side-list .dd-lib-item.open .dd-lib-title { font-weight: 600; }
+.dd-side-note { flex: none; padding: 4px 10px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dd-side-note.warn { color: var(--error); white-space: normal; }
+.dd-side-grip { flex: none; width: 8px; cursor: col-resize; }
+.dd-side-grip:hover, .dd-side-grip.on { background: linear-gradient(90deg, transparent 3px, #60a5fa 3px, #60a5fa 5px, transparent 5px); }
+body.dd-side-resizing { cursor: col-resize; user-select: none; }
+body.dd-side-resizing iframe { pointer-events: none; }
 .dd-stage:fullscreen { border: 0; border-radius: 0; background: #2f343c; }
 .dd-stage.moving { user-select: none; }
 .dd-stage.moving .dd-body { pointer-events: none; }
