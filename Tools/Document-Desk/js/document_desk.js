@@ -350,6 +350,7 @@ function activate(w) {
     if (w.z !== desk.z - 1) w.z = desk.z++;
     desk.windows.forEach(o => { if (o === w || o.id === before) paint(o); else live.get(o.id).el.style.zIndex = (o.onTop ? ON_TOP : 0) + o.z; });
     saveSoon();
+    if (before !== w.id && find.re) scheduleFind(0, false);     // the search follows the selected window (SFM-359)
 }
 
 function closeWindow(w, force = false) {
@@ -3496,7 +3497,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ---------------------------------------------------------------- search (SFM-267)
-// One search over every window on the desk: the text of every PDF page (pdf.js text content, read once per document
+// One search over the selected window (SFM-359, `findScope()`; every window only when none shown is selected): the text of every PDF page (pdf.js text content, read once per document
 // and kept while it is open) and the shown text of every sheet / CSV cell; images have no text. Case does not matter.
 // * = any characters within one line of a PDF or one cell -- at the start or the end of the search: the rest of the
 // word --, ? = one character, ~* ~? ~~ = the character itself. Matches are marked (PDF: in the text layer of the drawn
@@ -3521,6 +3522,14 @@ function findPattern(q, flags = 'gi') {
         else src += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     }
     return new RegExp(src, flags);
+}
+
+// SFM-359 (user 2026-11-23: "always search in the pdf of the window that is selected"): the search runs in the
+// selected window only; choosing another window searches that one. Only when no shown window is selected (all
+// minimized) it runs over every window, so a match in a minimized window still brings it back (SFM-315).
+function findScope() {
+    const w = activeWindow();
+    return w && !w.min ? [w] : readingOrder();
 }
 
 const upperBound = (arr, x) => { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] <= x) lo = m + 1; else hi = m; } return lo; };
@@ -3574,8 +3583,8 @@ async function runFind(jump = true) {
     Object.assign(find, {q, re, hits: [], cur: -1, byPlace: new Map(), scrollTo: null});
     markAll();
     if (!re) { findInfo(q.trim() ? 'Type more than * and ?' : '', !!q.trim()); return; }
-    const hits = [];
-    for (const w of readingOrder()) {
+    const hits = [], scope = findScope();
+    for (const w of scope) {
         const rt = live.get(w.id);
         if (!rt) continue;
         if (w.kind === 'pdf' && rt.pdf) {
@@ -3610,7 +3619,7 @@ async function runFind(jump = true) {
     if (gen !== find.gen) return;
     find.hits = hits;
     hits.forEach((h, i) => { const key = placeKey(h); if (!find.byPlace.has(key)) find.byPlace.set(key, []); find.byPlace.get(key).push(i); });
-    if (!hits.length) { markAll(); findInfo('No match', true); return; }
+    if (!hits.length) { markAll(); findInfo(scope.length === 1 ? `No match in ${scope[0].name}` : 'No match', true); return; }
     if (jump) { goFind(0); return; }
     find.cur = before ? hits.findIndex(h => h.wid === before.wid && h.page === before.page && h.start === before.start
                                              && h.sheet === before.sheet && h.k === before.k && h.para === before.para) : -1;
@@ -3825,7 +3834,7 @@ async function openLibrary(w = null) {
     dlg.showModal();
     $('dd-lib-q').focus();
     try {
-        lib.docs = await readLibrary();
+        [lib.docs] = await Promise.all([readLibrary(), loadVersions()]);
     } catch (e) {
         lib.docs = [];
         libNote(`Library not read: ${e.message}.`, true);
@@ -3845,12 +3854,61 @@ async function readLibrary() {
         .sort((a, b) => (a.title || a.name).localeCompare(b.title || b.name, undefined, {numeric: true}));
 }
 
-// every word of the query must occur; * and ? as in the desk's search (SFM-267)
+// every word of the query must occur; * and ? as in the desk's search (SFM-267); with a chosen aircraft / vehicle
+// version only that version's documents (SFM-358)
 function libMatches(docs, query) {
     const words = query.split(/\s+/).filter(Boolean).map(w => { try { return findPattern(w, 'i'); } catch { return null; } });
     const hay = d => [d.id, d.title, d.name, d.path, sourceOf(d), ...(d.aliases || [])].join(' ');
-    return docs.filter(d => words.every(re => !re || re.test(hay(d))));
+    return docs.filter(d => (!pv.docs || pv.docs.has(d.id)) && words.every(re => !re || re.test(hay(d))));
 }
+
+// ---- aircraft / vehicle versions (SFM-358): the Library page's version filter, on the list and in the dialog
+// The versions come from the Aircraft / Vehicle Versions plugin (/api/product-versions, per PC); a version's documents
+// are its own and those of every version above it. The selects exist only with that plugin (template), so the
+// standalone (no server) never asks. One choice for the Library page and the desk: the Library's localStorage key.
+const PV_KEY = 'libraryVersion';
+const PV_SELECTS = ['dd-side-version', 'dd-lib-version'];
+const pv = {list: [], byId: new Map(), sel: '', docs: null};
+const pvSelects = () => PV_SELECTS.map(id => $(id)).filter(Boolean);
+
+async function loadVersions() {
+    const sels = pvSelects();
+    if (!sels.length) return;
+    try {
+        const r = await fetch('/api/product-versions', {cache: 'no-store'});
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        pv.list = (await r.json()).versions || [];
+    } catch (e) { pv.list = []; }
+    pv.byId = new Map(pv.list.map(v => [v.id, v]));
+    for (const sel of sels) {
+        sel.length = 1;
+        for (const v of pv.list)
+            sel.add(new Option(`${'  '.repeat(v.depth)}${v.name} (${v.documents.length + v.inherited.length})`, v.id));
+    }
+    let want = '';
+    try { want = localStorage.getItem(PV_KEY) || ''; } catch { /* private window */ }
+    setVersion(pv.byId.has(want) ? want : '', false);
+}
+
+// render = the user chose: both lists follow and the Library page gets the same choice
+function setVersion(id, render = true) {
+    const v = pv.byId.get(id);
+    pv.sel = v ? id : '';
+    pv.docs = v ? new Set([...v.documents, ...v.inherited.map(i => i.doc)]) : null;
+    for (const sel of pvSelects()) { sel.value = pv.sel; sel.classList.toggle('on', !!v); }
+    if (!render) return;
+    try { localStorage.setItem(PV_KEY, pv.sel); } catch { /* private window */ }
+    if ($('dd-side') && side.docs) renderSide();
+    if ($('dd-lib') && $('dd-lib').open) renderLibrary();
+}
+
+// "of 12 documents -- A350 › MSN 42" in the notes under the lists
+const pvNote = () => pv.sel ? ` -- ${pv.byId.get(pv.sel).path.join(' › ')}` : '';
+const noMatch = docs => docs && docs.length
+    ? (pv.sel ? 'No document of this version matches.' : 'No document matches.')
+    : 'No PDF, Word, Excel, CSV or image in the Library.';
+
+pvSelects().forEach(sel => sel.addEventListener('change', () => setVersion(sel.value)));
 
 // The folder tree of the dialog and the side list: top branches = the library folders, then the subfolders
 function libTree(shown, item) {
@@ -3897,15 +3955,14 @@ function renderLibrary() {
             <span class="dd-lib-title">${esc(d.title || d.name)}${(d.aliases || []).map(a => `<span class="dd-lib-alias">[${esc(a)}]</span>`).join('')}</span>
             ${d.modified ? `<span class="dd-lib-date" title="Changed ${esc(d.modified)}">${esc(d.modified.slice(0, 10))}</span>` : ''}
         </label>`;
-    $('dd-lib-list').innerHTML = shown.length ? libTree(shown, item)
-        : `<div class="dd-msg">${lib.docs && lib.docs.length ? 'No document matches.' : 'No PDF, Word, Excel, CSV or image in the Library.'}</div>`;
+    $('dd-lib-list').innerHTML = shown.length ? libTree(shown, item) : `<div class="dd-msg">${noMatch(lib.docs)}</div>`;
     lib.shown = shown.length;
     libFooter();
 }
 
 function libFooter() {
     if (!$('dd-lib-note').classList.contains('warn'))
-        libNote(lib.docs ? `${lib.shown} of ${lib.docs.length} documents` + (lib.chosen.size ? ` -- ${lib.chosen.size} chosen` : '') : '');
+        libNote(lib.docs ? `${lib.shown} of ${lib.docs.length} documents${pvNote()}` + (lib.chosen.size ? ` -- ${lib.chosen.size} chosen` : '') : '');
     $('dd-lib-add').disabled = !lib.chosen.size;
     $('dd-lib-add').textContent = lib.replace != null ? 'Replace' : lib.chosen.size > 1 ? `Open ${lib.chosen.size}` : 'Open';
 }
@@ -3998,7 +4055,7 @@ async function loadSide() {
     $('dd-side-list').innerHTML = '<div class="dd-msg">Loading…</div>';
     sideNote('');
     try {
-        side.docs = await readLibrary();
+        [side.docs] = await Promise.all([readLibrary(), loadVersions()]);
     } catch (e) {
         side.docs = [];
         sideNote(`Library not read: ${e.message}.`, true);
@@ -4020,11 +4077,10 @@ function renderSide() {
             <span class="dd-lib-id">${esc(d.id)}</span>
             <span class="dd-lib-title">${esc(d.title || d.name)}${(d.aliases || []).map(a => `<span class="dd-lib-alias">[${esc(a)}]</span>`).join('')}</span>
         </div>`;
-    $('dd-side-list').innerHTML = shown.length ? libTree(shown, item)
-        : `<div class="dd-msg">${side.docs && side.docs.length ? 'No document matches.' : 'No PDF, Word, Excel, CSV or image in the Library.'}</div>`;
+    $('dd-side-list').innerHTML = shown.length ? libTree(shown, item) : `<div class="dd-msg">${noMatch(side.docs)}</div>`;
     markSideOpen();
     if (!$('dd-side-note').classList.contains('warn'))
-        sideNote(side.docs && side.docs.length ? `${shown.length} of ${side.docs.length} documents` : '');
+        sideNote(side.docs && side.docs.length ? `${shown.length} of ${side.docs.length} documents${pvNote()}` : '');
 }
 
 // documents with a window on the desk are marked (blue edge); called whenever windows come or go
