@@ -3583,10 +3583,12 @@ async function runFind(jump = true) {
     Object.assign(find, {q, re, hits: [], cur: -1, byPlace: new Map(), scrollTo: null});
     markAll();
     if (!re) { findInfo(q.trim() ? 'Type more than * and ?' : '', !!q.trim()); return; }
-    const hits = [], scope = findScope();
+    const hits = [], scope = findScope(), locked = [];
     for (const w of scope) {
         const rt = live.get(w.id);
         if (!rt) continue;
+        // a password PDF whose password was not given (yet) has no text to search: say so (SFM-361)
+        if (w.kind === 'pdf' && !rt.pdf && rt.el.dataset.state === 'locked') { locked.push(w.name); continue; }
         if (w.kind === 'pdf' && rt.pdf) {
             let pages = null;
             try {
@@ -3619,7 +3621,12 @@ async function runFind(jump = true) {
     if (gen !== find.gen) return;
     find.hits = hits;
     hits.forEach((h, i) => { const key = placeKey(h); if (!find.byPlace.has(key)) find.byPlace.set(key, []); find.byPlace.get(key).push(i); });
-    if (!hits.length) { markAll(); findInfo(scope.length === 1 ? `No match in ${scope[0].name}` : 'No match', true); return; }
+    if (!hits.length) {
+        markAll();
+        findInfo(locked.length ? `Not searched: ${locked.join(', ')} -- enter the password in the window first`
+                 : scope.length === 1 ? `No match in ${scope[0].name}` : 'No match', true);
+        return;
+    }
     if (jump) { goFind(0); return; }
     find.cur = before ? hits.findIndex(h => h.wid === before.wid && h.page === before.page && h.start === before.start
                                              && h.sheet === before.sheet && h.k === before.k && h.para === before.para) : -1;
