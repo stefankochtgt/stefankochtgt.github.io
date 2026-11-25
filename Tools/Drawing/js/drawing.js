@@ -87,7 +87,7 @@ function parseXml(text) {
         for (const el of p.children) {
             if (el.tagName !== 'shape') continue;
             const s = { id: el.getAttribute('id') || '', type: el.getAttribute('type') || '', style: {}, cps: [] };
-            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt', 'midX', 'midY']) if (el.hasAttribute(a)) s[a] = num(el, a);
+            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt', 'midX', 'midY', 'textDx', 'textDy']) if (el.hasAttribute(a)) s[a] = num(el, a);
             for (const a of ['from', 'to', 'fromAt', 'toAt', 'route', 'link', 'img', 'attach']) if (el.getAttribute(a)) s[a] = el.getAttribute(a);
             for (const c of el.children) {
                 if (c.tagName === 'text') s.text = c.textContent;
@@ -120,7 +120,7 @@ function toXml(doc) {
         out.push(head + '>');
         for (const s of p.shapes) {
             let attrs = `id="${xmlEsc(s.id)}" type="${s.type}"`;
-            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'midX', 'midY']) if (s[a] !== undefined) attrs += ` ${a}="${r1(s[a])}"`;
+            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'midX', 'midY', 'textDx', 'textDy']) if (s[a] !== undefined) attrs += ` ${a}="${r1(s[a])}"`;
             for (const a of ['from', 'fromPt', 'fromAt', 'to', 'toPt', 'toAt', 'route', 'link', 'img', 'attach']) if (s[a] !== undefined && s[a] !== '' && s[a] !== null) attrs += ` ${a}="${xmlEsc(s[a])}"`;
             const parts = [];
             if (s.text) parts.push(`<text>${xmlEsc(s.text)}</text>`);
@@ -162,7 +162,7 @@ function checkDoc(doc) {
         for (const s of p.shapes) {
             if (!ID_RE.test(s.id) || byId.has(s.id)) throw new Error(`Page "${p.name}": shape id "${s.id}" is invalid or used twice.`);
             if (!SHAPE_TYPES.includes(s.type)) throw new Error(`Page "${p.name}": ${s.id} has an unknown type "${s.type}".`);
-            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt', 'midX', 'midY'])
+            for (const a of ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2', 'fromPt', 'toPt', 'midX', 'midY', 'textDx', 'textDy'])
                 if (s[a] !== undefined && !Number.isFinite(s[a])) throw new Error(`Page "${p.name}": ${s.id} ${a} is not a number.`);
             const needed = ONE_D.has(s.type) ? ['x1', 'y1', 'x2', 'y2'] : ['x', 'y', 'w', 'h'];
             const missing = needed.filter(a => s[a] === undefined);
@@ -215,6 +215,10 @@ function outlinePoint(s, at) {
     if (Math.abs(f * RASTER - k) < 0.01) f = k / RASTER;      // "0.3333" is exactly 4/12: equal distances stay exact
     let x = side === 'l' ? s.x : side === 'r' ? s.x + s.w : s.x + f * s.w;
     let y = side === 't' ? s.y : side === 'b' ? s.y + s.h : s.y + f * s.h;
+    // SFM-364: a grid place stored as a fraction ("0.142857") is exactly on its grid line -- else two places that
+    // should face each other differ by a rounding error and the arrow gets a tiny step
+    const onGrid = v => { const g = Math.round(v / GRID) * GRID; return Math.abs(v - g) < 0.02 ? g : v; };
+    if (side === 't' || side === 'b') x = onGrid(x); else y = onGrid(y);
     if (s.type === 'ellipse') {
         const cx = s.x + s.w / 2, cy = s.y + s.h / 2, a = s.w / 2 || 1, b = s.h / 2 || 1;
         const nx = (x - cx) / a, ny = (y - cy) / b, r = Math.hypot(nx, ny) || 1;
@@ -222,6 +226,26 @@ function outlinePoint(s, at) {
     }
     const [dx, dy] = SIDE_DIR[side] || [0, 0];
     return { x, y, dx, dy };
+}
+
+// SFM-364 (user 2026-11-25: "make that the size of shapes and connector positions of shapes (rectangle) are always on
+// positions on the grid. so that when i use a connector the arrow can go straight without angles"): with Snap to grid
+// on, the places on a side of a rectangle-like shape are where the grid lines cross it (inside the side, not the
+// corners) -- the same lines for every shape, so two shapes always offer places that face each other. An ellipse, a
+// side too short for a grid line, or Snap to grid off: the twelfths (RASTER). Each place: {at, major}.
+function sidePlaces(s, side) {
+    const across = side === 't' || side === 'b', start = across ? s.x : s.y, len = across ? s.w : s.h;
+    const out = [];
+    if (S.snap && s.type !== 'ellipse' && len > 0) {
+        for (let v = Math.floor(start / GRID) * GRID; v < start + len - 0.01; v += GRID) {
+            if (v <= start + 0.01) continue;
+            const f = (v - start) / len;
+            out.push({ at: `${side}:${f.toFixed(6)}`, major: Math.abs(v - (start + len / 2)) < 0.01 });
+        }
+        if (out.length) return out;
+    }
+    for (let k = 1; k < RASTER; k++) out.push({ at: `${side}:${(k / RASTER).toFixed(4)}`, major: k % 6 === 0, third: k % 3 === 0 });
+    return out;
 }
 
 // The raster place on the shape's outline nearest to `pt`, if `pt` is within `band` of the outline.
@@ -242,8 +266,11 @@ function outlineHit(s, pt, band) {
         if (!best) return null;
         [side, , f] = best;
     }
-    const k = Math.max(1, Math.min(RASTER - 1, Math.round(f * RASTER)));
-    const at = `${side}:${(k / RASTER).toFixed(4)}`;
+    let at = null, best = Infinity;                  // the nearest of the side's places (SFM-364: grid or twelfths)
+    for (const q of sidePlaces(s, side)) {
+        const d = Math.abs(Number(q.at.split(':')[1]) - f);
+        if (d < best) { best = d; at = q.at; }
+    }
     return { at, ...outlinePoint(s, at) };
 }
 
@@ -400,6 +427,17 @@ function bbox(page, s) {
     return { x: s.x, y: s.y, w: s.w, h: s.h };
 }
 
+// SFM-363 (user 2026-11-25: "make that the text of connector can be [moved] by drag and drop also editable through
+// clicking it"): the text of a line / connector sits at the middle of its middle segment, moved by textDx / textDy --
+// kept relative to that point, so it goes along when the shapes or the line move. LABEL_W x LABEL_H: its box.
+const LABEL_W = 160, LABEL_H = 24;
+function labelBox(page, s) {
+    const pts = connectorPoints(page, s);
+    const i = Math.floor((pts.length - 1) / 2), mid = pts[i], next = pts[i + 1] || mid;
+    const cx = (mid.x + next.x) / 2 + (s.textDx || 0), cy = (mid.y + next.y) / 2 + (s.textDy || 0);
+    return { x: cx - LABEL_W / 2, y: cy - LABEL_H / 2, w: LABEL_W, h: LABEL_H };
+}
+
 // ---- drawing (SVG) ---------------------------------------------------------------------------
 
 const $ = id => document.getElementById(id);
@@ -511,11 +549,10 @@ function shapeSvg(page, s, embed) {
         text = `<foreignObject x="${s.x + (s.w - boxW) / 2}" y="${s.y + (s.h - boxH) / 2}" width="${boxW}" height="${boxH}" style="overflow:visible;${rot}transform-origin:${s.x + s.w / 2}px ${s.y + s.h / 2}px;transform-box:view-box;">`
             + `<div xmlns="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:${boxW}px;height:${boxH}px;display:flex;flex-direction:column;justify-content:${jc};padding:4px;overflow:visible;${css}">${body}</div></foreignObject>`;
     } else if (s.text) {
-        const pts = connectorPoints(page, s);
-        const mid = pts[Math.floor((pts.length - 1) / 2)], next = pts[Math.floor((pts.length - 1) / 2) + 1] || mid;
+        const b = labelBox(page, s);
         const { css, body } = textHtml(s, st);
-        text = `<foreignObject x="${(mid.x + next.x) / 2 - 80}" y="${(mid.y + next.y) / 2 - 12}" width="160" height="24" style="overflow:visible;">`
-            + `<div xmlns="http://www.w3.org/1999/xhtml" style="${css}text-align:center;background:#fff;display:inline-block;width:160px;">${body}</div></foreignObject>`;
+        text = `<foreignObject${embed ? '' : ' class="dw-linetext"'} x="${r1(b.x)}" y="${r1(b.y)}" width="${LABEL_W}" height="${LABEL_H}" style="overflow:visible;">`
+            + `<div xmlns="http://www.w3.org/1999/xhtml" style="${css}text-align:center;background:#fff;display:inline-block;width:${LABEL_W}px;">${body}</div></foreignObject>`;
     }
     return `<g class="dw-shape" data-id="${esc(s.id)}"${filter}>${geo}${text}</g>`;
 }
@@ -663,9 +700,9 @@ function overlaySvg(p) {
     const hover = S.drag && S.drag.mode === 'end' ? S.drag.hover : (S.tool === 'connector' ? S.hover : null);
     const hs = hover && shape(hover.id);
     if (hs && !ONE_D.has(hs.type)) {
-        for (const side of 'trbl') for (let k = 1; k < RASTER; k++) {
-            const q = outlinePoint(hs, `${side}:${(k / RASTER).toFixed(4)}`);
-            out.push(`<circle class="dw-raster" cx="${q.x}" cy="${q.y}" r="${(k % 6 === 0 ? 3.6 : k % 3 === 0 ? 3 : 2.3) / z}" fill="#2563eb" stroke="#fff" stroke-width="${0.8 / z}" opacity="0.9" pointer-events="none"/>`);
+        for (const side of 'trbl') for (const place of sidePlaces(hs, side)) {
+            const q = outlinePoint(hs, place.at);
+            out.push(`<circle class="dw-raster" cx="${q.x}" cy="${q.y}" r="${(place.major ? 3.6 : place.third ? 3 : 2.3) / z}" fill="#2563eb" stroke="#fff" stroke-width="${0.8 / z}" opacity="0.9" pointer-events="none"/>`);
         }
         if (hover.x !== undefined) out.push(`<circle class="dw-raster-hit" cx="${hover.x}" cy="${hover.y}" r="${5 / z}" fill="none" stroke="#16a34a" stroke-width="${2 / z}" pointer-events="none"/>`);
     }
@@ -683,7 +720,12 @@ function overlaySvg(p) {
                 for (let i = 1; i < pts.length - 2; i++) {
                     const u = pts[i], v = pts[i + 1], vertical = Math.abs(u.x - v.x) < 0.01;
                     if (Math.hypot(v.x - u.x, v.y - u.y) < 16 / z) continue;
-                    const cx = (u.x + v.x) / 2, cy = (u.y + v.y) / 2;
+                    let cx = (u.x + v.x) / 2, cy = (u.y + v.y) / 2;
+                    // SFM-363: the text sits in the middle of this line -- the handle goes beside it, so the text can be grabbed
+                    if (s.text && i === Math.floor((pts.length - 1) / 2) && !s.textDx && !s.textDy) {
+                        const len = Math.hypot(v.x - u.x, v.y - u.y), k = Math.min(0.35, (50 + 10 / z) / len);
+                        cx -= (v.x - u.x) * k; cy -= (v.y - u.y) * k;
+                    }
                     out.push(`<g class="dw-handle bend" data-bend="${vertical ? 'x' : 'y'}" style="cursor:${vertical ? 'ew' : 'ns'}-resize"><title>Drag to move this line of the arrow (right-click: automatic right angles)</title>`
                         + `<rect x="${cx - (vertical ? 3 : 7) / z}" y="${cy - (vertical ? 7 : 3) / z}" width="${(vertical ? 6 : 14) / z}" height="${(vertical ? 14 : 6) / z}" rx="${2 / z}" fill="#fde68a" stroke="#b45309" stroke-width="${1 / z}"/>${handleHit(cx, cy, z)}</g>`);
                 }
@@ -1048,6 +1090,16 @@ function onPointerDown(evt) {
     }
     // pointer tool
     const id = hitShape(target) || (linkEl && linkEl.dataset.id);
+    // SFM-363: the text of a line / connector -- dragged it moves, a click (no drag) opens it for typing
+    if (id && target.closest('.dw-linetext') && !evt.shiftKey && !evt.ctrlKey && !evt.metaKey && !evt.altKey) {
+        const s = shape(id);
+        S.lastDown = null;
+        S.sel = [id];
+        S.drag = { mode: 'label', id, start: m, orig: { dx: s.textDx || 0, dy: s.textDy || 0 }, before: snapshot(), moved: false };
+        $('dw-svg').setPointerCapture(evt.pointerId);
+        select(S.sel);
+        return;
+    }
     // a double-click edits the text -- detected here: each click redraws the shapes, so the browser's own
     // dblclick (which needs the same element under both clicks) never comes
     const now = performance.now();
@@ -1148,8 +1200,23 @@ function onPointerMove(evt) {
         if (h.includes('n')) { y = Math.min(my, o.y + o.h - 5); hh = o.y + o.h - y; }
         if (h.includes('s')) { hh = Math.max(5, my - o.y); }
         // a corner handle with Shift keeps the proportions -- a picture the other way round: always, Shift = free (SFM-291)
-        if ((s.type === 'image' ? !evt.shiftKey : evt.shiftKey) && h.length === 2) { const ratio = o.w / o.h; if (w / hh > ratio) w = hh * ratio; else hh = w / ratio; if (h.includes('w')) x = o.x + o.w - w; if (h.includes('n')) y = o.y + o.h - hh; }
+        if ((s.type === 'image' ? !evt.shiftKey : evt.shiftKey) && h.length === 2) {
+            const ratio = o.w / o.h;
+            if (w / hh > ratio) w = hh * ratio; else hh = w / ratio;
+            if (s.type !== 'image') { w = Math.max(GRID, snap(w)); hh = Math.max(GRID, snap(hh)); }    // SFM-364: sizes on the grid
+            if (h.includes('w')) x = o.x + o.w - w;
+            if (h.includes('n')) y = o.y + o.h - hh;
+        }
         Object.assign(s, { x, y, w, h: hh });
+        render();
+    } else if (d.mode === 'label') {                // SFM-363: free, not on the grid -- it is text, not a shape
+        const dx = m.x - d.start.x, dy = m.y - d.start.y;
+        if (!d.moved && Math.abs(dx) + Math.abs(dy) <= 3 / S.zoom) return;
+        d.moved = true;
+        const s = shape(d.id);
+        s.textDx = Math.round(d.orig.dx + dx); s.textDy = Math.round(d.orig.dy + dy);
+        if (!s.textDx) delete s.textDx;
+        if (!s.textDy) delete s.textDy;
         render();
     } else if (d.mode === 'bend') {                 // SFM-337: the line moved by hand stays there
         const s = shape(d.id);
@@ -1209,6 +1276,10 @@ function onPointerUp(evt) {
             return;
         }
     }
+    if (d.mode === 'label' && !d.moved) {                // SFM-363: a click on the text edits it
+        setTimeout(() => startText(d.id), 0);            // after the browser's own focus change of this press
+        return;
+    }
     if (d.mode === 'move' && !d.moved) {                 // a click (no drag): the first half of a double-click
         S.lastDown = S.sel.length === 1 ? { id: S.sel[0], t: performance.now() } : null;
         render();
@@ -1229,7 +1300,7 @@ function startText(id) {
     S.sel = [id];
     render();
     const st = styleOf(s);
-    const b = bbox(page(), s);
+    const b = ONE_D.has(s.type) ? labelBox(page(), s) : bbox(page(), s);     // a line's text: in its place (SFM-363)
     const ta = $('dw-text');
     const r = $('dw-svg').getBoundingClientRect(), host = $('dw-canvas').getBoundingClientRect();
     const left = r.left - host.left + S.pan.x + b.x * S.zoom, top = r.top - host.top + S.pan.y + b.y * S.zoom;
@@ -2339,6 +2410,8 @@ function contextMenu(evt) {
             else items.push(['Add note', addNote]);                                                                       // SFM-311
         }
         if (selected().every(s => ONE_D.has(s.type))) items.push(...lineItems(selected()));       // SFM-323
+        const off = offGrid(selected());                                                            // SFM-364
+        if (off.length) items.push([`Put on the grid${off.length > 1 ? ` (${off.length} shapes)` : ''}`, () => putOnGrid(off)]);
         items.push(['Bring to front', () => order(true)], ['Send to back', () => order(false)]);
         if (S.store.models && S.sel.length === 1) {
             items.push(['Link to model object…', linkDialog]);
@@ -2350,6 +2423,25 @@ function contextMenu(evt) {
         items.push(['Select all', ACTIONS['dw-select-all']], ['Fit to window', fit]);
     }
     showMenu(items, evt.clientX, evt.clientY);
+}
+
+// SFM-364: shapes (not pictures, not lines) whose place or size is off the grid; putOnGrid() rounds place and size to
+// the grid (at least one step), its notes go along, glued connectors follow -- one Undo step
+const gridOff = v => Math.abs(v - Math.round(v / GRID) * GRID) > 0.01;
+function offGrid(shapes) {
+    return shapes.filter(s => !ONE_D.has(s.type) && s.type !== 'image' && [s.x, s.y, s.w, s.h].some(gridOff));
+}
+function putOnGrid(shapes) {
+    const p = page(), g = v => Math.round(v / GRID) * GRID;
+    change(() => {
+        for (const s of shapes) {
+            const nx = g(s.x), ny = g(s.y);
+            for (const n of notesOf(p, [s.id])) { n.x += nx - s.x; n.y += ny - s.y; }
+            s.w = Math.max(GRID, g(s.x + s.w) - nx); s.h = Math.max(GRID, g(s.y + s.h) - ny);
+            s.x = nx; s.y = ny;
+        }
+    });
+    status(`${shapes.length} shape(s) put on the grid`);
 }
 
 // SFM-323: right-click on lines / connectors -- routing (connectors), which ends carry an arrow, reverse the direction.
@@ -2372,6 +2464,8 @@ function lineItems(lines) {
     items.push(['Reverse direction', () => change(() => lines.forEach(reverseLine)), false, 'dw-line-item']);
     const bent = conns.filter(s => s.midX !== undefined || s.midY !== undefined);
     if (bent.length) items.push(['Automatic right angles', () => change(() => bent.forEach(s => { delete s.midX; delete s.midY; })), false, 'dw-line-item']);
+    const moved = lines.filter(s => s.textDx !== undefined || s.textDy !== undefined);       // SFM-363
+    if (moved.length) items.push(['Text back to the middle', () => change(() => moved.forEach(s => { delete s.textDx; delete s.textDy; })), false, 'dw-line-item']);
     return items;
 }
 

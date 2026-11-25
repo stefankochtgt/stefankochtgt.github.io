@@ -78,6 +78,7 @@
 #dw-svg .dw-shape rect, #dw-svg .dw-shape ellipse { pointer-events: visible; }
 #dw-svg .dw-link { cursor: pointer; }
 #dw-svg .dw-link text { pointer-events: none; }
+#dw-svg[data-tool="pointer"] .dw-linetext { cursor: text; }       /* SFM-363: click to edit, drag to move */
 #dw-svg .dw-cp { cursor: pointer; }
 #dw-text { position: absolute; z-index: 5; box-sizing: border-box; padding: 4px; margin: 0; resize: none; border: 1px solid #2563eb;
     outline: 2px solid rgba(37, 99, 235, .25); background: rgba(255, 255, 255, .96); line-height: 1.2; overflow: auto; }
