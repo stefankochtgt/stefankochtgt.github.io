@@ -711,6 +711,10 @@ function overlaySvg(p) {
             out.push(`<g class="dw-cp${i >= 4 ? ' own' : ''}" data-id="${esc(s.id)}" data-pt="${i}"><path d="M${c.x - 4 / z},${c.y - 4 / z} L${c.x + 4 / z},${c.y + 4 / z} M${c.x - 4 / z},${c.y + 4 / z} L${c.x + 4 / z},${c.y - 4 / z}" stroke="#2563eb" stroke-width="${1.5 / z}"/><circle cx="${c.x}" cy="${c.y}" r="${6 / z}" fill="transparent"/></g>`);
     for (const s of selected()) {
         if (ONE_D.has(s.type)) {
+            // SFM-366 (user 2026-11-25: "the black lines turn blue which is similar color,.. can you make it more obious
+            // that multiple are selected?"): a wide light-blue band along a selected line / arrow
+            const d = connectorPoints(p, s).map((q, i) => `${i ? 'L' : 'M'}${r1(q.x)},${r1(q.y)}`).join(' ');
+            out.push(`<path class="dw-sel-halo" d="${d}" fill="none" stroke="#3b82f6" stroke-opacity="0.35" stroke-width="${10 / z}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>`);
             const glued = [s.from, s.to];
             [[s.x1, s.y1], [s.x2, s.y2]].forEach(([x, y], i) => out.push(
                 `<g class="dw-handle end" data-end="${i}"><rect x="${x - 5 / z}" y="${y - 5 / z}" width="${10 / z}" height="${10 / z}" fill="${glued[i] ? '#16a34a' : '#fff'}" stroke="#1d4ed8" stroke-width="${1 / z}"/>${handleHit(x, y, z)}</g>`));
@@ -731,10 +735,23 @@ function overlaySvg(p) {
                 }
             }
         } else {
-            out.push(`<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="none" stroke="#1d4ed8" stroke-width="${1 / z}" stroke-dasharray="${4 / z} ${3 / z}" pointer-events="none"/>`);
+            // SFM-366: a thick blue frame a little outside the shape (not on its own outline), lightly filled
+            const pad = 4 / z;
+            out.push(`<rect class="dw-sel-frame" x="${s.x - pad}" y="${s.y - pad}" width="${s.w + 2 * pad}" height="${s.h + 2 * pad}" rx="${3 / z}" fill="#3b82f6" fill-opacity="0.12" stroke="#2563eb" stroke-width="${2.5 / z}" pointer-events="none"/>`);
             if (S.sel.length === 1) for (const [h, fx, fy] of HANDLES)
                 out.push(`<g class="dw-handle" data-handle="${h}" style="cursor:${h}-resize"><rect x="${s.x + fx * s.w - 4.5 / z}" y="${s.y + fy * s.h - 4.5 / z}" width="${9 / z}" height="${9 / z}" fill="#fff" stroke="#1d4ed8" stroke-width="${1 / z}"/>${handleHit(s.x + fx * s.w, s.y + fy * s.h, z)}</g>`);
         }
+    }
+    // SFM-366: several selected -- a dashed box around all of them with how many
+    const many = selected();
+    if (many.length > 1) {
+        const bs = many.map(s => bbox(p, s)), pad = 12 / z;
+        const x1 = Math.min(...bs.map(b => b.x)) - pad, y1 = Math.min(...bs.map(b => b.y)) - pad;
+        const x2 = Math.max(...bs.map(b => b.x + b.w)) + pad, y2 = Math.max(...bs.map(b => b.y + b.h)) + pad;
+        const label = `${many.length} selected`, fs = 12 / z, lw = (label.length * 7 + 10) / z;
+        out.push(`<g class="dw-sel-group" pointer-events="none"><rect x="${x1}" y="${y1}" width="${x2 - x1}" height="${y2 - y1}" fill="none" stroke="#2563eb" stroke-width="${1.5 / z}" stroke-dasharray="${6 / z} ${4 / z}"/>`
+            + `<rect x="${x1}" y="${y1 - 18 / z}" width="${lw}" height="${18 / z}" rx="${3 / z}" fill="#2563eb"/>`
+            + `<text x="${x1 + 5 / z}" y="${y1 - 5 / z}" font-size="${fs}" font-family="Segoe UI, Arial, sans-serif" font-weight="600" fill="#fff">${label}</text></g>`);
     }
     // a selected note: a dashed line to its shape (SFM-311)
     for (const s of selected()) {
@@ -1048,6 +1065,13 @@ function onPointerDown(evt) {
         $('dw-svg').setPointerCapture(evt.pointerId);
         return;
     }
+    // SFM-365 (user 2026-11-25: "i cannot select multiple drawing shapes at once and then delete update all"): after
+    // drawing, the shape / line / connector tool stays on, and a click on a shape drew a new one on top of it instead of
+    // selecting it. Shift / Ctrl + click on a shape now always selects (the pointer tool takes over); a plain click on a
+    // shape without dragging selects it too (onPointerUp drops the shape it began). A drag still draws, also on a shape.
+    const onShape = hitShape(target);
+    const drawTool = S.tool !== 'pointer' && S.tool !== 'cpoint';
+    if (onShape && drawTool && (evt.shiftKey || evt.ctrlKey || evt.metaKey)) setTool('pointer');
     if (S.tool === 'cpoint') {
         const id = hitShape(target) || (target.closest('.dw-cp') && target.closest('.dw-cp').dataset.id);
         const s = id && shape(id);
@@ -1072,7 +1096,7 @@ function onPointerDown(evt) {
         const before = snapshot();
         p.shapes.push(s);
         S.sel = [s.id];
-        S.drag = { mode: 'end', id: s.id, end: 1, before, created: true };
+        S.drag = { mode: 'end', id: s.id, end: 1, before, created: true, on: onShape, start: m };
         $('dw-svg').setPointerCapture(evt.pointerId);
         render();
         return;
@@ -1083,7 +1107,7 @@ function onPointerDown(evt) {
         const before = snapshot();
         p.shapes.push(s);
         S.sel = [s.id];
-        S.drag = { mode: 'create', id: s.id, start, before };
+        S.drag = { mode: 'create', id: s.id, start, before, on: onShape };
         $('dw-svg').setPointerCapture(evt.pointerId);
         render();
         return;
@@ -1259,6 +1283,8 @@ function onPointerUp(evt) {
     }
     if (d.mode === 'create') {
         const s = shape(d.id);
+        // SFM-365: a click on a shape selects it -- not with the text tool, which places a text box there (it is off after one)
+        if (s.w < 4 && s.h < 4 && d.on && shape(d.on) && s.type !== 'text') { clickSelects(d); return; }
         if (s.w < 4 && s.h < 4) {                      // a click: the default size
             const size = s.type === 'text' ? [120, 30] : s.type === 'person' ? [40, 80] : [120, 60];
             s.w = size[0]; s.h = size[1];
@@ -1269,6 +1295,10 @@ function onPointerUp(evt) {
     }
     if (d.mode === 'end' && d.created) {
         const s = shape(d.id);
+        // SFM-365: the mouse not moved on a shape = a click there: selects it (the glued start jumps to the shape's side,
+        // so the line's own length says nothing here)
+        const up = evt && toModel(evt);
+        if (d.on && up && Math.hypot(up.x - d.start.x, up.y - d.start.y) < 4 / S.zoom) { clickSelects(d); return; }
         if (Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < 4 && !(s.from && s.to)) {   // a click without dragging: nothing
             restoreDoc(d.before.doc);
             S.sel = [];
@@ -1286,6 +1316,16 @@ function onPointerUp(evt) {
         return;
     }
     commitDrag(d);
+}
+
+// SFM-365: a click (no drag) with a drawing tool on a shape: the shape begun is dropped, the pointer tool takes over
+// and the clicked shape is selected
+function clickSelects(d) {
+    restoreDoc(d.before.doc);
+    S.sel = [d.on];                                  // before the redraw: the shape begun is gone
+    setTool('pointer');
+    select([d.on]);
+    status(`Selected ${d.on} -- drag to draw on top of a shape`);
 }
 
 function commitDrag(d) {
@@ -1818,9 +1858,9 @@ function setTool(tool) {
     if (DRAW_KINDS.includes(tool)) S.shapeKind = tool;
     render();
     $('dw-hint').textContent = {
-        pointer: '', rect: 'Drag on the page to draw a rectangle (Shift: square).', ellipse: 'Drag to draw an ellipse (Shift: circle).',
-        line: 'Drag to draw a line (Shift: horizontal / vertical).', person: 'Click for a person, or drag its size; double-click it to write its name below it.', text: 'Click or drag on the page for a text box, then type.',
-        connector: 'Drag from a shape to another: on a shape\'s line the end snaps to the raster dots (twelfths of a side), inside a shape it takes the nearest side; it stays glued when the shapes move.',
+        pointer: '', rect: 'Drag on the page to draw a rectangle (Shift: square). A click on a shape selects it.', ellipse: 'Drag to draw an ellipse (Shift: circle). A click on a shape selects it.',
+        line: 'Drag to draw a line (Shift: horizontal / vertical). A click on a shape selects it.', person: 'Click for a person, or drag its size; double-click it to write its name below it.', text: 'Click or drag on the page for a text box, then type.',
+        connector: 'Drag from a shape to another: on a shape\'s line the end snaps to the raster dots (with Grid on the grid lines, else twelfths of a side), inside a shape it takes the nearest side; it stays glued when the shapes move. A click on a shape selects it.',
         cpoint: 'Click on a shape to add a connection point there; click an own point (×) again to remove it.',
     }[tool];
 }
